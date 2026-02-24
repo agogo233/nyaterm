@@ -16,6 +16,12 @@
         },
         {
           "path": "$APPLOCALDATA/logs/**"
+        },
+        {
+          "path": "$TEMP"
+        },
+        {
+          "path": "$TEMP/**"
         }
       ]
     },

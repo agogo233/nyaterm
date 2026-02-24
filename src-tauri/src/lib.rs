@@ -10,6 +10,7 @@ mod pty;
 mod session;
 mod sftp;
 mod ssh;
+pub mod watcher;
 
 use config::{Group, QuickCommand, QuickCommandsConfig, SavedConnection, UiConfig};
 use error::{AppError, AppResult};
@@ -129,12 +130,33 @@ async fn attach_session(
 
 #[tauri::command]
 async fn close_session(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
 ) -> AppResult<()> {
-    state
+    let session_id_clone = session_id.clone();
+    
+    // Broadcast the close command
+    let res = state
         .send_command(&session_id, SessionCommand::Close)
-        .await
+        .await;
+
+    // Concurrently tidy up any downloaded/watcher temporary files stored in the OS temp directory
+    tauri::async_runtime::spawn(async move {
+        use tauri::Manager;
+        if let Ok(temp_dir) = app.path().temp_dir() {
+            let session_temp_dir = temp_dir.join("dragonfly").join(&session_id_clone);
+            if session_temp_dir.exists() {
+                if let Err(e) = tokio::fs::remove_dir_all(&session_temp_dir).await {
+                    tracing::warn!("Failed to clean up temp directory {}: {}", session_temp_dir.display(), e);
+                } else {
+                    tracing::info!("Successfully cleaned up temp directory for session: {}", session_id_clone);
+                }
+            }
+        }
+    });
+
+    res
 }
 
 #[tauri::command]
@@ -189,6 +211,70 @@ async fn list_remote_dir(
     path: String,
 ) -> AppResult<Vec<sftp::FileEntry>> {
     sftp::list_remote_dir(app, state.inner().clone(), &session_id, &path).await
+}
+
+#[tauri::command]
+async fn delete_remote_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    path: String,
+) -> AppResult<()> {
+    sftp::delete_remote_file(app, state.inner().clone(), &session_id, &path).await
+}
+
+#[tauri::command]
+async fn rename_remote_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    old_path: String,
+    new_path: String,
+) -> AppResult<()> {
+    sftp::rename_remote_file(app, state.inner().clone(), &session_id, &old_path, &new_path).await
+}
+
+#[tauri::command]
+async fn download_remote_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+) -> AppResult<()> {
+    sftp::download_remote_file(app, state.inner().clone(), &session_id, &remote_path, &local_path).await
+}
+
+#[tauri::command]
+async fn upload_local_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    local_path: String,
+    remote_path: String,
+) -> AppResult<()> {
+    sftp::upload_local_file(app, state.inner().clone(), &session_id, &local_path, &remote_path).await
+}
+
+#[tauri::command]
+async fn get_file_properties(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    path: String,
+) -> AppResult<sftp::FileProperties> {
+    sftp::get_file_properties(app, state.inner().clone(), &session_id, &path).await
+}
+
+#[tauri::command]
+async fn chmod_remote_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    path: String,
+    mode: String,
+) -> AppResult<()> {
+    sftp::chmod_remote_file(app, state.inner().clone(), &session_id, &path, &mode).await
 }
 
 // ── Config Commands ─────────────────────────────────────────────────────────
@@ -320,12 +406,34 @@ fn save_quick_commands(app: tauri::AppHandle, commands: Vec<QuickCommand>) -> Ap
     config::save_quick_commands(&app, &cfg)
 }
 
+// ── App Settings Commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_app_settings(app: tauri::AppHandle) -> AppResult<config::AppSettings> {
+    config::load_app_settings(&app)
+}
+
+#[tauri::command]
+fn save_app_settings(app: tauri::AppHandle, settings: config::AppSettings) -> AppResult<()> {
+    config::save_app_settings(&app, &settings)
+}
+
 // ── App Entry ───────────────────────────────────────────────────────────────
 
 /// Initializes tracing, builds the Tauri app, and runs the event loop.
+#[tauri::command]
+fn get_system_fonts() -> Vec<String> {
+    use font_kit::source::SystemSource;
+    if let Ok(mut families) = SystemSource::new().all_families() {
+        families.sort();
+        families.dedup();
+        return families;
+    }
+    Vec::new()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-
     let session_manager = Arc::new(SessionManager::new());
 
     tauri::Builder::default()
@@ -346,9 +454,40 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 mgr.init_history_store(config_dir).await;
             });
+            
+            // Build system tray icon
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Dragonfly")
+                .on_tray_icon_event(|tray, event| match event {
+                    tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } => {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if let Ok(settings) = crate::config::load_app_settings(window.app_handle()) {
+                    if settings.general.minimize_to_tray {
+                        let _ = window.hide();
+                        api.prevent_close();
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            get_system_fonts,
             create_ssh_session,
             create_local_session,
             write_to_session,
@@ -361,6 +500,12 @@ pub fn run() {
             fuzzy_search_history,
             get_home_dir,
             list_remote_dir,
+            delete_remote_file,
+            rename_remote_file,
+            download_remote_file,
+            upload_local_file,
+            get_file_properties,
+            chmod_remote_file,
             get_saved_connections,
             save_connection,
             delete_connection,
@@ -371,6 +516,10 @@ pub fn run() {
             save_ui_config,
             get_quick_commands,
             save_quick_commands,
+            get_app_settings,
+            save_app_settings,
+            watcher::start_file_watch,
+            watcher::stop_file_watch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
