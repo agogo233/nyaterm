@@ -151,7 +151,7 @@ export function SearchTab() {
         </div>
         <p className="text-xs mt-1 text-muted-foreground">
           {t(
-            "settings.customEnginesDesc",
+            "settings.engineUrl",
             "Use %s to represent the searched text in the URL template.",
           )}
         </p>
