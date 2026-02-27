@@ -75,7 +75,6 @@
   },
   "terminalCtx": {
     "copy": "Copy",
-    "copyCommand": "Copy Command",
     "paste": "Paste",
     "pasteSelectedText": "Paste Selected Text",
     "find": "Find...",

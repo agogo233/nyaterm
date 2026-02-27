@@ -75,7 +75,6 @@
   },
   "terminalCtx": {
     "copy": "复制",
-    "copyCommand": "复制命令",
     "paste": "粘贴",
     "pasteSelectedText": "粘贴选定的文本",
     "find": "查找...",
