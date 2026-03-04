@@ -33,7 +33,21 @@ import {
   SiGooglegemini,
   SiZhihu,
   SiYoutube,
+  SiAndroid,
+  SiArchlinux,
+  SiManjaro,
+  SiOpensuse,
+  SiFreebsd,
+  SiRaspberrypi,
+  SiRockylinux,
+  SiAlmalinux,
+  SiNixos,
+  SiGentoo,
+  SiAlpinelinux,
+  SiKalilinux,
+  SiLinuxmint,
 } from "react-icons/si";
+import { FaWindows } from "react-icons/fa";
 import { DiBingSmall, DiYahooSmall } from "react-icons/di";
 import { MdSearch } from "react-icons/md";
 
@@ -70,6 +84,38 @@ export const QUICK_ICONS: Record<string, QuickIconDef> = {
 };
 
 export type QuickIconName = keyof typeof QUICK_ICONS;
+
+/** Mainstream OS / distro icons. */
+export const SYSTEM_ICONS: Record<string, QuickIconDef> = {
+  windows: { icon: FaWindows, color: "#0078D4" },
+  apple: { icon: SiApple, color: "#A2AAAD" },
+  android: { icon: SiAndroid, color: "#3DDC84" },
+  linux: { icon: SiLinux, color: "#FCC624" },
+  ubuntu: { icon: SiUbuntu, color: "#E95420" },
+  debian: { icon: SiDebian, color: "#A81D33" },
+  centos: { icon: SiCentos, color: "#262577" },
+  fedora: { icon: SiFedora, color: "#3C4FB1" },
+  arch: { icon: SiArchlinux, color: "#1793D1" },
+  manjaro: { icon: SiManjaro, color: "#35BF5C" },
+  opensuse: { icon: SiOpensuse, color: "#73BA25" },
+  rocky: { icon: SiRockylinux, color: "#10B981" },
+  alma: { icon: SiAlmalinux, color: "#FF4649" },
+  alpine: { icon: SiAlpinelinux, color: "#0D597F" },
+  kali: { icon: SiKalilinux, color: "#268BEE" },
+  mint: { icon: SiLinuxmint, color: "#87CF3E" },
+  nixos: { icon: SiNixos, color: "#5277C3" },
+  gentoo: { icon: SiGentoo, color: "#54487A" },
+  freebsd: { icon: SiFreebsd, color: "#AB2B28" },
+  raspberrypi: { icon: SiRaspberrypi, color: "#A22846" },
+};
+
+export type SystemIconName = keyof typeof SYSTEM_ICONS;
+
+/** Merged lookup for all connection icons (services + systems). */
+export const CONNECTION_ICONS: Record<string, QuickIconDef> = {
+  ...QUICK_ICONS,
+  ...SYSTEM_ICONS,
+};
 
 export const SEARCH_ICONS: Record<string, QuickIconDef> = {
   google: { icon: SiGoogle, color: "#4285F4" },

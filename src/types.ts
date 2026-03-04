@@ -32,29 +32,42 @@ export type SshAuth =
   | { type: "password"; password: string }
   | { type: "key"; key_data: string; passphrase?: string };
 
-/** Group for organizing saved connections. */
+/** Group for organizing saved connections. Groups form a tree via parent_id. */
 export interface Group {
   id: string;
   name: string;
+  parent_id?: string;
   sort_order: number;
+}
+
+/** Managed SSH private key stored in keys.json. */
+export interface SshKey {
+  id: string;
+  name: string;
+  /** True when encrypted key data exists on disk. */
+  has_key_data?: boolean;
+  /** Transient: file path from the UI file picker. */
+  key_file_path?: string;
+  /** Passphrase for this key (only sent when creating/updating). */
+  passphrase?: string;
 }
 
 /** Stored SSH connection with host, auth, and optional group. */
 export interface SavedConnection {
   id: string;
   name: string;
-  group?: string;
+  group_id?: string;
   description?: string;
   host: string;
   port: number;
   username: string;
   auth_type: string;
   password?: string;
-  passphrase?: string;
-  /** File path selected via the file picker — backend reads and encrypts. */
-  key_file_path?: string;
-  /** True when an encrypted private key is already stored on disk. */
-  has_key_data?: boolean;
+  /** References a managed SSH key by id. */
+  key_id?: string;
+  sort_order?: number;
+  /** Icon key referencing a named icon from QUICK_ICONS (e.g. "docker", "ubuntu"). */
+  icon?: string;
 }
 
 /** Saved tab state for startup restoration. */
@@ -62,6 +75,13 @@ export interface RestorableTab {
   title: string;
   session_type: string;
   connection_id?: string;
+}
+
+export type PanelId = "fileExplorer" | "fileTransfer" | "savedConnections" | "activeSessions" | "commandHistory";
+
+export interface PanelLayout {
+  left: PanelId[];
+  right: PanelId[];
 }
 
 /** Layout preferences: panel widths, visibility flags, theme. */
@@ -81,19 +101,38 @@ export interface UiConfig {
   show_quick_commands: boolean;
   zoom_level: number;
   language?: string;
+  panel_layout: PanelLayout;
+  show_remote_stats: boolean;
+}
+
+/** Resource usage stats fetched from the active remote SSH host. */
+export interface RemoteStats {
+  cpu_percent: number;
+  mem_used_mb: number;
+  mem_total_mb: number;
 }
 
 /** Labeled command shortcut for quick execution. */
+export interface QuickCommandCategory {
+  id: string;
+  name: string;
+}
+
 export interface QuickCommand {
   id: string;
   label: string;
   command: string;
-  category?: string;
+  category_id?: string;
   description?: string;
   color_tag?: string;
   icon_tag?: string;
   pinned?: boolean;
   execution_mode?: string;
+}
+
+export interface QuickCommandsConfig {
+  commands: QuickCommand[];
+  categories: QuickCommandCategory[];
 }
 
 /** Fuzzy search result with matched command and highlight indices. */
@@ -118,6 +157,7 @@ export interface AppearanceSettings {
   background_opacity: number;
   cursor_style: string;
   cursor_blink: boolean;
+  ui_font_size: number;
 }
 
 export interface ProxySettings {
@@ -138,8 +178,21 @@ export interface SearchSettings {
 }
 
 export interface TranslationSettings {
+  target_language: string;
+  deepl_api_key: string;
+  baidu_app_id: string;
+  baidu_app_key: string;
+  ali_app_id: string;
+  ali_app_key: string;
+  youdao_app_id: string;
+  youdao_app_key: string;
+}
+
+export interface TranslateResult {
+  original: string;
+  translated: string;
+  detected_language: string;
   provider: string;
-  api_key: string;
 }
 
 export interface SecuritySettings {
@@ -172,4 +225,5 @@ export interface AppSettings {
   security: SecuritySettings;
   terminal: TerminalSettings;
   interaction: InteractionSettings;
+  ui: UiConfig;
 }
