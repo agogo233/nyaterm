@@ -214,7 +214,10 @@
     "clearAllSuccess": "All connections cleared",
     "folderName": "Folder Name",
     "folderNamePlaceholder": "New folder...",
-    "connectionName": "Connection Name"
+    "connectionName": "Connection Name",
+    "sortDefault": "Custom Order",
+    "sortNameAsc": "Name A → Z",
+    "sortNameDesc": "Name Z → A"
   },
   "app": {
     "noActiveSessions": "No active sessions",

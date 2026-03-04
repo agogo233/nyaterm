@@ -17,6 +17,10 @@ interface AppContextType {
   activeTabId: string | null;
   setActiveTabId: (id: string | null) => void;
   addTab: (sessionId: string, name: string, type: SessionType, connectionId?: string) => void;
+  /** Immediately add a "connecting" tab and make it active. Returns the new tabId. */
+  addPendingTab: (name: string, type: SessionType, connectionId?: string) => string;
+  /** Swap the temporary sessionId for the real one and clear the connecting flag. */
+  updateTabSession: (tabId: string, sessionId: string) => void;
   closeTab: (tabId: string) => void;
 
   // App Settings (includes UI config)
@@ -247,6 +251,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const addPendingTab = useCallback(
+    (name: string, type: SessionType, connectionId?: string): string => {
+      const tabId = `tab-${Date.now()}`;
+      const newTab: Tab = { id: tabId, sessionId: tabId, name, type, connectionId, connecting: true };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(tabId);
+      return tabId;
+    },
+    [],
+  );
+
+  const updateTabSession = useCallback((tabId: string, sessionId: string) => {
+    setTabs((prev) =>
+      prev.map((tab) => (tab.id === tabId ? { ...tab, sessionId, connecting: false } : tab)),
+    );
+  }, []);
+
   const closeTab = useCallback(
     (tabId: string) => {
       setTabs((prev) => {
@@ -314,6 +335,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         activeTabId,
         setActiveTabId,
         addTab,
+        addPendingTab,
+        updateTabSession,
         closeTab,
         appSettings,
         updateAppSettings,

@@ -214,7 +214,10 @@
     "clearAllSuccess": "已清空所有连接",
     "folderName": "文件夹名称",
     "folderNamePlaceholder": "新文件夹...",
-    "connectionName": "连接名称"
+    "connectionName": "连接名称",
+    "sortDefault": "自定义顺序",
+    "sortNameAsc": "名称 A → Z",
+    "sortNameDesc": "名称 Z → A"
   },
   "app": {
     "noActiveSessions": "暂无活动会话",

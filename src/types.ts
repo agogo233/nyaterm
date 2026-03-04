@@ -16,6 +16,8 @@ export interface Tab {
   name: string;
   type: SessionType;
   connectionId?: string;
+  /** True while the backend session is being established. XTerminal is not rendered yet. */
+  connecting?: boolean;
 }
 
 /** SSH connection config for creating a session. */
