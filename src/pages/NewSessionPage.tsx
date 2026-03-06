@@ -17,6 +17,7 @@ export default function NewSessionPage() {
   const { t } = useTranslation();
   const params = new URLSearchParams(window.location.search);
   const editId = params.get("edit") ?? undefined;
+  const autoConnect = params.get("autoConnect") === "1";
 
   const [initialData, setInitialData] = useState<SavedConnection | undefined>();
   const [name, setName] = useState("");
@@ -145,8 +146,11 @@ export default function NewSessionPage() {
         icon: iconKey || undefined,
       };
 
-      await invoke("save_connection", { connection });
+      const savedId = await invoke<string>("save_connection", { connection });
       await emit("session-saved");
+      if (autoConnect && (initialData?.id || savedId)) {
+        await emit("session-connect-after-edit", { connectionId: initialData?.id || savedId });
+      }
       resetForm();
       getCurrentWindow().close();
     } catch (e) {

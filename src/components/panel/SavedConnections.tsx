@@ -36,7 +36,7 @@ import { naturalCompare, type DragTarget, type GroupNode, type SortMode } from "
 
 interface SavedConnectionsProps {
   onNewConnection: (parentGroupId?: string) => void;
-  onEditConnection: (connection: SavedConnection) => void;
+  onEditConnection: (connection: SavedConnection, autoConnect?: boolean) => void;
 }
 
 /** Grouped saved SSH connections panel. Delegates rendering to sub-components via context. */
@@ -162,7 +162,7 @@ export default function SavedConnections({
       logger.error(`SSH connection failed for "${conn.name}"`, e);
       toast.error(t("savedConnections.connectionFailed", { error: e }));
       closeTab(tabId);
-      onEditConnection(conn);
+      onEditConnection(conn, true);
     } finally {
       connectingIdRef.current = null;
     }

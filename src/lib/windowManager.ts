@@ -35,10 +35,11 @@ export function openSettings() {
   });
 }
 
-export function openNewSession(editId?: string) {
-  const url = editId
+export function openNewSession(editId?: string, autoConnect?: boolean) {
+  let url = editId
     ? `index.html?window=new-session&edit=${encodeURIComponent(editId)}`
     : "index.html?window=new-session";
+  if (autoConnect) url += "&autoConnect=1";
   return openChildWindow({
     label: "new-session",
     title: "New Session",

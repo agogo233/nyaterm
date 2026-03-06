@@ -56,6 +56,8 @@ function App() {
     activeTabId,
     setActiveTabId,
     addTab,
+    addPendingTab,
+    updateTabSession,
     closeTab,
     updateUi,
     updateAppSettings,
@@ -113,10 +115,31 @@ function App() {
       ),
     );
 
+    unsubs.push(
+      listen<{ connectionId: string }>(
+        "session-connect-after-edit",
+        async (event) => {
+          const { connectionId } = event.payload;
+          try {
+            const conns = await invoke<SavedConnection[]>("get_saved_connections");
+            const conn = conns.find((c) => c.id === connectionId);
+            const connName = conn?.name ?? connectionId;
+            const tabId = addPendingTab(connName, "SSH", connectionId);
+            try {
+              const sessionId = await invoke<string>("create_ssh_session", { connectionId });
+              updateTabSession(tabId, sessionId);
+            } catch (e) {
+              closeTab(tabId);
+            }
+          } catch { /* ignore */ }
+        },
+      ),
+    );
+
     return () => {
       unsubs.forEach((p) => p.then((unsub) => unsub()));
     };
-  }, [addTab, updateAppSettings]);
+  }, [addTab, addPendingTab, updateTabSession, closeTab, updateAppSettings]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
 
@@ -125,8 +148,8 @@ function App() {
   };
 
   const handleEditConnection = useCallback(
-    (conn: SavedConnection) => {
-      openNewSession(conn.id);
+    (conn: SavedConnection, autoConnect?: boolean) => {
+      openNewSession(conn.id, autoConnect);
     },
     [],
   );
