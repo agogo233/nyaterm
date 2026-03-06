@@ -5,7 +5,6 @@ import { MdClose, MdTerminal } from "react-icons/md";
 import { Toaster } from "@/components/ui/sonner";
 import AboutDialog from "./components/dialog/app/AboutDialog";
 import LockScreen from "./components/dialog/app/LockScreen";
-// NewSessionDialog and SettingsDialog are now child windows (opened via windowManager)
 import DraggablePanel from "./components/layout/DraggablePanel";
 import Header from "./components/layout/Header";
 import ResizeHandle from "./components/layout/ResizeHandle";
