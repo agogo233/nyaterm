@@ -1,7 +1,7 @@
 {
   "name": "dragonfly",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "A modern, high-performance SSH client built with Tauri and React.",
   "author": "CoderKang",
   "homepage": "https://github.com/CoderKang/Dragonfly",
@@ -14,8 +14,10 @@
   },
   "type": "module",
   "scripts": {
+    "version-sync": "node scripts/sync-version.mjs",
+    "release": "node scripts/sync-version.mjs --commit && tsc && vite build",
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/sync-version.mjs && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "biome check src/",
