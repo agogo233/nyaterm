@@ -2,7 +2,7 @@ import type { SearchAddon } from "@xterm/addon-search";
 import type { Terminal } from "@xterm/xterm";
 import { useRef, useState } from "react";
 
-export function useTerminalSearch(terminalRef: React.MutableRefObject<Terminal | null>) {
+export function useTerminalSearch(terminalRef: React.RefObject<Terminal | null>) {
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");

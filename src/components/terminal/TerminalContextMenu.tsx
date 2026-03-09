@@ -32,7 +32,7 @@ import {
 interface TerminalContextMenuProps {
   children: React.ReactNode;
   sessionId: string;
-  terminalRef: React.MutableRefObject<Terminal | null>;
+  terminalRef: React.RefObject<Terminal | null>;
   onFind: (selection?: string) => void;
 }
 

@@ -6,9 +6,9 @@ import type { FuzzyResult } from "@/types/global";
 
 export function useCommandHistory(
   sessionId: string,
-  terminalRef: React.MutableRefObject<Terminal | null>,
-  currentLineRef: React.MutableRefObject<string>,
-  shellIntegrationRef: React.MutableRefObject<ShellIntegrationState>,
+  terminalRef: React.RefObject<Terminal | null>,
+  currentLineRef: React.RefObject<string>,
+  shellIntegrationRef: React.RefObject<ShellIntegrationState>,
   readBufferCommand: () => string,
 ) {
   const [suggestions, setSuggestions] = useState<FuzzyResult[]>([]);

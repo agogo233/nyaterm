@@ -11,8 +11,8 @@ export interface ShellIntegrationState {
 }
 
 export function useShellIntegration(
-  terminalRef: React.MutableRefObject<Terminal | null>,
-  currentLineRef: React.MutableRefObject<string>,
+  terminalRef: React.RefObject<Terminal | null>,
+  currentLineRef: React.RefObject<string>,
 ) {
   const shellIntegrationRef = useRef<ShellIntegrationState>({
     enabled: false,
