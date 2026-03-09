@@ -167,9 +167,9 @@ fn pty_session_thread(
     // Each script ends with a unique OSC marker; the reader thread discards all
     // output until this marker is seen, so the injection is invisible to the user.
     let shell_exe = shell_exe.to_lowercase();
-    let inject_sh = "if [ -z \"$DFLY_INJ\" ]; then export DFLY_INJ=1; __dfc() { printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"; }; [ -n \"$BASH_VERSION\" ] && PROMPT_COMMAND=\"__dfc; $PROMPT_COMMAND\"; [ -n \"$ZSH_VERSION\" ] && precmd_functions+=(__dfc); fi; printf '\\033]7777;DflyReady\\007'\n";
-    let inject_fish = "if not set -q DFLY_INJ; set -gx DFLY_INJ 1; function __dfc_hook --on-event fish_prompt; printf \"\\033]7;file://%s%s\\007\" (hostname) $PWD; end; end; printf '\\033]7777;DflyReady\\007'\n";
-    let inject_pwsh = "if (-not $env:DFLY_INJ) { $env:DFLY_INJ='1'; function prompt { $p = (pwd).ProviderPath; $h = [System.Net.Dns]::GetHostName(); Write-Host -NoNewline \"`e]7;file://$h$p`a\"; return \"PS $p> \" } }; Write-Host -NoNewline \"`e]7777;DflyReady`a\"\n";
+    let inject_sh = " if [ -z \"$DFLY_INJ\" ]; then export DFLY_INJ=1; __dfc() { printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"; }; [ -n \"$BASH_VERSION\" ] && PROMPT_COMMAND=\"__dfc; $PROMPT_COMMAND\"; [ -n \"$ZSH_VERSION\" ] && precmd_functions+=(__dfc); fi; if [ -n \"$BASH_VERSION\" ]; then __df_hl=$(HISTTIMEFORMAT= builtin history 1); if [ \"${__df_hl#*DFLY_INJ}\" != \"$__df_hl\" ]; then __df_hn=$(echo \"$__df_hl\" | awk '{print $1}'); if [ -n \"$__df_hn\" ]; then builtin history -d \"$__df_hn\" >/dev/null 2>&1 || true; fi; fi; unset __df_hl __df_hn; fi; printf '\\033]7777;DflyReady\\007'\n";
+    let inject_fish = " if not set -q DFLY_INJ; set -gx DFLY_INJ 1; function __dfc_hook --on-event fish_prompt; printf \"\\033]7;file://%s%s\\007\" (hostname) $PWD; end; end; printf '\\033]7777;DflyReady\\007'\n";
+    let inject_pwsh = " if (-not $env:DFLY_INJ) { $env:DFLY_INJ='1'; function prompt { $p = (pwd).ProviderPath; $h = [System.Net.Dns]::GetHostName(); Write-Host -NoNewline \"`e]7;file://$h$p`a\"; return \"PS $p> \" } }; Write-Host -NoNewline \"`e]7777;DflyReady`a\"\n";
 
     if shell_exe.contains("powershell") || shell_exe.contains("pwsh") {
         let _ = writer.write_all(inject_pwsh.as_bytes());

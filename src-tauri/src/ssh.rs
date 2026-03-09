@@ -298,8 +298,8 @@ pub async fn create_ssh_session(
 
     // Inject OSC 7 integration scripts; the I/O loop discards all output until
     // the DflyReady marker is seen, so the injection is invisible to the user.
-    let inject_sh = "if [ -z \"$DFLY_INJ\" ]; then export DFLY_INJ=1; __dfc() { printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"; }; [ -n \"$BASH_VERSION\" ] && PROMPT_COMMAND=\"__dfc; $PROMPT_COMMAND\"; [ -n \"$ZSH_VERSION\" ] && precmd_functions+=(__dfc); fi; printf '\\033]7777;DflyReady\\007'\n";
-    let inject_fish = "if not set -q DFLY_INJ; set -gx DFLY_INJ 1; function __dfc_hook --on-event fish_prompt; printf \"\\033]7;file://%s%s\\007\" (hostname) $PWD; end; end; printf '\\033]7777;DflyReady\\007'\n";
+    let inject_sh = " if [ -z \"$DFLY_INJ\" ]; then export DFLY_INJ=1; __dfc() { printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"; }; [ -n \"$BASH_VERSION\" ] && PROMPT_COMMAND=\"__dfc; $PROMPT_COMMAND\"; [ -n \"$ZSH_VERSION\" ] && precmd_functions+=(__dfc); fi; if [ -n \"$BASH_VERSION\" ]; then __df_hl=$(HISTTIMEFORMAT= builtin history 1); if [ \"${__df_hl#*DFLY_INJ}\" != \"$__df_hl\" ]; then __df_hn=$(echo \"$__df_hl\" | awk '{print $1}'); if [ -n \"$__df_hn\" ]; then builtin history -d \"$__df_hn\" >/dev/null 2>&1 || true; fi; fi; unset __df_hl __df_hn; fi; printf '\\033]7777;DflyReady\\007'\n";
+    let inject_fish = " if not set -q DFLY_INJ; set -gx DFLY_INJ 1; function __dfc_hook --on-event fish_prompt; printf \"\\033]7;file://%s%s\\007\" (hostname) $PWD; end; end; printf '\\033]7777;DflyReady\\007'\n";
     let inject_cmd = if shell_type == "fish" {
         inject_fish
     } else {
