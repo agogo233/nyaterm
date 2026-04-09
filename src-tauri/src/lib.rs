@@ -8,21 +8,15 @@ mod crypto;
 mod error;
 mod fuzzy;
 mod import;
-mod pty;
-pub mod recording;
-mod session;
-mod sftp;
+mod runtime;
 mod ssh;
 mod translate;
-mod tunnel;
-pub mod watcher;
 
-use recording::RecordingManager;
-use session::SessionManager;
+use runtime::{RecordingManager, SessionManager};
+use ssh::TunnelManager;
 use std::sync::Arc;
 use tauri::Manager;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use tunnel::TunnelManager;
 
 fn init_tracing(log_dir: std::path::PathBuf) {
     let _ = std::fs::create_dir_all(&log_dir);
@@ -70,6 +64,7 @@ pub fn run() {
     let session_manager = Arc::new(SessionManager::new());
     let tunnel_manager = Arc::new(TunnelManager::new());
     let recording_manager = Arc::new(RecordingManager::new());
+    
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -77,6 +72,7 @@ pub fn run() {
         .manage(session_manager.clone())
         .manage(tunnel_manager.clone())
         .manage(recording_manager.clone())
+        
         .setup(move |app| {
             let home_dir = app
                 .path()
@@ -149,6 +145,8 @@ pub fn run() {
             commands::session_cmds::start_recording,
             commands::session_cmds::stop_recording,
             commands::session_cmds::is_recording,
+            
+            
             commands::sftp_cmds::get_home_dir,
             commands::sftp_cmds::list_remote_dir,
             commands::sftp_cmds::delete_remote_file,
@@ -183,8 +181,8 @@ pub fn run() {
             commands::settings_cmds::get_app_settings,
             commands::settings_cmds::save_app_settings,
             commands::settings_cmds::verify_lock_password,
-            watcher::start_file_watch,
-            watcher::stop_file_watch,
+            runtime::watcher::start_file_watch,
+            runtime::watcher::stop_file_watch,
             translate::translate_text,
             import::import_sessions,
             commands::stats::get_remote_stats,
@@ -202,3 +200,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

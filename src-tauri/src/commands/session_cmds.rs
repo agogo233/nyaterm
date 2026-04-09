@@ -1,11 +1,8 @@
-use crate::config::{self, ProxySettings};
-use crate::crypto;
+use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::fuzzy::{fuzzy_search_items, FuzzyResult};
-use crate::pty;
-use crate::recording::RecordingManager;
-use crate::session::{SessionCommand, SessionInfo, SessionManager};
-use crate::ssh::{self, SshAuth, SshConfig};
+use crate::runtime::{self, RecordingManager, SessionCommand, SessionInfo, SessionManager};
+use crate::ssh::{self};
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -15,48 +12,7 @@ pub async fn create_ssh_session(
     state: tauri::State<'_, Arc<SessionManager>>,
     connection_id: String,
 ) -> AppResult<String> {
-    let conn = config::load_connection_by_id(&app, &connection_id)?;
-
-    let auth = match conn.auth_type.as_str() {
-        "password" => {
-            let pw_id = conn.password_id.as_deref().ok_or_else(|| {
-                AppError::Auth(
-                    "No password saved for this connection. Please edit and re-save it."
-                        .to_string(),
-                )
-            })?;
-            let pw_entry = config::load_password_by_id(&app, pw_id)?;
-            let password = pw_entry.password.ok_or_else(|| {
-                AppError::Auth("Password entry has no stored password.".to_string())
-            })?;
-            SshAuth::Password { password }
-        }
-        "key" => {
-            let key_id = conn.key_id.as_deref().ok_or_else(|| {
-                AppError::Auth("No SSH key assigned to this connection.".to_string())
-            })?;
-            let ssh_key = config::load_key_by_id(&app, key_id)?;
-            let key_data = config::decrypt_key_pem(&ssh_key)?.ok_or_else(|| {
-                AppError::Auth("No private key data stored for the assigned key.".to_string())
-            })?;
-            SshAuth::Key {
-                key_data,
-                passphrase: ssh_key.passphrase,
-            }
-        }
-        other => return Err(AppError::Auth(format!("Unknown auth type: {}", other))),
-    };
-
-    let proxy = resolve_proxy(&app, &conn)?;
-
-    let ssh_config = SshConfig {
-        proxy,
-        name: conn.name,
-        host: conn.host,
-        port: conn.port,
-        username: conn.username,
-        auth,
-    };
+    let ssh_config = ssh::load_saved_ssh_config(&app, &connection_id)?;
 
     ssh::create_ssh_session(app, state.inner().clone(), ssh_config, Some(connection_id)).await
 }
@@ -66,7 +22,7 @@ pub async fn create_local_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<SessionManager>>,
 ) -> AppResult<String> {
-    pty::create_local_session(app, state.inner().clone()).await
+    runtime::create_local_session(app, state.inner().clone()).await
 }
 
 #[tauri::command]
@@ -209,27 +165,5 @@ pub async fn is_recording(
     Ok(state.is_recording(&session_id))
 }
 
-/// Resolves a standalone proxy config for a saved connection, decrypting the password if present.
-pub(crate) fn resolve_proxy(
-    app: &tauri::AppHandle,
-    conn: &config::SavedConnection,
-) -> AppResult<Option<ProxySettings>> {
-    let proxy_id = match &conn.proxy_id {
-        Some(id) => id,
-        None => return Ok(None),
-    };
-    let proxy_cfg = config::load_proxy_by_id(app, proxy_id)?
-        .ok_or_else(|| AppError::Config(format!("Proxy '{}' not found", proxy_id)))?;
-    let password = proxy_cfg
-        .password
-        .as_ref()
-        .and_then(|ct| crypto::decrypt(ct).ok());
-    Ok(Some(ProxySettings {
-        enabled: true,
-        protocol: proxy_cfg.protocol,
-        host: proxy_cfg.host,
-        port: proxy_cfg.port,
-        username: proxy_cfg.username,
-        password,
-    }))
-}
+#[tauri::command]
+
