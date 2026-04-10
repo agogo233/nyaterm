@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FaMemory } from "react-icons/fa6";
+import { LuCpu } from "react-icons/lu";
 import {
   MdComputer,
   MdMonitorHeart,
+  MdOutlineLocalFireDepartment,
   MdStorage,
   MdSwapVert,
-  MdVisibility,
-  MdVisibilityOff,
-  MdOutlineLocalFireDepartment
 } from "react-icons/md";
-import { FaMemory } from "react-icons/fa6";
-import { LuCpu } from "react-icons/lu";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { useApp } from "@/context/AppContext";
 import { invoke } from "@/lib/invoke";
@@ -34,7 +32,10 @@ function formatRate(bytesPerSec: number): string {
   return `${val < 10 ? val.toFixed(1) : val.toFixed(0)} ${units[i]}`;
 }
 
-function formatUptime(seconds: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
+function formatUptime(
+  seconds: number,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
   const days = Math.floor(seconds / 86400);
   return t(days === 1 ? "resourceMonitor.day" : "resourceMonitor.days", { count: days });
 }
@@ -42,7 +43,10 @@ function formatUptime(seconds: number, t: (key: string, opts?: Record<string, un
 function ProgressBar({ value, color }: { value: number; color: string }) {
   const pct = Math.min(100, Math.max(0, value));
   return (
-    <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ backgroundColor: "var(--df-bg)" }}>
+    <div
+      className="h-1.5 w-full rounded-full overflow-hidden"
+      style={{ backgroundColor: "var(--df-bg)" }}
+    >
       <div
         className="h-full rounded-full transition-all duration-500"
         style={{ width: `${pct}%`, backgroundColor: color }}
@@ -57,25 +61,47 @@ function usageColor(pct: number): string {
   return "#22c55e";
 }
 
-function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+function SectionCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div
       className="rounded-lg border p-3 space-y-2"
       style={{ borderColor: "var(--df-border)", backgroundColor: "var(--df-bg)" }}
     >
       <div className="flex items-center gap-1.5">
-        <span className="text-sm" style={{ color: "var(--df-text-muted)" }}>{icon}</span>
-        <span className="text-xs font-semibold" style={{ color: "var(--df-text)" }}>{title}</span>
+        <span className="text-sm" style={{ color: "var(--df-text-muted)" }}>
+          {icon}
+        </span>
+        <span className="text-xs font-semibold" style={{ color: "var(--df-text)" }}>
+          {title}
+        </span>
       </div>
       {children}
     </div>
   );
 }
 
-function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+function InfoRow({
+  label,
+  value,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+}) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="text-[0.6875rem] shrink-0" style={{ color: "var(--df-text-muted)" }}>{label}</span>
+      <span className="text-[0.6875rem] shrink-0" style={{ color: "var(--df-text-muted)" }}>
+        {label}
+      </span>
       <span
         className="text-[0.6875rem] font-mono truncate text-right"
         style={{ color: valueColor ?? "var(--df-primary)" }}
@@ -98,11 +124,15 @@ function MemoryDonut({ used, available }: { used: number; available: number }) {
   const usedLen = usedPct * circumference;
 
   return (
-    <svg width="80" height="80" viewBox="0 0 96 96">
+    <svg width="80" height="80" viewBox="0 0 96 96" aria-hidden="true">
       {/* Available (green) - full ring background */}
       <circle
-        cx="48" cy="48" r={radius}
-        fill="none" stroke="#22c55e" strokeWidth={stroke}
+        cx="48"
+        cy="48"
+        r={radius}
+        fill="none"
+        stroke="#22c55e"
+        strokeWidth={stroke}
         strokeDasharray={`${circumference} 0`}
         strokeDashoffset={0}
         transform="rotate(-90 48 48)"
@@ -110,8 +140,12 @@ function MemoryDonut({ used, available }: { used: number; available: number }) {
       />
       {/* Used (red) - overwrites from start */}
       <circle
-        cx="48" cy="48" r={radius}
-        fill="none" stroke="#ef4444" strokeWidth={stroke}
+        cx="48"
+        cy="48"
+        r={radius}
+        fill="none"
+        stroke="#ef4444"
+        strokeWidth={stroke}
         strokeDasharray={`${usedLen} ${circumference - usedLen}`}
         strokeDashoffset={0}
         transform="rotate(-90 48 48)"
@@ -131,7 +165,6 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
   const { appSettings } = useApp();
   const [stats, setStats] = useState<RemoteStats | null>(null);
   const [error, setError] = useState(false);
-  const [showNetwork, setShowNetwork] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchingRef = useRef(false);
   const failCountRef = useRef(0);
@@ -139,30 +172,27 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
   const enabled = appSettings.ui.show_remote_stats ?? false;
   const pollIntervalMs = Math.max(1, appSettings.ui.remote_stats_interval ?? 3) * 1000;
 
-  const fetchStats = useCallback(
-    (sessionId: string) => {
-      if (fetchingRef.current) return;
-      fetchingRef.current = true;
+  const fetchStats = useCallback((sessionId: string) => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
 
-      invoke<RemoteStats>("get_remote_stats", { sessionId })
-        .then((data) => {
-          setStats(data);
-          setError(false);
-          failCountRef.current = 0;
-        })
-        .catch(() => {
-          failCountRef.current += 1;
-          setError(true);
-          if (failCountRef.current >= MAX_CONSECUTIVE_FAILURES) {
-            setStats(null);
-          }
-        })
-        .finally(() => {
-          fetchingRef.current = false;
-        });
-    },
-    [],
-  );
+    invoke<RemoteStats>("get_remote_stats", { sessionId })
+      .then((data) => {
+        setStats(data);
+        setError(false);
+        failCountRef.current = 0;
+      })
+      .catch(() => {
+        failCountRef.current += 1;
+        setError(true);
+        if (failCountRef.current >= MAX_CONSECUTIVE_FAILURES) {
+          setStats(null);
+        }
+      })
+      .finally(() => {
+        fetchingRef.current = false;
+      });
+  }, []);
 
   useEffect(() => {
     if (pollRef.current) {
@@ -204,15 +234,24 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
             {/* System */}
             <SectionCard icon={<MdComputer />} title={t("resourceMonitor.system")}>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                <InfoRow label={`${t("resourceMonitor.hostname")}:`} value={stats.system.hostname} />
-                <InfoRow label={`${t("resourceMonitor.uptime")}:`} value={formatUptime(stats.system.uptime_sec, t)} />
+                <InfoRow
+                  label={`${t("resourceMonitor.hostname")}:`}
+                  value={stats.system.hostname}
+                />
+                <InfoRow
+                  label={`${t("resourceMonitor.uptime")}:`}
+                  value={formatUptime(stats.system.uptime_sec, t)}
+                />
                 <InfoRow label={`${t("resourceMonitor.os")}:`} value={stats.system.os} />
                 <InfoRow label={`${t("resourceMonitor.arch")}:`} value={stats.system.arch} />
               </div>
             </SectionCard>
 
             {/* System Load */}
-            <SectionCard icon={<MdOutlineLocalFireDepartment />} title={t("resourceMonitor.systemLoad")}>
+            <SectionCard
+              icon={<MdOutlineLocalFireDepartment />}
+              title={t("resourceMonitor.systemLoad")}
+            >
               <div className="flex items-center justify-between gap-2">
                 <LoadValue label={t("resourceMonitor.Load1")} value={stats.load.load1} />
                 <LoadValue label={t("resourceMonitor.Load5")} value={stats.load.load5} />
@@ -224,13 +263,19 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
             <SectionCard icon={<LuCpu />} title={t("resourceMonitor.cpu")}>
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[0.6875rem] font-mono" style={{ color: "var(--df-text-muted)" }}>
+                  <span
+                    className="text-[0.6875rem] font-mono"
+                    style={{ color: "var(--df-text-muted)" }}
+                  >
                     {stats.cpu.cores}
                   </span>
                   <div className="flex-1 mx-2">
                     <ProgressBar value={stats.cpu.usage} color={usageColor(stats.cpu.usage)} />
                   </div>
-                  <span className="text-[0.6875rem] font-mono shrink-0" style={{ color: "var(--df-text)" }}>
+                  <span
+                    className="text-[0.6875rem] font-mono shrink-0"
+                    style={{ color: "var(--df-text)" }}
+                  >
                     {stats.cpu.usage.toFixed(1)}%
                   </span>
                 </div>
@@ -249,9 +294,21 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
                     {formatBytes(memTotal)}
                   </div>
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                    <LegendDot color="#ef4444" label={t("resourceMonitor.used")} value={formatBytes(stats.memory.used)} />
-                    <LegendDot color="#22c55e" label={t("resourceMonitor.available")} value={formatBytes(stats.memory.available)} />
-                    <LegendDot color="#6b7280" label={t("resourceMonitor.cached")} value={formatBytes(stats.memory.cached)} />
+                    <LegendDot
+                      color="#ef4444"
+                      label={t("resourceMonitor.used")}
+                      value={formatBytes(stats.memory.used)}
+                    />
+                    <LegendDot
+                      color="#22c55e"
+                      label={t("resourceMonitor.available")}
+                      value={formatBytes(stats.memory.available)}
+                    />
+                    <LegendDot
+                      color="#6b7280"
+                      label={t("resourceMonitor.cached")}
+                      value={formatBytes(stats.memory.cached)}
+                    />
                   </div>
                 </div>
                 <div className="shrink-0">
@@ -261,54 +318,51 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
             </SectionCard>
 
             {/* Network */}
-            <SectionCard
-              icon={<MdSwapVert />}
-              title={t("resourceMonitor.network")}
-            >
-              <div className="space-y-1">
-                <div className="flex items-center justify-end -mt-1 mb-1">
-                  <button
-                    className="p-0.5 rounded hover:bg-white/5 transition-colors"
-                    onClick={() => setShowNetwork((v) => !v)}
-                    title={showNetwork ? "Hide" : "Show"}
+            <SectionCard icon={<MdSwapVert />} title={t("resourceMonitor.network")}>
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-3 gap-1">
+                  <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
+                    {t("resourceMonitor.nic")}
+                  </span>
+                  <span
+                    className="text-[0.625rem] text-center"
+                    style={{ color: "var(--df-text-dimmed)" }}
                   >
-                    {showNetwork ? (
-                      <MdVisibility className="text-xs" style={{ color: "var(--df-text-muted)" }} />
-                    ) : (
-                      <MdVisibilityOff className="text-xs" style={{ color: "var(--df-text-dimmed)" }} />
-                    )}
-                  </button>
+                    {t("resourceMonitor.send")}
+                  </span>
+                  <span
+                    className="text-[0.625rem] text-right"
+                    style={{ color: "var(--df-text-dimmed)" }}
+                  >
+                    {t("resourceMonitor.receive")}
+                  </span>
                 </div>
-                {showNetwork && (
-                  <div className="space-y-1.5">
-                    <div className="grid grid-cols-3 gap-1">
-                      <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
-                        {t("resourceMonitor.nic")}
-                      </span>
-                      <span className="text-[0.625rem] text-center" style={{ color: "var(--df-text-dimmed)" }}>
-                        {t("resourceMonitor.send")}
-                      </span>
-                      <span className="text-[0.625rem] text-right" style={{ color: "var(--df-text-dimmed)" }}>
-                        {t("resourceMonitor.receive")}
-                      </span>
-                    </div>
-                    {stats.networks.map((net) => (
-                      <div key={net.nic} className="grid grid-cols-3 gap-1">
-                        <span className="text-[0.6875rem] font-mono truncate" style={{ color: "var(--df-text)" }}>
-                          {net.nic}
-                        </span>
-                        <span className="text-[0.6875rem] font-mono text-center" style={{ color: "var(--df-text)" }}>
-                          {formatRate(net.tx_bytes_per_sec)}
-                        </span>
-                        <span className="text-[0.6875rem] font-mono text-right" style={{ color: "var(--df-text)" }}>
-                          {formatRate(net.rx_bytes_per_sec)}
-                        </span>
-                      </div>
-                    ))}
-                    {stats.networks.length === 0 && (
-                      <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>-</span>
-                    )}
+                {stats.networks.map((net) => (
+                  <div key={net.nic} className="grid grid-cols-3 gap-1">
+                    <span
+                      className="text-[0.6875rem] font-mono truncate"
+                      style={{ color: "var(--df-text)" }}
+                    >
+                      {net.nic}
+                    </span>
+                    <span
+                      className="text-[0.6875rem] font-mono text-center"
+                      style={{ color: "var(--df-text)" }}
+                    >
+                      {formatRate(net.tx_bytes_per_sec)}
+                    </span>
+                    <span
+                      className="text-[0.6875rem] font-mono text-right"
+                      style={{ color: "var(--df-text)" }}
+                    >
+                      {formatRate(net.rx_bytes_per_sec)}
+                    </span>
                   </div>
+                ))}
+                {stats.networks.length === 0 && (
+                  <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
+                    -
+                  </span>
                 )}
               </div>
             </SectionCard>
@@ -321,13 +375,22 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
                     <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
                       {t("resourceMonitor.mountPath")}
                     </span>
-                    <span className="text-[0.625rem] text-center" style={{ color: "var(--df-text-dimmed)" }}>
+                    <span
+                      className="text-[0.625rem] text-center"
+                      style={{ color: "var(--df-text-dimmed)" }}
+                    >
                       {t("resourceMonitor.totalSize")}
                     </span>
-                    <span className="text-[0.625rem] text-center" style={{ color: "var(--df-text-dimmed)" }}>
+                    <span
+                      className="text-[0.625rem] text-center"
+                      style={{ color: "var(--df-text-dimmed)" }}
+                    >
                       {t("resourceMonitor.availSpace")}
                     </span>
-                    <span className="text-[0.625rem] text-right" style={{ color: "var(--df-text-dimmed)" }}>
+                    <span
+                      className="text-[0.625rem] text-right"
+                      style={{ color: "var(--df-text-dimmed)" }}
+                    >
                       {t("resourceMonitor.usagePercent")}
                     </span>
                   </div>
@@ -341,15 +404,24 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
                         >
                           {disk.mount}
                         </span>
-                        <span className="text-[0.6875rem] font-mono text-center" style={{ color: "var(--df-text)" }}>
+                        <span
+                          className="text-[0.6875rem] font-mono text-center"
+                          style={{ color: "var(--df-text)" }}
+                        >
                           {formatBytes(disk.total)}
                         </span>
-                        <span className="text-[0.6875rem] font-mono text-center" style={{ color: "var(--df-text)" }}>
+                        <span
+                          className="text-[0.6875rem] font-mono text-center"
+                          style={{ color: "var(--df-text)" }}
+                        >
                           {formatBytes(disk.available)}
                         </span>
                         <div className="flex items-center justify-end gap-1">
                           <div className="flex-1 max-w-[3rem]">
-                            <ProgressBar value={disk.use_percent} color={usageColor(disk.use_percent)} />
+                            <ProgressBar
+                              value={disk.use_percent}
+                              color={usageColor(disk.use_percent)}
+                            />
                           </div>
                           <span
                             className="text-[0.625rem] font-mono shrink-0"
@@ -363,7 +435,9 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
                   ))}
                 </div>
               ) : (
-                <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>-</span>
+                <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
+                  -
+                </span>
               )}
             </SectionCard>
           </div>
@@ -378,8 +452,12 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
 function EmptyState({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center gap-2 px-4">
-      <span className="text-2xl" style={{ color: "var(--df-text-dimmed)" }}>{icon}</span>
-      <span className="text-xs" style={{ color: "var(--df-text-muted)" }}>{text}</span>
+      <span className="text-2xl" style={{ color: "var(--df-text-dimmed)" }}>
+        {icon}
+      </span>
+      <span className="text-xs" style={{ color: "var(--df-text-muted)" }}>
+        {text}
+      </span>
     </div>
   );
 }
@@ -395,8 +473,19 @@ function LoadingSpinner({ label }: { label: string }) {
         viewBox="0 0 24 24"
       >
         <title>{label}</title>
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        <circle
+          className="opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          strokeWidth="4"
+        />
+        <path
+          className="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+        />
       </svg>
     </div>
   );
@@ -405,8 +494,13 @@ function LoadingSpinner({ label }: { label: string }) {
 function LoadValue({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center gap-1">
-      <span className="text-[0.6875rem]" style={{ color: "var(--df-text-muted)" }}>{label}</span>
-      <span className="text-[0.6875rem] font-mono font-medium" style={{ color: "var(--df-primary)" }}>
+      <span className="text-[0.6875rem]" style={{ color: "var(--df-text-muted)" }}>
+        {label}
+      </span>
+      <span
+        className="text-[0.6875rem] font-mono font-medium"
+        style={{ color: "var(--df-primary)" }}
+      >
         {value.toFixed(2)}
       </span>
     </div>
@@ -416,9 +510,16 @@ function LoadValue({ label, value }: { label: string; value: number }) {
 function LegendDot({ color, label, value }: { color: string; label: string; value: string }) {
   return (
     <div className="flex items-center gap-1">
-      <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-      <span className="text-[0.625rem]" style={{ color: "var(--df-text-muted)" }}>{label}</span>
-      <span className="text-[0.625rem] font-mono" style={{ color: "var(--df-text)" }}>{value}</span>
+      <span
+        className="inline-block w-2 h-2 rounded-full shrink-0"
+        style={{ backgroundColor: color }}
+      />
+      <span className="text-[0.625rem]" style={{ color: "var(--df-text-muted)" }}>
+        {label}
+      </span>
+      <span className="text-[0.625rem] font-mono" style={{ color: "var(--df-text)" }}>
+        {value}
+      </span>
     </div>
   );
 }
