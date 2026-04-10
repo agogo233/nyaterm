@@ -2,17 +2,21 @@ import { useTranslation } from "react-i18next";
 import { SelectItem } from "@/components/ui/select";
 import { useApp } from "@/context/AppContext";
 import { NumberInput } from "../ui/number-input";
-import { SettingInput, SettingRow, SettingSelect, SettingSwitch } from "./SettingFormItems";
+import {
+  SettingInput,
+  SettingRow,
+  SettingSection,
+  SettingSelect,
+  SettingSwitch,
+} from "./SettingFormItems";
 
 export function SecurityTab() {
   const { t } = useTranslation();
   const { appSettings, updateAppSettings } = useApp();
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <h4 className="font-semibold text-sm">{t("settings.sessionSecurity")}</h4>
-
+    <div className="space-y-5">
+      <SettingSection title={t("settings.sessionSecurity")} contentClassName="space-y-5">
         <SettingRow
           label={t("settings.enableScreenLock")}
           desc={t("settings.enableScreenLockDesc")}
@@ -33,11 +37,11 @@ export function SecurityTab() {
               label={t("settings.idleLockMinutes")}
               desc={t("settings.idleLockMinutesDesc")}
             >
-              <div className="flex w-full items-center gap-3 sm:w-auto">
+              <div className="flex w-full max-w-xs items-center gap-3 sm:w-auto">
                 <NumberInput
                   min={0}
                   max={1440}
-                  className="w-full sm:w-28"
+                  className="w-full sm:w-32"
                   value={appSettings.security.idle_lock_minutes}
                   onChange={(v) =>
                     updateAppSettings({
@@ -55,6 +59,7 @@ export function SecurityTab() {
               label={t("settings.lockPassword")}
               desc={t("settings.lockPasswordDesc")}
               type="password"
+              controlClassName="max-w-lg"
               placeholder={
                 appSettings.security.lock_password === "__SET__"
                   ? "••••••••"
@@ -67,7 +72,6 @@ export function SecurityTab() {
               }
               onChange={(e) => {
                 const val = e.target.value;
-                // Empty string clears the password; non-empty sets new plaintext
                 updateAppSettings({
                   security: { ...appSettings.security, lock_password: val || undefined },
                 });
@@ -75,11 +79,14 @@ export function SecurityTab() {
             />
           </>
         )}
+      </SettingSection>
 
+      <SettingSection>
         <SettingSelect
           label={t("settings.hostKeyPolicy")}
           desc={t("settings.hostKeyPolicyDesc")}
           value={appSettings.security.host_key_policy}
+          controlClassName="max-w-sm"
           onValueChange={(v) =>
             updateAppSettings({ security: { ...appSettings.security, host_key_policy: v } })
           }
@@ -88,7 +95,7 @@ export function SecurityTab() {
           <SelectItem value="prompt">{t("settings.hostKeyPrompt")}</SelectItem>
           <SelectItem value="accept">{t("settings.hostKeyAccept")}</SelectItem>
         </SettingSelect>
-      </div>
+      </SettingSection>
     </div>
   );
 }

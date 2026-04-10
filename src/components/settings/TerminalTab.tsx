@@ -10,7 +10,7 @@ import { useApp } from "@/context/AppContext";
 import { useTheme } from "@/context/ThemeContext";
 import { getBuiltinRules, hexLuminance } from "@/lib/keywordHighlightPresets";
 import type { KeywordHighlightRule } from "@/types/global";
-import { SettingNumberInput, SettingRow, SettingSwitch } from "./SettingFormItems";
+import { SettingNumberInput, SettingRow, SettingSection, SettingSwitch } from "./SettingFormItems";
 
 const DEFAULT_ACTION_LINK_MATCHERS = {
   ipv4: true,
@@ -24,7 +24,6 @@ export function TerminalTab() {
   const { terminalTheme } = useTheme();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Derive dark/light from the terminal theme background luminance.
   const isDark = useMemo(
     () => hexLuminance(terminalTheme.colors.terminal.background) < 0.5,
     [terminalTheme.colors.terminal.background],
@@ -66,64 +65,72 @@ export function TerminalTab() {
   const ringClass = isDark ? "ring-white/20" : "ring-black/20";
 
   return (
-    <div className="space-y-4">
-      <SettingNumberInput
-        label={t("settings.scrollbackLines")}
-        desc={t("settings.scrollbackLinesDesc")}
-        min={100}
-        max={100000}
-        step={100}
-        value={appSettings.terminal.scrollback_lines}
-        onChange={(v) =>
-          updateAppSettings({ terminal: { ...appSettings.terminal, scrollback_lines: v || 5000 } })
-        }
-      />
-
-      <SettingNumberInput
-        label={t("settings.keepAliveInterval")}
-        desc={t("settings.keepAliveIntervalDesc")}
-        min={0}
-        max={600}
-        step={5}
-        value={appSettings.terminal.keep_alive_interval}
-        onChange={(v) =>
-          updateAppSettings({ terminal: { ...appSettings.terminal, keep_alive_interval: v || 0 } })
-        }
-      />
-
-      <SettingRow
-        label={t("settings.hardwareAcceleration")}
-        desc={t("settings.hardwareAccelerationDesc")}
-      >
-        <SettingSwitch
-          checked={appSettings.terminal.hardware_acceleration}
+    <div className="space-y-5">
+      <SettingSection contentClassName="space-y-5">
+        <SettingNumberInput
+          label={t("settings.scrollbackLines")}
+          desc={t("settings.scrollbackLinesDesc")}
+          min={100}
+          max={100000}
+          step={100}
+          value={appSettings.terminal.scrollback_lines}
+          controlClassName="max-w-sm"
           onChange={(v) =>
-            updateAppSettings({ terminal: { ...appSettings.terminal, hardware_acceleration: v } })
+            updateAppSettings({
+              terminal: { ...appSettings.terminal, scrollback_lines: v || 5000 },
+            })
           }
         />
-      </SettingRow>
 
-      <SettingRow label={t("settings.showRemoteStats")} desc={t("settings.showRemoteStatsDesc")}>
-        <SettingSwitch
-          checked={appSettings.ui.show_remote_stats ?? false}
-          onChange={(v) => updateUi({ show_remote_stats: v })}
-        />
-      </SettingRow>
-
-      {appSettings.ui.show_remote_stats && (
         <SettingNumberInput
-          label={t("settings.remoteStatsInterval")}
-          desc={t("settings.remoteStatsIntervalDesc")}
-          min={1}
-          max={60}
-          step={1}
-          value={appSettings.ui.remote_stats_interval ?? 3}
-          onChange={(v) => updateUi({ remote_stats_interval: v || 3 })}
+          label={t("settings.keepAliveInterval")}
+          desc={t("settings.keepAliveIntervalDesc")}
+          min={0}
+          max={600}
+          step={5}
+          value={appSettings.terminal.keep_alive_interval}
+          controlClassName="max-w-sm"
+          onChange={(v) =>
+            updateAppSettings({
+              terminal: { ...appSettings.terminal, keep_alive_interval: v || 0 },
+            })
+          }
         />
-      )}
 
-      {/* ── Action Links ─────────────────────────────────────────────────── */}
-      <div className="space-y-3 pt-2 border-t">
+        <SettingRow
+          label={t("settings.hardwareAcceleration")}
+          desc={t("settings.hardwareAccelerationDesc")}
+        >
+          <SettingSwitch
+            checked={appSettings.terminal.hardware_acceleration}
+            onChange={(v) =>
+              updateAppSettings({ terminal: { ...appSettings.terminal, hardware_acceleration: v } })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow label={t("settings.showRemoteStats")} desc={t("settings.showRemoteStatsDesc")}>
+          <SettingSwitch
+            checked={appSettings.ui.show_remote_stats ?? false}
+            onChange={(v) => updateUi({ show_remote_stats: v })}
+          />
+        </SettingRow>
+
+        {appSettings.ui.show_remote_stats && (
+          <SettingNumberInput
+            label={t("settings.remoteStatsInterval")}
+            desc={t("settings.remoteStatsIntervalDesc")}
+            min={1}
+            max={60}
+            step={1}
+            value={appSettings.ui.remote_stats_interval ?? 3}
+            controlClassName="max-w-sm"
+            onChange={(v) => updateUi({ remote_stats_interval: v || 3 })}
+          />
+        )}
+      </SettingSection>
+
+      <SettingSection contentClassName="space-y-4">
         <SettingRow label={t("settings.actionLinks")} desc={t("settings.actionLinksDesc")}>
           <SettingSwitch
             checked={actionLinksEnabled}
@@ -136,12 +143,14 @@ export function TerminalTab() {
         </SettingRow>
 
         <div
-          className={`space-y-1 transition-opacity ${
-            actionLinksEnabled ? "" : "opacity-50 pointer-events-none"
+          className={`space-y-2 transition-opacity ${
+            actionLinksEnabled ? "" : "pointer-events-none opacity-50"
           }`}
         >
-          <Label className="font-medium text-sm">{t("settings.actionLinksMatchers")}</Label>
-          <div className="border rounded-md overflow-hidden divide-y">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">{t("settings.actionLinksMatchers")}</Label>
+          </div>
+          <div className="space-y-2">
             {(
               [
                 {
@@ -166,16 +175,16 @@ export function TerminalTab() {
             ).map(({ key, label, example, desc }) => (
               <div
                 key={key}
-                className="flex flex-col gap-2 bg-muted/20 px-3 py-3 sm:flex-row sm:items-center"
+                className="flex flex-col gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium">{label}</span>
-                    <span className="text-[11px] font-mono text-muted-foreground/70 bg-muted px-1.5 py-0.5 rounded">
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground/80">
                       {example}
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{desc}</p>
                 </div>
                 <Switch
                   checked={actionLinkMatchers[key]}
@@ -195,10 +204,9 @@ export function TerminalTab() {
             ))}
           </div>
         </div>
-      </div>
+      </SettingSection>
 
-      {/* ── Keyword Highlighting ──────────────────────────────────────────── */}
-      <div className="space-y-3 pt-2 border-t">
+      <SettingSection contentClassName="space-y-4">
         <SettingRow
           label={t("settings.keywordHighlightingExperimental")}
           desc={t("settings.keywordHighlightingExperimentalDesc")}
@@ -231,23 +239,27 @@ export function TerminalTab() {
           />
         </SettingRow>
 
-        {/* ── Built-in rules (read-only preview) ── */}
-        <div className="space-y-1">
-          <Label className="font-medium text-sm">
-            {t("settings.keywordHighlightBuiltinRules")}
-          </Label>
-          <p className="text-xs text-muted-foreground">
-            {t("settings.keywordHighlightBuiltinNote")}
-          </p>
-          <div className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2">
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">
+              {t("settings.keywordHighlightBuiltinRules")}
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {t("settings.keywordHighlightBuiltinNote")}
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
             {builtinRules.map((rule) => (
-              <div key={rule.id} className="flex min-w-0 items-center gap-2 bg-muted/30 px-3 py-2">
+              <div
+                key={rule.id}
+                className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 bg-background/70 px-3 py-2.5"
+              >
                 <span
-                  className={`w-3 h-3 rounded-full shrink-0 ring-1 ring-inset ${ringClass}`}
+                  className={`h-3 w-3 shrink-0 rounded-full ring-1 ring-inset ${ringClass}`}
                   style={{ backgroundColor: rule.color }}
                 />
                 <span className="w-20 shrink-0 text-sm text-muted-foreground">{rule.name}</span>
-                <span className="flex-1 text-xs text-muted-foreground/60 font-mono truncate">
+                <span className="flex-1 truncate font-mono text-xs text-muted-foreground/70">
                   {rule.patterns.slice(0, 3).join(", ")}
                   {rule.patterns.length > 3 && ` +${rule.patterns.length - 3}`}
                 </span>
@@ -256,23 +268,24 @@ export function TerminalTab() {
           </div>
         </div>
 
-        {/* ── User rules ── */}
         <div
-          className={`space-y-1 transition-opacity ${appSettings.terminal.keyword_highlights_enabled ? "" : "opacity-50 pointer-events-none"}`}
+          className={`space-y-3 transition-opacity ${
+            appSettings.terminal.keyword_highlights_enabled ? "" : "pointer-events-none opacity-50"
+          }`}
         >
           <div className="flex items-center justify-between">
-            <Label className="font-medium text-sm">{t("settings.keywordHighlightRules")}</Label>
+            <Label className="text-sm font-medium">{t("settings.keywordHighlightRules")}</Label>
             <Button variant="ghost" size="xs" className="text-primary" onClick={addRule}>
               <MdAdd className="text-[0.875rem]" />
               {t("common.add")}
             </Button>
           </div>
 
-          <div className="border rounded-md overflow-hidden">
+          <div className="space-y-2">
             {userRules.length === 0 && (
-              <p className="text-center text-xs text-muted-foreground py-5">
+              <div className="rounded-xl border border-dashed border-border/70 bg-background/40 px-4 py-8 text-center text-sm text-muted-foreground">
                 {t("settings.keywordHighlightNoRules")}
-              </p>
+              </div>
             )}
 
             {userRules.map((rule) => {
@@ -280,13 +293,15 @@ export function TerminalTab() {
               const patternCount = rule.patterns.filter((p) => p.trim()).length;
 
               return (
-                <div key={rule.id} className="border-b last:border-0">
-                  {/* Collapsed row */}
+                <div
+                  key={rule.id}
+                  className="overflow-hidden rounded-xl border border-border/70 bg-background/75"
+                >
                   <div
-                    className="cursor-pointer select-none px-3 py-2 transition-colors hover:bg-accent/50"
+                    className="cursor-pointer select-none px-4 py-3 transition-colors hover:bg-accent/40"
                     onClick={() => setExpandedId(isOpen ? null : rule.id)}
                   >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                       <div className="flex min-w-0 flex-1 items-center gap-2">
                         <span
                           className={`h-3 w-3 shrink-0 rounded-full ring-1 ring-inset ${ringClass}`}
@@ -330,20 +345,18 @@ export function TerminalTab() {
                     </div>
                   </div>
 
-                  {/* Expanded edit form */}
                   {isOpen && (
                     <div
-                      className="px-3 pb-3 pt-2 space-y-3 bg-accent/20 border-t"
+                      className="space-y-4 border-t border-border/70 bg-accent/15 px-4 pb-4 pt-3"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* Rule name + dark/light colors on the same row */}
                       <div className="flex flex-col gap-4 xl:flex-row xl:items-end">
-                        <div className="min-w-0 flex-1 space-y-1 xl:max-w-[16rem]">
+                        <div className="min-w-0 flex-1 space-y-2 xl:max-w-[16rem]">
                           <Label className="text-xs text-muted-foreground">
                             {t("settings.keywordHighlightRuleName")}
                           </Label>
                           <Input
-                            className="text-sm h-8"
+                            className="h-8 text-sm"
                             value={rule.name}
                             placeholder={t("settings.keywordHighlightRuleNamePlaceholder")}
                             onChange={(e) => patchRule(rule.id, { name: e.target.value })}
@@ -363,7 +376,7 @@ export function TerminalTab() {
                               swatchRing: "ring-black/20",
                             },
                           ].map(({ field, labelKey, swatchRing }) => (
-                            <div key={field} className="min-w-0 space-y-1">
+                            <div key={field} className="min-w-0 space-y-2">
                               <Label className="block text-xs text-muted-foreground">
                                 {t(`settings.${labelKey}`)}
                               </Label>
@@ -403,13 +416,12 @@ export function TerminalTab() {
                         </div>
                       </div>
 
-                      {/* Patterns */}
-                      <div className="space-y-1">
+                      <div className="space-y-2">
                         <Label className="text-xs text-muted-foreground">
                           {t("settings.keywordHighlightRulePatterns")}
                         </Label>
                         <Textarea
-                          className="text-sm font-mono min-h-[80px] max-h-[160px] resize-y overflow-y-auto"
+                          className="min-h-[80px] max-h-[160px] resize-y overflow-y-auto font-mono text-sm"
                           value={rule.patterns.join("\n")}
                           placeholder={t("settings.keywordHighlightRulePatternsPlaceholder")}
                           onChange={(e) =>
@@ -424,7 +436,7 @@ export function TerminalTab() {
             })}
           </div>
         </div>
-      </div>
+      </SettingSection>
     </div>
   );
 }

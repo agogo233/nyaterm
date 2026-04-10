@@ -4,7 +4,13 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { SelectItem } from "@/components/ui/select";
 import { useApp } from "@/context/AppContext";
 import { MOD } from "@/hooks/useGlobalShortcuts";
-import { SettingInput, SettingRow, SettingSelect, SettingSwitch } from "./SettingFormItems";
+import {
+  SettingInput,
+  SettingRow,
+  SettingSection,
+  SettingSelect,
+  SettingSwitch,
+} from "./SettingFormItems";
 
 export function InteractionTab() {
   const { t } = useTranslation();
@@ -55,8 +61,8 @@ export function InteractionTab() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
+    <div className="space-y-5">
+      <SettingSection contentClassName="space-y-5">
         <SettingRow label={t("settings.copyOnSelect")} desc={t("settings.copyOnSelectDesc")}>
           <SettingSwitch
             checked={appSettings.interaction.copy_on_select}
@@ -81,6 +87,7 @@ export function InteractionTab() {
           label={t("settings.wordSeparators")}
           desc={t("settings.wordSeparatorsDesc")}
           value={appSettings.interaction.word_separators}
+          controlClassName="max-w-2xl"
           onChange={(e) =>
             updateAppSettings({
               interaction: { ...appSettings.interaction, word_separators: e.target.value },
@@ -91,6 +98,7 @@ export function InteractionTab() {
         <SettingSelect
           label={t("settings.defaultEncoding")}
           value={appSettings.interaction.default_encoding}
+          controlClassName="max-w-sm"
           onValueChange={(v) =>
             updateAppSettings({ interaction: { ...appSettings.interaction, default_encoding: v } })
           }
@@ -98,19 +106,20 @@ export function InteractionTab() {
           <SelectItem value="UTF-8">UTF-8</SelectItem>
           <SelectItem value="GBK">GBK</SelectItem>
         </SettingSelect>
-      </div>
+      </SettingSection>
 
       {shortcutSections.map((section) => (
-        <div key={section.title} className="pt-4 border-t border-border/50">
-          <div className="mb-3">
-            <h3 className="text-sm font-medium">{section.title}</h3>
-            {section.desc && <p className="text-xs text-muted-foreground">{section.desc}</p>}
-          </div>
-          <div className="mt-2 grid grid-cols-1 gap-2 xl:grid-cols-2 xl:gap-x-8">
+        <SettingSection
+          key={section.title}
+          title={section.title}
+          desc={section.desc}
+          contentClassName="space-y-0"
+        >
+          <div className="grid grid-cols-1 gap-2 xl:grid-cols-2 xl:gap-x-6">
             {section.items.map((item) => (
               <div
                 key={item.label}
-                className="flex flex-col gap-2 rounded-md px-2 py-2 hover:bg-accent/30 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <span className="text-sm text-muted-foreground">{item.label}</span>
                 <KbdGroup className="flex-wrap sm:justify-end">
@@ -124,7 +133,7 @@ export function InteractionTab() {
               </div>
             ))}
           </div>
-        </div>
+        </SettingSection>
       ))}
     </div>
   );

@@ -10,7 +10,6 @@ import {
   MdSwapHoriz,
   MdTerminal,
   MdTranslate,
-  MdVpnKey,
 } from "react-icons/md";
 import ChildWindowHeader from "@/components/layout/ChildWindowHeader";
 import { AppearanceTab } from "@/components/settings/AppearanceTab";
@@ -67,7 +66,6 @@ export default function SettingsPage() {
     search: MdSearch,
     translate: MdTranslate,
     security: MdSecurity,
-    vpnKey: MdVpnKey,
     terminal: MdTerminal,
     mouse: MdMouse,
   };
@@ -91,11 +89,11 @@ export default function SettingsPage() {
         onClose={handleClose}
       />
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
         {/* Sidebar */}
-        <div className="flex w-14 shrink-0 flex-col border-r bg-background sm:w-44 lg:w-52">
+        <div className="flex w-14 shrink-0 flex-col border-r border-border/70 bg-muted/20 sm:w-48 lg:w-56">
           <div
-            className="flex items-center justify-center gap-3 border-b px-3 py-4 sm:justify-start sm:px-4 sm:py-5"
+            className="flex items-center justify-center gap-3 border-b border-border/70 px-3 py-4 sm:justify-start sm:px-4 sm:py-5"
             data-tauri-drag-region
           >
             <MdSettings className="shrink-0 text-2xl text-primary" />
@@ -103,19 +101,25 @@ export default function SettingsPage() {
               {t("settings.title")}
             </h1>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3 sm:px-3">
-            <div className="flex flex-col gap-1">
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3 sm:px-3 sm:py-4">
+            <div className="flex flex-col gap-1.5">
               {tabs.map((tab) => (
                 <Button
                   key={tab.id}
                   variant="ghost"
                   onClick={() => setActiveTab(tab.id)}
                   title={tab.label}
-                  className={`h-auto w-full justify-center gap-3 rounded-lg px-2 py-2.5 text-sm font-medium transition-colors sm:justify-start sm:px-3 ${activeTab === tab.id ? "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"}`}
+                  className={`h-auto w-full justify-center gap-3 rounded-xl border px-2 py-2.5 text-sm font-medium transition-colors sm:justify-start sm:px-3 ${
+                    activeTab === tab.id
+                      ? "border-primary/20 bg-primary/12 text-foreground shadow-xs hover:bg-primary/16"
+                      : "border-transparent text-muted-foreground hover:border-border/70 hover:bg-background hover:text-foreground"
+                  }`}
                 >
                   <DynamicIcon
                     name={tab.icon}
-                    className={`shrink-0 text-[1.125rem] ${activeTab === tab.id ? "text-primary" : ""}`}
+                    className={`shrink-0 text-[1.125rem] ${
+                      activeTab === tab.id ? "text-primary" : ""
+                    }`}
                   />
                   <span className="hidden truncate sm:inline">{tab.label}</span>
                 </Button>
@@ -127,15 +131,15 @@ export default function SettingsPage() {
         {/* Content Area */}
         <div className="flex-1 min-h-0 min-w-0 flex flex-col">
           <div
-            className="flex shrink-0 items-center justify-between border-b px-4 py-4 sm:px-6 sm:py-5"
+            className="flex shrink-0 items-center justify-between border-b border-border/70 bg-background/90 px-4 py-4 backdrop-blur sm:px-6 sm:py-5"
             data-tauri-drag-region
           >
             <h3 className="text-lg font-semibold sm:text-2xl">
               {tabs.find((t) => t.id === activeTab)?.label}
             </h3>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-            <div className="max-w-3xl space-y-6 text-base">
+          <div className="flex-1 overflow-y-auto bg-gradient-to-b from-background via-background to-muted/10 px-4 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+            <div className="mx-auto w-full max-w-5xl space-y-5 text-base sm:space-y-6">
               {ActiveComponent && <ActiveComponent />}
             </div>
           </div>

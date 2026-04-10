@@ -93,9 +93,9 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   },
   search: {
     custom_engines: [
-      { name: "Google", url_template: "https://google.com/search?q=%s" },
-      { name: "Bing", url_template: "https://bing.com/search?q=%s" },
-      { name: "GitHub", url_template: "https://github.com/search?q=%s" },
+      { name: "Google", url_template: "https://google.com/search?q=%s", show_in_menu: true },
+      { name: "Bing", url_template: "https://bing.com/search?q=%s", show_in_menu: true },
+      { name: "GitHub", url_template: "https://github.com/search?q=%s", show_in_menu: true },
     ],
   },
   translation: {

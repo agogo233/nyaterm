@@ -124,22 +124,16 @@ export default function TerminalContextMenu({
   );
 
   const doSearchOnline = useCallback(
-    (text: string, engine?: SearchEngine) => {
-      const searchSettings = appSettings?.search;
+    (text: string, engine: SearchEngine) => {
       let url = `https://www.google.com/search?q=${encodeURIComponent(text)}`;
 
-      if (engine?.url_template) {
+      if (engine.url_template) {
         url = engine.url_template.replace("%s", encodeURIComponent(text));
-      } else if (searchSettings && searchSettings.custom_engines.length > 0) {
-        const defaultEngine = searchSettings.custom_engines[0];
-        if (defaultEngine?.url_template) {
-          url = defaultEngine.url_template.replace("%s", encodeURIComponent(text));
-        }
       }
       openUrl(url);
       terminalRef.current?.focus();
     },
-    [appSettings?.search, terminalRef],
+    [terminalRef],
   );
 
   const doPasteSelected = useCallback(() => {
@@ -189,27 +183,29 @@ export default function TerminalContextMenu({
                   {t("terminalCtx.searchOnline")}
                 </ContextMenuSubTrigger>
                 <ContextMenuSubContent>
-                  {appSettings?.search?.custom_engines?.map((engine) => {
-                    let IconComponent = null;
-                    let color: string | undefined;
-                    if (engine.icon && SEARCH_ICONS[engine.icon]) {
-                      const iconDef = SEARCH_ICONS[engine.icon] as QuickIconDef;
-                      IconComponent = iconDef.icon;
-                      color = iconDef.color;
-                    }
+                  {appSettings?.search?.custom_engines
+                    ?.filter((engine) => engine.show_in_menu !== false)
+                    .map((engine) => {
+                      let IconComponent = null;
+                      let color: string | undefined;
+                      if (engine.icon && SEARCH_ICONS[engine.icon]) {
+                        const iconDef = SEARCH_ICONS[engine.icon] as QuickIconDef;
+                        IconComponent = iconDef.icon;
+                        color = iconDef.color;
+                      }
 
-                    return (
-                      <ContextMenuItem
-                        key={engine.name}
-                        onClick={() => doSearchOnline(ctxSelection.text, engine)}
-                      >
-                        {IconComponent && (
-                          <IconComponent className="text-[0.875rem] mr-2" style={{ color }} />
-                        )}
-                        {engine.name}
-                      </ContextMenuItem>
-                    );
-                  })}
+                      return (
+                        <ContextMenuItem
+                          key={engine.name}
+                          onClick={() => doSearchOnline(ctxSelection.text, engine)}
+                        >
+                          {IconComponent && (
+                            <IconComponent className="text-[0.875rem] mr-2" style={{ color }} />
+                          )}
+                          {engine.name}
+                        </ContextMenuItem>
+                      );
+                    })}
                 </ContextMenuSubContent>
               </ContextMenuSub>
               {translationProviders.length > 0 && (

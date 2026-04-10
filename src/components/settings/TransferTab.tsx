@@ -9,9 +9,11 @@ import { Label } from "@/components/ui/label";
 import { SelectItem } from "@/components/ui/select";
 import { useApp } from "@/context/AppContext";
 import {
+  SettingFieldGrid,
   SettingInput,
   SettingNumberInput,
   SettingRow,
+  SettingSection,
   SettingSelect,
   SettingSwitch,
 } from "./SettingFormItems";
@@ -46,12 +48,12 @@ function PathPickerInput({
   };
 
   return (
-    <div className="grid gap-3 min-[560px]:grid-cols-[minmax(10rem,15rem)_minmax(0,1fr)] min-[560px]:items-start">
-      <div className="min-w-0 space-y-1">
-        <Label className="font-medium text-sm">{label}</Label>
-        {desc && <p className="text-xs text-muted-foreground">{desc}</p>}
+    <div className="space-y-3">
+      <div className="min-w-0">
+        <Label className="text-sm font-medium leading-5">{label}</Label>
+        {desc && <p className="mt-1 text-xs leading-5 text-muted-foreground">{desc}</p>}
       </div>
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+      <div className="flex max-w-2xl flex-col gap-2 sm:flex-row">
         <Input
           className="flex-1 text-sm"
           placeholder={placeholder}
@@ -88,120 +90,130 @@ export function TransferTab() {
     updateAppSettings({ transfer: { ...transfer, ...patch } });
 
   return (
-    <div className="space-y-6">
-      <PathPickerInput
-        label={t("settings.downloadPath")}
-        desc={t("settings.downloadPathDesc")}
-        value={transfer.download_path}
-        placeholder={defaultDownloadDir}
-        onChange={(v) => update({ download_path: v })}
-      />
-
-      <SettingRow label={t("settings.askSaveLocation")} desc={t("settings.askSaveLocationDesc")}>
-        <SettingSwitch
-          checked={transfer.ask_save_location}
-          onChange={(v) => update({ ask_save_location: v })}
-        />
-      </SettingRow>
-
-      <PathPickerInput
-        label={t("settings.defaultEditor")}
-        desc={t("settings.defaultEditorDesc")}
-        value={transfer.default_editor}
-        placeholder={t("settings.defaultEditorDesc")}
-        onChange={(v) => update({ default_editor: v })}
-        directory={false}
-        filters={[
-          { name: "Executable", extensions: ["exe", "cmd", "bat", "com", "app", "sh", ""] },
-        ]}
-      />
-
-      <PathPickerInput
-        label={t("settings.recordingPath")}
-        desc={t("settings.recordingPathDesc")}
-        value={transfer.recording_path}
-        placeholder={defaultDownloadDir}
-        onChange={(v) => update({ recording_path: v })}
-      />
-
-      <div className="space-y-4">
-        <SettingNumberInput
-          label={t("settings.downloadThreads")}
-          desc={t("settings.downloadThreadsDesc")}
-          min={1}
-          max={10}
-          value={transfer.download_threads}
-          onChange={(v) => update({ download_threads: v })}
+    <div className="space-y-5">
+      <SettingSection contentClassName="space-y-5">
+        <PathPickerInput
+          label={t("settings.downloadPath")}
+          desc={t("settings.downloadPathDesc")}
+          value={transfer.download_path}
+          placeholder={defaultDownloadDir}
+          onChange={(v) => update({ download_path: v })}
         />
 
-        <SettingNumberInput
-          label={t("settings.uploadThreads")}
-          desc={t("settings.uploadThreadsDesc")}
-          min={1}
-          max={10}
-          value={transfer.upload_threads}
-          onChange={(v) => update({ upload_threads: v })}
+        <SettingRow label={t("settings.askSaveLocation")} desc={t("settings.askSaveLocationDesc")}>
+          <SettingSwitch
+            checked={transfer.ask_save_location}
+            onChange={(v) => update({ ask_save_location: v })}
+          />
+        </SettingRow>
+
+        <PathPickerInput
+          label={t("settings.defaultEditor")}
+          desc={t("settings.defaultEditorDesc")}
+          value={transfer.default_editor}
+          placeholder={t("settings.defaultEditorDesc")}
+          onChange={(v) => update({ default_editor: v })}
+          directory={false}
+          filters={[
+            { name: "Executable", extensions: ["exe", "cmd", "bat", "com", "app", "sh", ""] },
+          ]}
         />
-      </div>
 
-      <SettingSelect
-        label={t("settings.duplicateStrategy")}
-        desc={t("settings.duplicateStrategyDesc")}
-        value={transfer.duplicate_strategy}
-        onValueChange={(v) => update({ duplicate_strategy: v })}
-      >
-        <SelectItem value="overwrite">{t("settings.strategyOverwrite")}</SelectItem>
-        <SelectItem value="skip">{t("settings.strategySkip")}</SelectItem>
-        <SelectItem value="rename">{t("settings.strategyRename")}</SelectItem>
-        <SelectItem value="ask">{t("settings.strategyAsk")}</SelectItem>
-      </SettingSelect>
-
-      <SettingRow
-        label={t("settings.preserveTimestamps")}
-        desc={t("settings.preserveTimestampsDesc")}
-      >
-        <SettingSwitch
-          checked={transfer.preserve_timestamps}
-          onChange={(v) => update({ preserve_timestamps: v })}
+        <PathPickerInput
+          label={t("settings.recordingPath")}
+          desc={t("settings.recordingPathDesc")}
+          value={transfer.recording_path}
+          placeholder={defaultDownloadDir}
+          onChange={(v) => update({ recording_path: v })}
         />
-      </SettingRow>
+      </SettingSection>
 
-      <SettingRow
-        label={t("settings.resumeBrokenTransfer")}
-        desc={t("settings.resumeBrokenTransferDesc")}
-      >
-        <SettingSwitch
-          checked={transfer.resume_broken_transfer}
-          onChange={(v) => update({ resume_broken_transfer: v })}
-        />
-      </SettingRow>
+      <SettingSection contentClassName="space-y-5">
+        <SettingFieldGrid>
+          <SettingNumberInput
+            label={t("settings.downloadThreads")}
+            desc={t("settings.downloadThreadsDesc")}
+            min={1}
+            max={10}
+            value={transfer.download_threads}
+            controlClassName="max-w-sm"
+            onChange={(v) => update({ download_threads: v })}
+          />
 
-      <SettingInput
-        label={t("settings.defaultFilePermissions")}
-        desc={t("settings.defaultFilePermissionsDesc")}
-        placeholder="644"
-        value={transfer.default_file_permissions}
-        onChange={(e) => update({ default_file_permissions: e.target.value })}
-      />
+          <SettingNumberInput
+            label={t("settings.uploadThreads")}
+            desc={t("settings.uploadThreadsDesc")}
+            min={1}
+            max={10}
+            value={transfer.upload_threads}
+            controlClassName="max-w-sm"
+            onChange={(v) => update({ upload_threads: v })}
+          />
 
-      <SettingNumberInput
-        label={t("settings.maxTransferRetries")}
-        desc={t("settings.maxTransferRetriesDesc")}
-        min={0}
-        max={10}
-        value={transfer.max_transfer_retries}
-        onChange={(v) => update({ max_transfer_retries: v })}
-      />
+          <SettingSelect
+            label={t("settings.duplicateStrategy")}
+            desc={t("settings.duplicateStrategyDesc")}
+            value={transfer.duplicate_strategy}
+            controlClassName="max-w-sm"
+            onValueChange={(v) => update({ duplicate_strategy: v })}
+          >
+            <SelectItem value="overwrite">{t("settings.strategyOverwrite")}</SelectItem>
+            <SelectItem value="skip">{t("settings.strategySkip")}</SelectItem>
+            <SelectItem value="rename">{t("settings.strategyRename")}</SelectItem>
+            <SelectItem value="ask">{t("settings.strategyAsk")}</SelectItem>
+          </SettingSelect>
 
-      <SettingNumberInput
-        label={t("settings.transferBufferSize")}
-        desc={t("settings.transferBufferSizeDesc")}
-        min={8}
-        max={256}
-        step={8}
-        value={transfer.transfer_buffer_size}
-        onChange={(v) => update({ transfer_buffer_size: v })}
-      />
+          <SettingNumberInput
+            label={t("settings.maxTransferRetries")}
+            desc={t("settings.maxTransferRetriesDesc")}
+            min={0}
+            max={10}
+            value={transfer.max_transfer_retries}
+            controlClassName="max-w-sm"
+            onChange={(v) => update({ max_transfer_retries: v })}
+          />
+
+          <SettingNumberInput
+            label={t("settings.transferBufferSize")}
+            desc={t("settings.transferBufferSizeDesc")}
+            min={8}
+            max={256}
+            step={8}
+            value={transfer.transfer_buffer_size}
+            controlClassName="max-w-sm"
+            onChange={(v) => update({ transfer_buffer_size: v })}
+          />
+
+          <SettingInput
+            label={t("settings.defaultFilePermissions")}
+            desc={t("settings.defaultFilePermissionsDesc")}
+            placeholder="644"
+            value={transfer.default_file_permissions}
+            controlClassName="max-w-sm"
+            onChange={(e) => update({ default_file_permissions: e.target.value })}
+          />
+        </SettingFieldGrid>
+
+        <SettingRow
+          label={t("settings.preserveTimestamps")}
+          desc={t("settings.preserveTimestampsDesc")}
+        >
+          <SettingSwitch
+            checked={transfer.preserve_timestamps}
+            onChange={(v) => update({ preserve_timestamps: v })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.resumeBrokenTransfer")}
+          desc={t("settings.resumeBrokenTransferDesc")}
+        >
+          <SettingSwitch
+            checked={transfer.resume_broken_transfer}
+            onChange={(v) => update({ resume_broken_transfer: v })}
+          />
+        </SettingRow>
+      </SettingSection>
     </div>
   );
 }

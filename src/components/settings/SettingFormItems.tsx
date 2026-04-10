@@ -3,15 +3,88 @@ import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
 import { Select, SelectContent, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 
+type SettingMetaProps = {
+  label: string;
+  desc?: string;
+};
 
-function SettingMeta({ label, desc }: { label: string; desc?: string }) {
+type SettingFieldShellProps = SettingMetaProps & {
+  children: React.ReactNode;
+  className?: string;
+  controlClassName?: string;
+};
+
+type SettingSectionProps = {
+  title?: string;
+  desc?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  contentClassName?: string;
+};
+
+function SettingMeta({ label, desc }: SettingMetaProps) {
   return (
     <div className="min-w-0">
-      <Label className="font-medium text-sm">{label}</Label>
-      {desc && <p className="text-xs text-muted-foreground">{desc}</p>}
+      <Label className="text-sm font-medium leading-5">{label}</Label>
+      {desc && <p className="mt-1 text-xs leading-5 text-muted-foreground">{desc}</p>}
     </div>
   );
+}
+
+function SettingFieldShell({
+  label,
+  desc,
+  children,
+  className,
+  controlClassName,
+}: SettingFieldShellProps) {
+  return (
+    <div className={cn("space-y-3", className)}>
+      <SettingMeta label={label} desc={desc} />
+      <div className={cn("min-w-0 max-w-xl", controlClassName)}>{children}</div>
+    </div>
+  );
+}
+
+export function SettingSection({
+  title,
+  desc,
+  action,
+  children,
+  className,
+  contentClassName,
+}: SettingSectionProps) {
+  return (
+    <section className={cn("rounded-xl border border-border/70 bg-card/60 shadow-xs", className)}>
+      {(title || desc || action) && (
+        <div className="flex flex-col gap-3 border-b border-border/60 px-4 py-4 sm:px-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            {(title || desc) && (
+              <div className="min-w-0">
+                {title && <h3 className="text-sm font-semibold leading-5">{title}</h3>}
+                {desc && <p className="mt-1 text-xs leading-5 text-muted-foreground">{desc}</p>}
+              </div>
+            )}
+            {action && <div className="flex shrink-0 items-center">{action}</div>}
+          </div>
+        </div>
+      )}
+      <div className={cn("space-y-4 px-4 py-4 sm:px-5 sm:py-5", contentClassName)}>{children}</div>
+    </section>
+  );
+}
+
+export function SettingFieldGrid({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={cn("grid gap-4 lg:grid-cols-2 lg:gap-x-6", className)}>{children}</div>;
 }
 
 export function SettingRow({
@@ -24,11 +97,9 @@ export function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid gap-3 min-[560px]:grid-cols-[minmax(10rem,15rem)_minmax(0,1fr)] min-[560px]:items-start">
+    <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-x-6">
       <SettingMeta label={label} desc={desc} />
-      <div className="flex min-w-0 max-w-full items-center gap-2 justify-self-end min-[560px]:justify-end min-[560px]:justify-self-stretch">
-        {children}
-      </div>
+      <div className="flex min-w-0 items-center justify-start gap-2 sm:justify-end">{children}</div>
     </div>
   );
 }
@@ -36,15 +107,25 @@ export function SettingRow({
 export function SettingInput({
   label,
   desc,
+  fieldClassName,
+  controlClassName,
+  className,
   ...inputProps
-}: { label: string; desc?: string } & React.ComponentProps<typeof Input>) {
+}: {
+  label: string;
+  desc?: string;
+  fieldClassName?: string;
+  controlClassName?: string;
+} & React.ComponentProps<typeof Input>) {
   return (
-    <div className="grid gap-3 min-[560px]:grid-cols-[minmax(10rem,15rem)_minmax(0,1fr)] min-[560px]:items-start">
-      <SettingMeta label={label} desc={desc} />
-      <div className="min-w-0">
-        <Input className="w-full text-sm" {...inputProps} />
-      </div>
-    </div>
+    <SettingFieldShell
+      label={label}
+      desc={desc}
+      className={fieldClassName}
+      controlClassName={controlClassName}
+    >
+      <Input className={cn("w-full text-sm", className)} {...inputProps} />
+    </SettingFieldShell>
   );
 }
 
@@ -57,6 +138,8 @@ export function SettingNumberInput({
   max,
   step,
   className,
+  fieldClassName,
+  controlClassName,
 }: {
   label: string;
   desc?: string;
@@ -66,21 +149,25 @@ export function SettingNumberInput({
   max?: number;
   step?: number;
   className?: string;
+  fieldClassName?: string;
+  controlClassName?: string;
 }) {
   return (
-    <div className="grid gap-3 min-[560px]:grid-cols-[minmax(10rem,15rem)_minmax(0,1fr)] min-[560px]:items-start">
-      <SettingMeta label={label} desc={desc} />
-      <div className="min-w-0">
-        <NumberInput
-          value={value}
-          onChange={onChange}
-          min={min}
-          max={max}
-          step={step}
-          className={className}
-        />
-      </div>
-    </div>
+    <SettingFieldShell
+      label={label}
+      desc={desc}
+      className={fieldClassName}
+      controlClassName={controlClassName}
+    >
+      <NumberInput
+        value={value}
+        onChange={onChange}
+        min={min}
+        max={max}
+        step={step}
+        className={cn("w-full", className)}
+      />
+    </SettingFieldShell>
   );
 }
 
@@ -90,25 +177,33 @@ export function SettingSelect({
   value,
   onValueChange,
   children,
+  fieldClassName,
+  controlClassName,
+  triggerClassName,
 }: {
   label: string;
   desc?: string;
   value: string;
   onValueChange: (v: string) => void;
   children: React.ReactNode;
+  fieldClassName?: string;
+  controlClassName?: string;
+  triggerClassName?: string;
 }) {
   return (
-    <div className="grid gap-3 min-[560px]:grid-cols-[minmax(10rem,15rem)_minmax(0,1fr)] min-[560px]:items-start">
-      <SettingMeta label={label} desc={desc} />
-      <div className="min-w-0">
-        <Select value={value} onValueChange={onValueChange}>
-          <SelectTrigger className="w-full text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>{children}</SelectContent>
-        </Select>
-      </div>
-    </div>
+    <SettingFieldShell
+      label={label}
+      desc={desc}
+      className={fieldClassName}
+      controlClassName={controlClassName}
+    >
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className={cn("w-full text-sm", triggerClassName)}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>{children}</SelectContent>
+      </Select>
+    </SettingFieldShell>
   );
 }
 
