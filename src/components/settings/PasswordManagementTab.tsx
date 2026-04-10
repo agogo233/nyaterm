@@ -15,6 +15,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SavedPassword } from "@/types/global";
 
+interface PasswordManagementTabProps {
+  onCountChange?: (count: number) => void;
+}
+
 interface PasswordEditorProps {
   editHasPassword: boolean;
   editName: string;
@@ -77,7 +81,7 @@ function PasswordEditor({
   );
 }
 
-export function PasswordManagementTab() {
+export function PasswordManagementTab({ onCountChange }: PasswordManagementTabProps) {
   const { t } = useTranslation();
   const [passwords, setPasswords] = useState<SavedPassword[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -93,10 +97,11 @@ export function PasswordManagementTab() {
     try {
       const result = await invoke<SavedPassword[]>("get_saved_passwords");
       setPasswords(result);
+      onCountChange?.(result.length);
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [onCountChange]);
 
   useEffect(() => {
     loadPasswords();

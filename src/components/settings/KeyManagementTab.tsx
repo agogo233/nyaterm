@@ -16,6 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SshKey } from "@/types/global";
 
+interface KeyManagementTabProps {
+  onCountChange?: (count: number) => void;
+}
+
 interface KeyEditorProps {
   editHasKeyData: boolean;
   editKeyFileName: string;
@@ -97,7 +101,7 @@ function KeyEditor({
   );
 }
 
-export function KeyManagementTab() {
+export function KeyManagementTab({ onCountChange }: KeyManagementTabProps) {
   const { t } = useTranslation();
   const [keys, setKeys] = useState<SshKey[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -115,10 +119,11 @@ export function KeyManagementTab() {
     try {
       const result = await invoke<SshKey[]>("get_ssh_keys");
       setKeys(result);
+      onCountChange?.(result.length);
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [onCountChange]);
 
   useEffect(() => {
     loadKeys();
