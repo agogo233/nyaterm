@@ -1,10 +1,10 @@
 use super::auth::{authenticate_handle, authenticate_handle_with_otp, load_saved_ssh_config};
 use super::client::{build_client_config, connect_with_proxy, SshConfig, SshHandle, SshHandler};
 use super::io::{open_shell_channel, ssh_io_loop};
-use crate::error::AppResult;
 use crate::core::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
+use crate::error::AppResult;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc;

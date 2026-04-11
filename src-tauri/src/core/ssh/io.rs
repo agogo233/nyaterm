@@ -1,9 +1,9 @@
 use super::client::{SshHandle, SshHandler};
-use crate::error::{AppError, AppResult};
 use crate::core::ssh::osc::{self, OscStripper, ShellKind};
 use crate::core::{
     update_cwd_if_changed, RecordingManager, SessionCommand, SessionManager, SharedCwd,
 };
+use crate::error::{AppError, AppResult};
 use russh::{client, ChannelMsg};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};

@@ -65,8 +65,8 @@ pub fn generate_otp_code(app: tauri::AppHandle, id: String) -> AppResult<OtpCode
 pub fn import_otp_from_qr(path: String) -> AppResult<OtpEntry> {
     use crate::error::AppError;
 
-    let img = image::open(&path)
-        .map_err(|e| AppError::Config(format!("Failed to open image: {e}")))?;
+    let img =
+        image::open(&path).map_err(|e| AppError::Config(format!("Failed to open image: {e}")))?;
     let gray = img.to_luma8();
 
     let mut prepared = rqrr::PreparedImage::prepare(gray);
@@ -118,10 +118,7 @@ pub fn import_otp_from_qr(path: String) -> AppResult<OtpEntry> {
 }
 
 /// Shared logic for generating an OTP code from a stored entry.
-pub(crate) fn generate_otp_for_entry(
-    app: &tauri::AppHandle,
-    id: &str,
-) -> AppResult<OtpCodeResult> {
+pub(crate) fn generate_otp_for_entry(app: &tauri::AppHandle, id: &str) -> AppResult<OtpCodeResult> {
     let entry = config::load_otp_entry_by_id(app, id)?;
     let secret_str = entry
         .secret

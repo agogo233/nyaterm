@@ -1,6 +1,6 @@
 use crate::config;
-use crate::error::{AppError, AppResult};
 use crate::core::ssh::TunnelManager;
+use crate::error::{AppError, AppResult};
 use std::sync::Arc;
 use tauri::Manager;
 
