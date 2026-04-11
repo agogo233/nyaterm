@@ -4,12 +4,12 @@ import { execSync } from 'child_process';
 const pkg = JSON.parse(readFileSync('package.json', 'utf-8'));
 const version = pkg.version;
 
-// 同步到 tauri.conf.json
+// Change the version in tauri.conf.json
 const tauriConf = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf-8'));
 tauriConf.version = version;
 writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauriConf, null, 2) + '\n');
 
-// 同步到 Cargo.toml（仅替换 [package] 下的 version，不影响依赖项的 version）
+// Change the version in Cargo.toml
 let cargo = readFileSync('src-tauri/Cargo.toml', 'utf-8');
 cargo = cargo.replace(
     /(\[package\]\s*\nname\s*=\s*"[^"]*"\s*\n)version\s*=\s*"[^"]*"/,
@@ -17,17 +17,29 @@ cargo = cargo.replace(
 );
 writeFileSync('src-tauri/Cargo.toml', cargo);
 
-// 同步到 Cargo.lock（仅替换 dragonfly 包条目的 version）
-let cargoLock = readFileSync('src-tauri/Cargo.lock', 'utf-8');
-cargoLock = cargoLock.replace(
-    /(\[\[package\]\]\nname = "dragonfly"\n)version = "[^"]*"/,
-    `$1version = "${version}"`
-);
-writeFileSync('src-tauri/Cargo.lock', cargoLock);
+// Change the version in Cargo.lock
+function updateDragonflyVersion(version) {
+  const filePath = 'src-tauri/Cargo.lock';
+  const content = readFileSync(filePath, 'utf-8');
+
+  const pattern =
+    /(\[\[package\]\]\r?\nname = "dragonfly"\r?\nversion = ")([^"]*)(")/;
+
+  if (!pattern.test(content)) {
+    throw new Error(
+      'Could not find the version field for [[package]] name = "dragonfly" in src-tauri/Cargo.lock'
+    );
+  }
+
+  const updated = content.replace(pattern, `$1${version}$3`);
+
+  writeFileSync(filePath, updated, 'utf-8');
+}
+updateDragonflyVersion(version);
 
 console.log(`✅ Version synced to ${version}`);
 
-// 如果传入 --commit 参数，自动提交版本变更
+// If the --commit parameter is passed, automatically commit the version change
 if (process.argv.includes('--commit')) {
     const files = ['package.json', 'src-tauri/tauri.conf.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock'];
     execSync(`git add ${files.join(' ')}`, { stdio: 'inherit' });
