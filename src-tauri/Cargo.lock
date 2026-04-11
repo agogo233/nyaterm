@@ -1357,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "dragonfly"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "aes-gcm 0.10.3",
  "async-http-proxy",
