@@ -21,9 +21,8 @@ export function hexLuminance(hex: string): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
-/** 在 token 边界前后添加约束 */
 function requireTokenBoundary(pattern: string): string {
-  // 去除原有的 \b，避免冲突
+  // remove the \b to avoid conflicts
   const cleanPattern = pattern.replace(/\\b/g, "");
   return `(?<![\\w-])(?:${cleanPattern})(?![\\w-])`;
 }
