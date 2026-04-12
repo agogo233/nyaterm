@@ -49,6 +49,13 @@ export function useCommandHistory(
   };
 
   const dismissSuggestions = useCallback(() => {
+    if (
+      !showSuggestionsRef.current &&
+      suggestionsRef.current.length === 0 &&
+      selectedIndexRef.current === -1
+    ) {
+      return;
+    }
     showSuggestionsRef.current = false;
     suggestionsRef.current = [];
     selectedIndexRef.current = -1;
@@ -107,8 +114,8 @@ export function useCommandHistory(
       invoke("write_to_session", {
         sessionId,
         data: `${eraseChars + command}\r`,
-      }).catch(() => { });
-      invoke("add_command_history", { sessionId, command }).catch(() => { });
+      }).catch(() => {});
+      invoke("add_command_history", { sessionId, command }).catch(() => {});
       currentLineRef.current = "";
       shellIntegrationRef.current.fallbackNeedsDetection = true;
 
