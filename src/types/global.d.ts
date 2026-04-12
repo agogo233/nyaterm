@@ -112,6 +112,7 @@ export interface ConnectionAuth {
 /** Network block for connections. */
 export interface ConnectionNetwork {
   proxy_id?: string;
+  proxy_jump_id?: string;
 }
 
 /** Unified saved connection with type-discriminated config. */
@@ -393,10 +394,9 @@ export interface TranslateResult {
 
 export interface SecuritySettings {
   use_os_keyring: boolean;
-  require_master_password: boolean;
   enable_screen_lock: boolean;
   idle_lock_minutes: number;
-  lock_password?: string;
+  master_password?: string;
   host_key_policy: string;
 }
 
@@ -487,4 +487,5 @@ export interface FileEntry {
 
 export interface FileExplorerProps {
   activeSessionId: string | null;
+  activeSessionType: SessionType | null;
 }

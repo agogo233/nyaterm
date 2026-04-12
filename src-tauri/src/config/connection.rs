@@ -91,6 +91,8 @@ fn default_auth_mode() -> String {
 pub struct ConnectionNetwork {
     #[serde(default)]
     pub proxy_id: Option<String>,
+    #[serde(default)]
+    pub proxy_jump_id: Option<String>,
 }
 
 // ── Saved connection ────────────────────────────────────────────────────────

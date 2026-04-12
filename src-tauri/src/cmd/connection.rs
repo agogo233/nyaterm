@@ -22,6 +22,8 @@ pub fn save_connection(
     let target_id = connection.id.clone();
     let existing = cfg.connections.iter().find(|c| c.id == target_id);
 
+    validate_proxy_jump_config(&connection, &cfg.connections)?;
+
     // Preserve existing password_id if not provided
     if let Some(ref mut auth) = connection.auth {
         if auth.password_id.is_none() {
@@ -39,6 +41,151 @@ pub fn save_connection(
     config::save_config(&app, &cfg)?;
     let _ = app.emit("connections-changed", ());
     Ok(target_id)
+}
+
+fn validate_proxy_jump_config(
+    connection: &SavedConnection,
+    existing_connections: &[SavedConnection],
+) -> AppResult<()> {
+    let proxy_jump_id = connection
+        .network
+        .as_ref()
+        .and_then(|network| network.proxy_jump_id.as_deref());
+
+    let Some(proxy_jump_id) = proxy_jump_id else {
+        return Ok(());
+    };
+
+    if !matches!(connection.config, config::ConnectionType::Ssh { .. }) {
+        return Err(AppError::Config(
+            "ProxyJump is only supported for SSH connections".to_string(),
+        ));
+    }
+
+    if connection.id == proxy_jump_id {
+        return Err(AppError::Config(
+            "A connection cannot use itself as a jump host".to_string(),
+        ));
+    }
+
+    let jump_connection = existing_connections
+        .iter()
+        .find(|candidate| candidate.id == proxy_jump_id)
+        .ok_or_else(|| AppError::Config(format!("Jump host '{}' not found", proxy_jump_id)))?;
+
+    if !matches!(jump_connection.config, config::ConnectionType::Ssh { .. }) {
+        return Err(AppError::Config(
+            "Only SSH connections can be used as jump hosts".to_string(),
+        ));
+    }
+
+    if jump_connection
+        .network
+        .as_ref()
+        .and_then(|network| network.proxy_jump_id.as_deref())
+        .is_some()
+    {
+        return Err(AppError::Config(
+            "A connection that already uses a jump host cannot be selected as a jump host"
+                .to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_proxy_jump_config;
+    use crate::config::{ConnectionNetwork, ConnectionType, SavedConnection};
+
+    fn ssh_connection(id: &str, proxy_jump_id: Option<&str>) -> SavedConnection {
+        SavedConnection {
+            id: id.to_string(),
+            name: format!("SSH {id}"),
+            config: ConnectionType::Ssh {
+                host: "example.com".to_string(),
+                port: 22,
+                username: "root".to_string(),
+            },
+            group_id: None,
+            description: None,
+            sort_order: 0,
+            icon: None,
+            auth: None,
+            network: proxy_jump_id.map(|jump_id| ConnectionNetwork {
+                proxy_id: None,
+                proxy_jump_id: Some(jump_id.to_string()),
+            }),
+        }
+    }
+
+    fn telnet_connection(id: &str, proxy_jump_id: Option<&str>) -> SavedConnection {
+        SavedConnection {
+            id: id.to_string(),
+            name: format!("Telnet {id}"),
+            config: ConnectionType::Telnet {
+                host: "example.com".to_string(),
+                port: 23,
+            },
+            group_id: None,
+            description: None,
+            sort_order: 0,
+            icon: None,
+            auth: None,
+            network: proxy_jump_id.map(|jump_id| ConnectionNetwork {
+                proxy_id: None,
+                proxy_jump_id: Some(jump_id.to_string()),
+            }),
+        }
+    }
+
+    #[test]
+    fn rejects_proxy_jump_on_non_ssh_connections() {
+        let connection = telnet_connection("telnet-1", Some("jump-1"));
+        let jump = ssh_connection("jump-1", None);
+
+        let error = validate_proxy_jump_config(&connection, &[jump]).unwrap_err();
+
+        assert!(error.to_string().contains("ProxyJump is only supported"));
+    }
+
+    #[test]
+    fn rejects_self_reference() {
+        let connection = ssh_connection("self", Some("self"));
+
+        let error = validate_proxy_jump_config(&connection, &[]).unwrap_err();
+
+        assert!(error.to_string().contains("cannot use itself"));
+    }
+
+    #[test]
+    fn rejects_non_ssh_jump_hosts() {
+        let connection = ssh_connection("target", Some("jump"));
+        let jump = telnet_connection("jump", None);
+
+        let error = validate_proxy_jump_config(&connection, &[jump]).unwrap_err();
+
+        assert!(error.to_string().contains("Only SSH connections"));
+    }
+
+    #[test]
+    fn rejects_multi_hop_jump_hosts() {
+        let connection = ssh_connection("target", Some("jump"));
+        let jump = ssh_connection("jump", Some("another"));
+
+        let error = validate_proxy_jump_config(&connection, &[jump]).unwrap_err();
+
+        assert!(error.to_string().contains("already uses a jump host"));
+    }
+
+    #[test]
+    fn accepts_single_hop_ssh_jump_hosts() {
+        let connection = ssh_connection("target", Some("jump"));
+        let jump = ssh_connection("jump", None);
+
+        validate_proxy_jump_config(&connection, &[jump]).unwrap();
+    }
 }
 
 #[tauri::command]
