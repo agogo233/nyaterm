@@ -3,6 +3,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { BiServer } from "react-icons/bi";
+import { GrUpgrade } from "react-icons/gr";
 import {
   MdAdd,
   MdArticle,
@@ -27,20 +29,21 @@ import {
   MdZoomIn,
   MdZoomOut,
 } from "react-icons/md";
-import { BiServer } from "react-icons/bi";
 import packageJson from "../../../package.json";
 import { useApp } from "../../context/AppContext";
 import { useTheme } from "../../context/ThemeContext";
 import { MOD } from "../../hooks/useGlobalShortcuts";
 import { AVAILABLE_LANGUAGES } from "../../i18n";
-import { getActivePane, getTabDisplayName } from "../../lib/workspaceTabs";
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
   decreaseTerminalFontSize,
   increaseTerminalFontSize,
 } from "../../lib/terminalFontSize";
+import { getActivePane, getTabDisplayName } from "../../lib/workspaceTabs";
+import type { SavedConnection, Tab } from "../../types/global";
 import DragonflyLogo from "../DragonflyLogo";
 import ImportDialog from "../dialog/connections/ImportDialog";
+import { SYSTEM_ICONS } from "../icons";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,9 +54,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../ui/alert-dialog";
-import type { SavedConnection, Tab } from "../../types/global";
-
-import { SYSTEM_ICONS } from "../icons";
 import {
   Menubar,
   MenubarCheckboxItem,
@@ -82,6 +82,7 @@ const iconMap: Record<string, React.ElementType> = {
   computer: MdComputer,
   menu_book: MdMenuBook,
   update: MdUpdate,
+  upgrade: GrUpgrade,
   article: MdArticle,
   info: MdInfo,
   menu: MdMenu,
@@ -101,6 +102,10 @@ interface HeaderProps {
   onToggleLeft?: () => void;
   onToggleRight?: () => void;
   onAbout: () => void;
+  onCheckForUpdates: () => void;
+  hasUpdate?: boolean;
+  showUpdateDot?: boolean;
+  onHelpMenuOpen?: () => void;
   activeTab?: Tab | null;
   savedConnections?: SavedConnection[];
 }
@@ -121,6 +126,10 @@ export default function Header({
   onToggleLeft,
   onToggleRight,
   onAbout,
+  onCheckForUpdates,
+  hasUpdate,
+  showUpdateDot,
+  onHelpMenuOpen,
   activeTab,
   savedConnections,
 }: HeaderProps) {
@@ -256,8 +265,8 @@ export default function Header({
       },
       {
         label: t("menu.checkForUpdates"),
-        icon: "update",
-        action: () => openUrl(`${packageJson.homepage}/releases`),
+        icon: hasUpdate ? "upgrade" : "update",
+        action: onCheckForUpdates,
       },
       {
         label: t("menu.viewLogs"),
@@ -324,9 +333,17 @@ export default function Header({
         }}
       >
         {item.icon && (
-          <DynamicIcon name={item.icon} className="text-[1rem] mr-2 text-[var(--df-text-muted)]" />
+          <DynamicIcon
+            name={item.icon}
+            className={`text-[1rem] mr-2 ${item.icon === "upgrade" ? "text-green-500" : "text-[var(--df-text-muted)]"}`}
+          />
         )}
         <span className="flex-1">{item.label}</span>
+        {item.icon === "upgrade" && (
+          <span className="ml-2 text-[10px] font-medium text-green-500">
+            {t("updater.hasNewVersion")}
+          </span>
+        )}
         {item.shortcut && <MenubarShortcut>{item.shortcut}</MenubarShortcut>}
       </MenubarItem>
     );
@@ -373,8 +390,17 @@ export default function Header({
         <Menubar className="border-none bg-transparent h-auto p-0 gap-1 shadow-none">
           {menuKeys.map(({ key, label }) => (
             <MenubarMenu key={key}>
-              <MenubarTrigger className="cursor-default px-2.5 py-1 text-xs font-medium rounded-md transition-colors text-[var(--df-text-muted)] data-[state=open]:text-[var(--df-primary)] data-[state=open]:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:text-[var(--df-text-muted)] data-[state=open]:focus:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] data-[state=open]:focus:text-[var(--df-primary)] outline-none">
+              <MenubarTrigger
+                className="relative cursor-default px-2.5 py-1 text-xs font-medium rounded-md transition-colors text-[var(--df-text-muted)] data-[state=open]:text-[var(--df-primary)] data-[state=open]:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:text-[var(--df-text-muted)] data-[state=open]:focus:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] data-[state=open]:focus:text-[var(--df-primary)] outline-none"
+                {...(key === "help" && showUpdateDot ? { onClick: onHelpMenuOpen } : {})}
+              >
                 {label}
+                {key === "help" && showUpdateDot && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                  </span>
+                )}
               </MenubarTrigger>
               <MenubarContent align="start" className="min-w-[180px]">
                 {menus[key].map((item, idx) => renderMenuItem(item, idx))}
@@ -401,7 +427,8 @@ export default function Header({
                   </span>
                 )}
                 <span className="text-xs font-medium truncate">
-                  {activeConnection.name} — {activeConnection.username}@{activeConnection.host}:{activeConnection.port}
+                  {activeConnection.name} — {activeConnection.username}@{activeConnection.host}:
+                  {activeConnection.port}
                 </span>
               </>
             ) : activePane.type === "SSH" ? (
