@@ -5,13 +5,16 @@ import { useTranslation } from "react-i18next";
 import {
   MdAdd,
   MdBolt,
+  MdClose,
   MdDelete,
   MdEdit,
+  MdFilterList,
   MdKeyboardReturn,
   MdPushPin,
   MdSearch,
   MdTerminal,
 } from "react-icons/md";
+import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -190,62 +193,91 @@ function QuickCommands({ onSend }: QuickCommandsProps) {
     return filtered;
   }, [commands, search, selectedCategory]);
 
+  const searchQuery = search.trim();
+  const hasActiveFilters = searchQuery.length > 0 || selectedCategory !== "all";
+  const headerMetaText =
+    hasActiveFilters && commands.length > 0
+      ? `${filteredCommands.length}/${commands.length}`
+      : `${commands.length}`;
+  const headerControlClassName =
+    "h-7 border-0 bg-[var(--df-bg-hover)] py-1 text-xs text-[var(--df-text)] shadow-none";
+
   return (
-    <div className="h-full flex flex-col" style={{ backgroundColor: "var(--df-bg-panel)" }}>
-      {/* Toolbar */}
-      <div
-        className="flex items-center gap-2 px-2 py-1 border-b shrink-0"
-        style={{ borderColor: "var(--df-border)" }}
-      >
-        <MdBolt className="text-[0.9375rem] shrink-0" style={{ color: "var(--df-text-dimmed)" }} />
+    <TooltipProvider delayDuration={500}>
+      <div className="h-full flex flex-col" style={{ backgroundColor: "var(--df-bg-panel)" }}>
+        <PanelHeader
+          title={t("panel.quickCommands")}
+          meta={
+            commands.length > 0 ? (
+              <span className="text-[0.6875rem]" style={{ color: "var(--df-text-dimmed)" }}>
+                {headerMetaText}
+              </span>
+            ) : null
+          }
+          actions={
+            <>
+              <div className="relative w-[9rem] shrink-0 transition-colors focus-within:text-[var(--df-primary)] text-[var(--df-text-dimmed)]">
+                <MdSearch className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[0.875rem]" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t("quickCommands.search")}
+                  className={`${headerControlClassName} pl-7 pr-7 placeholder:text-[var(--df-text-dimmed)] focus-visible:ring-1 focus-visible:ring-[var(--df-primary)] focus-visible:bg-transparent`}
+                />
+                {search && (
+                  <button
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 transition-colors hover:text-[var(--df-text)] text-[var(--df-text-dimmed)]"
+                    onClick={() => setSearch("")}
+                  >
+                    <MdClose className="text-[0.75rem]" />
+                  </button>
+                )}
+              </div>
 
-        {/* Search */}
-        <div className="relative shrink-0 flex-1 sm:flex-none">
-          <Input
-            className="w-full sm:w-32 focus-visible:w-full placeholder:text-xs sm:focus-visible:w-64 bg-transparent h-6 pl-6 pr-2 py-0 border-input transition-all duration-300 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
-            placeholder={t("quickCommands.search")}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <MdSearch className="text-[0.6875rem] absolute left-1.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-        </div>
+              <div className="relative w-[8.5rem] shrink-0 transition-colors focus-within:text-[var(--df-primary)] text-[var(--df-text-dimmed)]">
+                <MdFilterList className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 text-[0.875rem]" />
+                <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                  <SelectTrigger
+                    className={`${headerControlClassName} w-full pl-7 pr-2 hover:bg-[color-mix(in_srgb,var(--df-bg-hover)_70%,var(--df-bg-panel))] focus:ring-1 focus:ring-[var(--df-primary)] [&_span]:leading-none`}
+                  >
+                    <SelectValue placeholder={t("quickCommands.allCategories")} />
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    <SelectItem value="all" className="text-xs">
+                      {t("quickCommands.allCategories")}
+                    </SelectItem>
+                    {allCategories.map((category) => (
+                      <SelectItem key={category.id} value={category.id} className="text-xs">
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="uncategorized" className="text-xs">
+                      {t("quickCommands.uncategorized")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-        <div className="flex-1 hidden sm:block" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-6 w-6 shrink-0 rounded-md p-0 transition-colors hover:bg-[var(--df-bg-hover)]"
+                    style={{ color: "var(--df-text-muted)" }}
+                    aria-label={t("quickCommands.addCommand")}
+                    onClick={() => openQuickCommand()}
+                  >
+                    <MdAdd className="text-[1.05rem]" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t("quickCommands.addCommand")}</TooltipContent>
+              </Tooltip>
+            </>
+          }
+        />
 
-        {/* Categories */}
-        <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-          <SelectTrigger className="h-6 text-[0.6875rem] w-auto border min-w-[100px] max-w-[150px] shadow-none py-0 px-2 rounded bg-transparent focus:ring-0">
-            <SelectValue placeholder={t("quickCommands.allCategories")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-[0.6875rem]">
-              {t("quickCommands.allCategories")}
-            </SelectItem>
-            {allCategories.map((c) => (
-              <SelectItem key={c.id} value={c.id} className="text-[0.6875rem]">
-                {c.name}
-              </SelectItem>
-            ))}
-            <SelectItem value="uncategorized" className="text-[0.6875rem]">
-              {t("quickCommands.uncategorized")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-
-        {/* Add Button */}
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="bg-muted/50 hover:bg-muted text-foreground transition-colors"
-          title={t("quickCommands.addCommand")}
-          onClick={() => openQuickCommand()}
-        >
-          <MdAdd className="text-[0.875rem]" />
-        </Button>
-      </div>
-
-      {/* Commands List */}
-      <TooltipProvider delayDuration={500}>
+        {/* Commands List */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden terminal-scroll p-1.5">
           <div className="flex flex-wrap gap-1.5 content-start">
             {filteredCommands.length === 0 ? (
@@ -387,19 +419,19 @@ function QuickCommands({ onSend }: QuickCommandsProps) {
             )}
           </div>
         </div>
-      </TooltipProvider>
-      {promptCmd && (
-        <VariablePromptDialog
-          open={!!promptCmd}
-          command={promptCmd.command}
-          variables={promptVars}
-          onCancel={() => {
-            setPromptCmd(null);
-          }}
-          onSubmit={handlePromptSubmit}
-        />
-      )}
-    </div>
+        {promptCmd && (
+          <VariablePromptDialog
+            open={!!promptCmd}
+            command={promptCmd.command}
+            variables={promptVars}
+            onCancel={() => {
+              setPromptCmd(null);
+            }}
+            onSubmit={handlePromptSubmit}
+          />
+        )}
+      </div>
+    </TooltipProvider>
   );
 }
 
