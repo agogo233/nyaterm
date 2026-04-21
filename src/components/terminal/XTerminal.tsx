@@ -1,4 +1,3 @@
-import { invoke } from "@/lib/invoke";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { FitAddon } from "@xterm/addon-fit";
@@ -16,6 +15,7 @@ import { useShellIntegration } from "@/hooks/useShellIntegration";
 import { useTerminalSearch } from "@/hooks/useTerminalSearch";
 import { useTerminalSettings } from "@/hooks/useTerminalSettings";
 import { readClipboardText } from "@/lib/clipboard";
+import { invoke } from "@/lib/invoke";
 import { hexLuminance } from "@/lib/keywordHighlightPresets";
 import { logger } from "@/lib/logger";
 import {
@@ -29,6 +29,7 @@ import {
   canSuggestFromTracker,
   createTerminalInputState,
   getTrackedCommand,
+  syncTerminalInputFromRenderedLine,
 } from "@/lib/terminalInputTracker";
 import { XTERM_PERFORMANCE_CONFIG } from "@/lib/xtermPerformance";
 import ActionLinkMenu from "./ActionLinkMenu";
@@ -171,17 +172,17 @@ export default function XTerminal({
 
   const applySuggestion = useCallback(
     (command: string, execute: boolean) => {
-      const eraseChars = "\x7f".repeat(inputStateRef.current.value.length);
-      void sendSessionInput(
-        sessionId,
-        execute ? `${eraseChars + command}\r` : eraseChars + command,
-        {
-          preview: execute
-            ? { kind: "replace-and-execute", value: command }
-            : { kind: "replace", value: command },
-          registerSubmission: execute ? command : null,
-        },
-      ).catch(() => {});
+      const trackedState = inputStateRef.current;
+      const replaceCurrentLine = trackedState.lineRewriteRequired;
+      const input = replaceCurrentLine
+        ? `\u0005\u0015${command}`
+        : `${"\x7f".repeat(trackedState.value.length)}${command}`;
+      void sendSessionInput(sessionId, execute ? `${input}\r` : input, {
+        preview: execute
+          ? { kind: "replace-and-execute", value: command }
+          : { kind: "replace", value: command },
+        registerSubmission: execute ? command : null,
+      }).catch(() => {});
     },
     [sessionId],
   );
@@ -366,6 +367,42 @@ export default function XTerminal({
     fitAddonRef.current = fitAddon;
     inputStateRef.current = createTerminalInputState();
     const isTerminalAlive = () => !disposed && terminalRef.current === terminal;
+    const readRenderedInputLine = (): string | null => {
+      const buffer = terminal.buffer.active;
+      const absoluteY = buffer.baseY + buffer.cursorY;
+      const currentLine = buffer.getLine(absoluteY);
+      if (!currentLine) return null;
+
+      let startY = absoluteY;
+      while (startY > 0) {
+        const line = buffer.getLine(startY);
+        if (!line?.isWrapped) break;
+        startY -= 1;
+      }
+
+      let rendered = "";
+      for (let y = startY; y < absoluteY; y += 1) {
+        const line = buffer.getLine(y);
+        if (!line) break;
+        rendered += line.translateToString(false, 0, terminal.cols);
+      }
+
+      rendered += currentLine.translateToString(false, 0, buffer.cursorX);
+      return rendered;
+    };
+    const syncInputStateFromTerminalBuffer = () => {
+      if (inputStateRef.current.desyncReason !== "tab" || !inputStateRef.current.desynced) {
+        return false;
+      }
+
+      const rendered = readRenderedInputLine();
+      if (rendered === null) {
+        return false;
+      }
+
+      inputStateRef.current = syncTerminalInputFromRenderedLine(rendered);
+      return true;
+    };
     const syncSuggestionsWithInputState = () => {
       if (canSuggestFromTracker(inputStateRef.current)) {
         triggerSearch();
@@ -489,6 +526,7 @@ export default function XTerminal({
     });
 
     const writeParsedDisposable = terminal.onWriteParsed(() => {
+      syncInputStateFromTerminalBuffer();
       const terminalSettings = appSettingsRef.current?.terminal;
       if (
         performanceModeRef.current !== "overloaded" &&
@@ -834,6 +872,7 @@ export default function XTerminal({
         }
       }
 
+      syncInputStateFromTerminalBuffer();
       const command = data === "\r" ? getTrackedCommand(inputStateRef.current) : "";
       inputStateRef.current = applyTerminalInputData(inputStateRef.current, data);
       syncSuggestionsWithInputState();

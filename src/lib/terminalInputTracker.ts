@@ -1,10 +1,12 @@
-import { sanitizeTerminalCommand } from "@/lib/terminalCommand";
 import type { SessionInputPreview } from "@/lib/sessionInput";
+import { extractCommandFromRenderedLine, sanitizeTerminalCommand } from "@/lib/terminalCommand";
 
 export interface TerminalInputState {
   value: string;
   cursor: number;
   desynced: boolean;
+  desyncReason: "tab" | "terminal" | null;
+  lineRewriteRequired: boolean;
   multiline: boolean;
 }
 
@@ -13,6 +15,8 @@ export function createTerminalInputState(): TerminalInputState {
     value: "",
     cursor: 0,
     desynced: false,
+    desyncReason: null,
+    lineRewriteRequired: false,
     multiline: false,
   };
 }
@@ -22,6 +26,8 @@ function resetState(multiline = false): TerminalInputState {
     value: "",
     cursor: 0,
     desynced: false,
+    desyncReason: null,
+    lineRewriteRequired: false,
     multiline,
   };
 }
@@ -81,10 +87,16 @@ function deletePreviousWord(state: TerminalInputState): TerminalInputState {
   };
 }
 
-function markDesynced(state: TerminalInputState, multiline = false): TerminalInputState {
+function markDesynced(
+  state: TerminalInputState,
+  reason: "tab" | "terminal",
+  multiline = false,
+): TerminalInputState {
   return {
     ...state,
     desynced: true,
+    desyncReason: reason,
+    lineRewriteRequired: state.lineRewriteRequired || reason === "tab",
     multiline,
   };
 }
@@ -94,6 +106,20 @@ function replaceValue(value: string): TerminalInputState {
     value,
     cursor: value.length,
     desynced: false,
+    desyncReason: null,
+    lineRewriteRequired: false,
+    multiline: false,
+  };
+}
+
+export function syncTerminalInputFromRenderedLine(renderedLine: string): TerminalInputState {
+  const value = extractCommandFromRenderedLine(renderedLine);
+  return {
+    value,
+    cursor: value.length,
+    desynced: false,
+    desyncReason: null,
+    lineRewriteRequired: false,
     multiline: false,
   };
 }
@@ -141,7 +167,7 @@ export function applyTerminalInputData(
     case "\x1b[3~":
       return deleteRight(state);
     case "\t":
-      return markDesynced(state);
+      return markDesynced(state, "tab");
   }
 
   if (data.includes("\n") || data.includes("\r")) {
@@ -149,11 +175,26 @@ export function applyTerminalInputData(
   }
 
   if (data.startsWith("\x1b")) {
-    return markDesynced(state);
+    return markDesynced(state, "terminal");
   }
 
   if (/[\x00-\x1f\x7f]/u.test(data)) {
-    return markDesynced(state);
+    return markDesynced(state, "terminal");
+  }
+
+  if (state.desynced && state.desyncReason === "tab") {
+    // Tab completion can change the visible prompt text without a reliable echo we can parse.
+    // Once the user resumes typing plain text, treat the tracker as synchronized again so
+    // suggestions recover for the current line instead of staying disabled until Enter/Ctrl+C.
+    return insertText(
+      {
+        ...state,
+        desynced: false,
+        desyncReason: null,
+        lineRewriteRequired: true,
+      },
+      data,
+    );
   }
 
   return insertText(state, data);
