@@ -29,7 +29,6 @@ import {
   canSuggestFromTracker,
   createTerminalInputState,
   getTrackedCommand,
-  syncTerminalInputFromRenderedLine,
 } from "@/lib/terminalInputTracker";
 import { XTERM_PERFORMANCE_CONFIG } from "@/lib/xtermPerformance";
 import ActionLinkMenu from "./ActionLinkMenu";
@@ -367,42 +366,6 @@ export default function XTerminal({
     fitAddonRef.current = fitAddon;
     inputStateRef.current = createTerminalInputState();
     const isTerminalAlive = () => !disposed && terminalRef.current === terminal;
-    const readRenderedInputLine = (): string | null => {
-      const buffer = terminal.buffer.active;
-      const absoluteY = buffer.baseY + buffer.cursorY;
-      const currentLine = buffer.getLine(absoluteY);
-      if (!currentLine) return null;
-
-      let startY = absoluteY;
-      while (startY > 0) {
-        const line = buffer.getLine(startY);
-        if (!line?.isWrapped) break;
-        startY -= 1;
-      }
-
-      let rendered = "";
-      for (let y = startY; y < absoluteY; y += 1) {
-        const line = buffer.getLine(y);
-        if (!line) break;
-        rendered += line.translateToString(false, 0, terminal.cols);
-      }
-
-      rendered += currentLine.translateToString(false, 0, buffer.cursorX);
-      return rendered;
-    };
-    const syncInputStateFromTerminalBuffer = () => {
-      if (inputStateRef.current.desyncReason !== "tab" || !inputStateRef.current.desynced) {
-        return false;
-      }
-
-      const rendered = readRenderedInputLine();
-      if (rendered === null) {
-        return false;
-      }
-
-      inputStateRef.current = syncTerminalInputFromRenderedLine(rendered);
-      return true;
-    };
     const syncSuggestionsWithInputState = () => {
       if (canSuggestFromTracker(inputStateRef.current)) {
         triggerSearch();
@@ -526,7 +489,6 @@ export default function XTerminal({
     });
 
     const writeParsedDisposable = terminal.onWriteParsed(() => {
-      syncInputStateFromTerminalBuffer();
       const terminalSettings = appSettingsRef.current?.terminal;
       if (
         performanceModeRef.current !== "overloaded" &&
@@ -872,7 +834,6 @@ export default function XTerminal({
         }
       }
 
-      syncInputStateFromTerminalBuffer();
       const command = data === "\r" ? getTrackedCommand(inputStateRef.current) : "";
       inputStateRef.current = applyTerminalInputData(inputStateRef.current, data);
       syncSuggestionsWithInputState();

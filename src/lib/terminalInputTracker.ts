@@ -1,5 +1,5 @@
 import type { SessionInputPreview } from "@/lib/sessionInput";
-import { extractCommandFromRenderedLine, sanitizeTerminalCommand } from "@/lib/terminalCommand";
+import { sanitizeTerminalCommand } from "@/lib/terminalCommand";
 
 export interface TerminalInputState {
   value: string;
@@ -102,18 +102,6 @@ function markDesynced(
 }
 
 function replaceValue(value: string): TerminalInputState {
-  return {
-    value,
-    cursor: value.length,
-    desynced: false,
-    desyncReason: null,
-    lineRewriteRequired: false,
-    multiline: false,
-  };
-}
-
-export function syncTerminalInputFromRenderedLine(renderedLine: string): TerminalInputState {
-  const value = extractCommandFromRenderedLine(renderedLine);
   return {
     value,
     cursor: value.length,

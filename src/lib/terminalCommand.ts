@@ -32,15 +32,6 @@ function stripKnownPromptPrefix(input: string): string {
   return input;
 }
 
-/** Remove known shell prompt prefixes while preserving the command text exactly as rendered. */
-export function extractCommandFromRenderedLine(input: string): string {
-  if (!input) {
-    return "";
-  }
-
-  return stripKnownPromptPrefix(stripLeadingEnvPrefixes(input));
-}
-
 /** Remove known shell prompt prefixes so command parsing stays stable across shells. */
 export function sanitizeTerminalCommand(input: string): string {
   const trimmed = input.trim();
@@ -48,6 +39,6 @@ export function sanitizeTerminalCommand(input: string): string {
     return "";
   }
 
-  const withoutPrompt = extractCommandFromRenderedLine(trimmed);
+  const withoutPrompt = stripKnownPromptPrefix(stripLeadingEnvPrefixes(trimmed));
   return withoutPrompt.trim();
 }
