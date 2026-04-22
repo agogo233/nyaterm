@@ -1,17 +1,14 @@
 import { listen } from "@tauri-apps/api/event";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   MdCheckCircle,
   MdCloudSync,
+  MdContentCopy,
   MdError,
+  MdExpandLess,
+  MdExpandMore,
   MdFilterList,
   MdHistory,
   MdHourglassEmpty,
@@ -21,6 +18,7 @@ import {
 import { toast } from "sonner";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DEFAULT_CLOUD_SYNC_STATUS,
   formatCloudProvider,
@@ -31,19 +29,11 @@ import {
 import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
 import { cn } from "@/lib/utils";
-import type {
-  CloudConflictPreview,
-  CloudSyncHistoryEntry,
-  CloudSyncStatus,
-} from "@/types/global";
-
-// ─── types ────────────────────────────────────────────────────────────────────
+import type { CloudConflictPreview, CloudSyncHistoryEntry, CloudSyncStatus } from "@/types/global";
 
 type SyncState = "idle" | "running" | "success" | "failed" | "conflict" | "disabled";
 type EntryKind = "sync" | "backup";
 type EntryStatus = "success" | "failed" | "conflict" | "running";
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
 
 function stateConfig(state: SyncState): {
   icon: React.ReactNode;
@@ -81,7 +71,7 @@ function stateConfig(state: SyncState): {
         dot: "bg-muted-foreground/40",
         badge: "bg-muted/60 text-muted-foreground ring-1 ring-border/50",
       };
-    default: // idle
+    default:
       return {
         icon: <MdHourglassEmpty />,
         dot: "bg-muted-foreground/30",
@@ -116,24 +106,185 @@ function kindBadge(kind: string): string {
   }
 }
 
-// ─── sub-components ───────────────────────────────────────────────────────────
+function overviewTone(status: "total" | "success" | "failed" | "conflict") {
+  switch (status) {
+    case "success":
+      return "border-emerald-500/25 bg-emerald-500/8";
+    case "failed":
+      return "border-red-500/25 bg-red-500/8";
+    case "conflict":
+      return "border-amber-500/25 bg-amber-500/8";
+    default:
+      return "border-border/60 bg-card/45";
+  }
+}
+
+function historyCardTone(status: string) {
+  switch (status) {
+    case "failed":
+      return "border-red-500/20 bg-red-500/5 hover:border-red-500/35";
+    case "conflict":
+      return "border-amber-500/20 bg-amber-500/5 hover:border-amber-500/35";
+    default:
+      return "border-border/50 bg-card/40 hover:border-border/80 hover:bg-card/60";
+  }
+}
+
+function normalizeHistoryMessage(value?: string | null) {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function extractFirstSentence(value: string) {
+  const normalized = normalizeHistoryMessage(value);
+  if (!normalized) return "";
+  const match = normalized.match(/^(.{1,120}?[.!?])(?:\s|$)/);
+  return match?.[1]?.trim() ?? "";
+}
+
+function extractHttpStatus(value: string) {
+  const normalized = normalizeHistoryMessage(value);
+  const match = normalized.match(/\b([45]\d{2}\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\b/);
+  return match?.[1] ?? null;
+}
+
+function buildHistorySummary(
+  entry: CloudSyncHistoryEntry,
+  kindLabels: Record<string, string>,
+  statusLabels: Record<string, string>,
+  t: TFunction,
+) {
+  const normalized = normalizeHistoryMessage(entry.message);
+  if (!normalized) {
+    return t("settings.historySummaryKindStatus", {
+      kind: kindLabels[entry.kind as EntryKind] ?? entry.kind,
+      status: statusLabels[entry.status as EntryStatus] ?? entry.status,
+    });
+  }
+
+  const firstSentence = extractFirstSentence(entry.message);
+  if (firstSentence && firstSentence.length <= 110) {
+    return firstSentence;
+  }
+
+  if (!entry.message.includes("\n") && normalized.length <= 110) {
+    return normalized;
+  }
+
+  const genericSummary = t("settings.historySummaryKindStatus", {
+    kind: kindLabels[entry.kind as EntryKind] ?? entry.kind,
+    status: statusLabels[entry.status as EntryStatus] ?? entry.status,
+  });
+  const httpStatus = extractHttpStatus(entry.message);
+  if (!httpStatus) {
+    return genericSummary;
+  }
+
+  return t("settings.historySummaryWithStatus", {
+    summary: genericSummary,
+    status: httpStatus,
+  });
+}
 
 interface StatRowProps {
   label: string;
   value: string;
 }
+
 function StatRow({ label, value }: StatRowProps) {
   return (
-    <div className="flex items-baseline justify-between gap-2 min-w-0">
-      <span className="shrink-0 text-muted-foreground/70">{label}</span>
-      <span className="truncate text-right font-mono text-[0.625rem] text-foreground/80">
-        {value}
-      </span>
+    <div className="rounded-lg border border-border/40 bg-muted/15 px-3 py-2.5">
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+        {label}
+      </div>
+      <div className="mt-1 truncate text-sm font-medium text-foreground/85">{value}</div>
     </div>
   );
 }
 
-// ─── main component ───────────────────────────────────────────────────────────
+interface OverviewCardProps {
+  label: string;
+  value: number;
+  tone: "total" | "success" | "failed" | "conflict";
+}
+
+function OverviewCard({ label, value, tone }: OverviewCardProps) {
+  return (
+    <div className={cn("rounded-xl border px-3 py-3", overviewTone(tone))}>
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground/75">
+        {label}
+      </div>
+      <div className="mt-1 text-base font-semibold text-foreground/90">{value}</div>
+    </div>
+  );
+}
+
+interface FilterChipProps {
+  active: boolean;
+  count: number;
+  label: string;
+  onClick: () => void;
+}
+
+function FilterChip({ active, count, label, onClick }: FilterChipProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+        active
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:bg-muted/55 hover:text-foreground",
+      )}
+    >
+      <span>{label}</span>
+      <span
+        className={cn(
+          "rounded-full px-1.5 py-0.5 text-xs font-semibold",
+          active
+            ? "bg-primary-foreground/15 text-primary-foreground"
+            : "bg-background/70 text-foreground/70",
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+interface HistoryMetaChipProps {
+  label: string;
+  value: string;
+  monospace?: boolean;
+}
+
+function HistoryMetaChip({ label, value, monospace = false }: HistoryMetaChipProps) {
+  return (
+    <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted/45 px-2 py-1 text-xs text-muted-foreground">
+      <span className="shrink-0 text-muted-foreground/70">{label}</span>
+      <span className={cn("truncate text-foreground/75", monospace && "font-mono")}>{value}</span>
+    </span>
+  );
+}
+
+interface HistoryDetailFieldProps {
+  label: string;
+  value: string;
+  monospace?: boolean;
+}
+
+function HistoryDetailField({ label, value, monospace = false }: HistoryDetailFieldProps) {
+  return (
+    <div className="rounded-md border border-border/40 bg-background/35 px-3 py-2">
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground/75">
+        {label}
+      </div>
+      <div className={cn("mt-1 text-sm text-foreground/85", monospace && "font-mono text-xs")}>
+        {value}
+      </div>
+    </div>
+  );
+}
 
 function SyncBackupHistoryPanel() {
   const { t } = useTranslation();
@@ -141,8 +292,6 @@ function SyncBackupHistoryPanel() {
   const [status, setStatus] = useState<CloudSyncStatus>(DEFAULT_CLOUD_SYNC_STATUS);
   const [loading, setLoading] = useState(true);
   const [runningAction, setRunningAction] = useState<string | null>(null);
-
-  // filter state
   const [filterKind, setFilterKind] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [searchText, setSearchText] = useState("");
@@ -186,6 +335,7 @@ function SyncBackupHistoryPanel() {
         }));
       }),
     ];
+
     return () => {
       unsubs.forEach((promise) => {
         promise.then((unlisten) => unlisten());
@@ -213,8 +363,6 @@ function SyncBackupHistoryPanel() {
     [refresh, t],
   );
 
-  // ─── derived ────────────────────────────────────────────────────────────────
-
   const kindLabels = useMemo(
     () => ({
       sync: t("settings.historyKindSync"),
@@ -237,57 +385,85 @@ function SyncBackupHistoryPanel() {
 
   const stateCfg = stateConfig(status.state as SyncState);
 
-  // summary counts
-  const successCount = useMemo(
-    () => history.filter((e) => e.status === "success").length,
-    [history],
-  );
-  const failedCount = useMemo(
-    () => history.filter((e) => e.status === "failed").length,
-    [history],
-  );
-  const conflictCount = useMemo(
-    () => history.filter((e) => e.status === "conflict").length,
-    [history],
-  );
+  const counts = useMemo(() => {
+    const next = {
+      total: history.length,
+      sync: 0,
+      backup: 0,
+      success: 0,
+      failed: 0,
+      conflict: 0,
+    };
 
-  // filtered entries
+    for (const entry of history) {
+      if (entry.kind === "sync") next.sync += 1;
+      if (entry.kind === "backup") next.backup += 1;
+      if (entry.status === "success") next.success += 1;
+      if (entry.status === "failed") next.failed += 1;
+      if (entry.status === "conflict") next.conflict += 1;
+    }
+
+    return next;
+  }, [history]);
+
   const filtered = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    return history.filter((e) => {
-      if (filterKind !== "all" && e.kind !== filterKind) return false;
-      if (filterStatus !== "all" && e.status !== filterStatus) return false;
-      if (q) {
-        const haystack = [
-          e.message,
-          e.trigger,
-          e.provider,
-          e.revision,
-          e.kind,
-          e.status,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      return true;
+    const query = searchText.trim().toLowerCase();
+    return history.filter((entry) => {
+      if (filterKind !== "all" && entry.kind !== filterKind) return false;
+      if (filterStatus !== "all" && entry.status !== filterStatus) return false;
+      if (!query) return true;
+
+      const haystack = [
+        entry.message,
+        entry.trigger,
+        entry.provider,
+        entry.revision,
+        entry.kind,
+        entry.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(query);
     });
-  }, [history, filterKind, filterStatus, searchText]);
+  }, [filterKind, filterStatus, history, searchText]);
 
-  const hasFilters = filterKind !== "all" || filterStatus !== "all" || searchText.trim() !== "";
+  const hasFilters = filterKind !== "all" || filterStatus !== "all" || searchText.trim().length > 0;
 
-  // ─── render ─────────────────────────────────────────────────────────────────
+  const clearFilters = useCallback(() => {
+    setFilterKind("all");
+    setFilterStatus("all");
+    setSearchText("");
+  }, []);
+
+  const kindFilterOptions = useMemo(
+    () => [
+      { value: "all", label: t("settings.historyAll"), count: counts.total },
+      { value: "sync", label: kindLabels.sync, count: counts.sync },
+      { value: "backup", label: kindLabels.backup, count: counts.backup },
+    ],
+    [counts.backup, counts.sync, counts.total, kindLabels, t],
+  );
+
+  const statusFilterOptions = useMemo(
+    () => [
+      { value: "all", label: t("settings.historyAll"), count: counts.total },
+      { value: "success", label: statusLabels.success, count: counts.success },
+      { value: "failed", label: statusLabels.failed, count: counts.failed },
+      { value: "conflict", label: statusLabels.conflict, count: counts.conflict },
+    ],
+    [counts.conflict, counts.failed, counts.success, counts.total, statusLabels, t],
+  );
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden">
       <PanelHeader
         title={t("panel.syncBackupHistory")}
         actions={
           <Button
             variant="ghost"
-            size="icon"
-            className="h-6 w-6"
+            size="icon-xs"
             onClick={() => void refresh()}
             disabled={loading}
             title={t("resourceMonitor.refresh")}
@@ -297,39 +473,39 @@ function SyncBackupHistoryPanel() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto terminal-scroll">
-        {/* ── Status card ─────────────────────────────────────────────── */}
+      <div className="terminal-scroll flex-1 overflow-y-auto">
         <div className="px-2 pt-2">
-          <div className="rounded-lg border border-border/60 bg-card/50 overflow-hidden">
-            {/* header row */}
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border/40">
-              <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", stateCfg.dot)} />
-              <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground flex-1 truncate">
-                {t("settings.historyCurrentState")}
-              </span>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-semibold",
-                  stateCfg.badge,
-                )}
-              >
-                <span className="text-[0.75rem]">{stateCfg.icon}</span>
-                {t(`settings.syncState.${status.state}`, status.state)}
-              </span>
-              <span className="text-[0.625rem] text-muted-foreground/70 shrink-0">
-                {formatCloudProvider(status.provider)}
-              </span>
+          <div className="overflow-hidden rounded-xl border border-border/60 bg-card/50">
+            <div className="flex items-start gap-3 px-3 py-3">
+              <span className={cn("mt-1 h-2 w-2 rounded-full shrink-0", stateCfg.dot)} />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    {t("settings.historyCurrentState")}
+                  </span>
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold",
+                      stateCfg.badge,
+                    )}
+                  >
+                    <span className="text-sm">{stateCfg.icon}</span>
+                    {t(`settings.syncState.${status.state}`, status.state)}
+                  </span>
+                  <span className="rounded-full bg-muted/45 px-2 py-1 text-xs text-muted-foreground">
+                    {formatCloudProvider(status.provider)}
+                  </span>
+                </div>
+
+                {status.message && !status.conflict ? (
+                  <div className="mt-2 rounded-lg border border-border/40 bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground">
+                    {status.message}
+                  </div>
+                ) : null}
+              </div>
             </div>
 
-            {/* message */}
-            {status.message ? (
-              <div className="px-3 py-1.5 text-[0.6875rem] text-muted-foreground border-b border-border/30 bg-muted/20">
-                {status.message}
-              </div>
-            ) : null}
-
-            {/* stats grid */}
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 px-3 py-2 text-[0.625rem]">
+            <div className="grid grid-cols-1 gap-2 border-t border-border/35 px-3 py-3 sm:grid-cols-2">
               <StatRow
                 label={t("settings.lastSyncCheck")}
                 value={formatTimestamp(status.last_checked_at_ms) ?? t("settings.never")}
@@ -350,20 +526,21 @@ function SyncBackupHistoryPanel() {
           </div>
         </div>
 
-        {/* ── Conflict card ─────────────────────────────────────────────── */}
         {status.conflict ? (
           <div className="px-2 pt-2">
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/8 overflow-hidden">
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-500/25">
-                <MdWarning className="text-amber-500 shrink-0" />
-                <span className="text-[0.6875rem] font-semibold text-amber-500 flex-1">
+            <div className="overflow-hidden rounded-xl border border-amber-500/35 bg-amber-500/8">
+              <div className="flex items-center gap-2 border-b border-amber-500/20 px-3 py-3">
+                <MdWarning className="shrink-0 text-lg text-amber-500" />
+                <span className="flex-1 text-sm font-semibold text-amber-500">
                   {t("settings.syncConflictTitle")}
                 </span>
               </div>
-              <div className="px-3 py-2 text-[0.6875rem] text-muted-foreground">
+
+              <div className="px-3 py-3 text-sm leading-6 text-muted-foreground">
                 {status.conflict.message}
               </div>
-              <div className="grid grid-cols-1 gap-1 px-3 pb-2 text-[0.625rem]">
+
+              <div className="grid grid-cols-1 gap-2 px-3 pb-3">
                 <StatRow
                   label={t("settings.remoteSnapshot")}
                   value={shortValue(status.conflict.remote_revision, 10)}
@@ -377,11 +554,12 @@ function SyncBackupHistoryPanel() {
                   value={shortValue(status.conflict.remote_payload_hash, 10)}
                 />
               </div>
+
               <div className="flex gap-2 px-3 pb-3">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 text-[0.6875rem] flex-1"
+                  className="flex-1 text-xs"
                   onClick={() => void handleResolveConflict("download_remote")}
                   disabled={runningAction !== null}
                 >
@@ -389,7 +567,7 @@ function SyncBackupHistoryPanel() {
                 </Button>
                 <Button
                   size="sm"
-                  className="h-7 text-[0.6875rem] flex-1"
+                  className="flex-1 text-xs"
                   onClick={() => void handleResolveConflict("upload_local")}
                   disabled={runningAction !== null}
                 >
@@ -400,136 +578,139 @@ function SyncBackupHistoryPanel() {
           </div>
         ) : null}
 
-        {/* ── Summary chips ────────────────────────────────────────────── */}
         {history.length > 0 ? (
-          <div className="flex items-center gap-1.5 px-2 pt-2">
-            <MdHistory className="text-muted-foreground/50 shrink-0" />
-            <div className="flex flex-wrap gap-1 flex-1">
-              <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[0.6rem] text-muted-foreground ring-1 ring-border/50">
-                {t("settings.historyOverviewTotal")}&nbsp;
-                <strong className="text-foreground/80">{history.length}</strong>
-              </span>
-              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.6rem] text-emerald-500 ring-1 ring-emerald-500/25">
-                {t("settings.historyOverviewSuccess")}&nbsp;
-                <strong>{successCount}</strong>
-              </span>
-              {failedCount > 0 && (
-                <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[0.6rem] text-red-500 ring-1 ring-red-500/25">
-                  {t("settings.historyOverviewFailed")}&nbsp;
-                  <strong>{failedCount}</strong>
-                </span>
-              )}
-              {conflictCount > 0 && (
-                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[0.6rem] text-amber-500 ring-1 ring-amber-500/25">
-                  {t("settings.historyOverviewConflict")}&nbsp;
-                  <strong>{conflictCount}</strong>
-                </span>
-              )}
+          <>
+            <div className="px-2 pt-2">
+              <div className="grid grid-cols-2 gap-2">
+                <OverviewCard
+                  label={t("settings.historyOverviewTotal")}
+                  value={counts.total}
+                  tone="total"
+                />
+                <OverviewCard
+                  label={t("settings.historyOverviewSuccess")}
+                  value={counts.success}
+                  tone="success"
+                />
+                <OverviewCard
+                  label={t("settings.historyOverviewFailed")}
+                  value={counts.failed}
+                  tone="failed"
+                />
+                <OverviewCard
+                  label={t("settings.historyOverviewConflict")}
+                  value={counts.conflict}
+                  tone="conflict"
+                />
+              </div>
             </div>
-          </div>
+
+            <div className="px-2 pt-2">
+              <div className="rounded-xl border border-border/60 bg-card/45 p-3">
+                <div className="relative">
+                  <MdFilterList className="absolute left-3 top-1/2 -translate-y-1/2 text-base text-muted-foreground/50" />
+                  <input
+                    type="text"
+                    value={searchText}
+                    onChange={(event) => setSearchText(event.target.value)}
+                    placeholder={t("settings.historySearchPlaceholder")}
+                    className="h-10 w-full rounded-lg border border-border/60 bg-muted/25 pl-9 pr-3 text-sm placeholder:text-muted-foreground/45 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+                      {t("settings.historyFilterKind")}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {kindFilterOptions.map((option) => (
+                        <FilterChip
+                          key={option.value}
+                          active={filterKind === option.value}
+                          count={option.count}
+                          label={option.label}
+                          onClick={() => setFilterKind(option.value)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+                      {t("settings.historyFilterStatus")}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {statusFilterOptions.map((option) => (
+                        <FilterChip
+                          key={option.value}
+                          active={filterStatus === option.value}
+                          count={option.count}
+                          label={option.label}
+                          onClick={() => setFilterStatus(option.value)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {hasFilters ? (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-primary underline underline-offset-2"
+                        onClick={clearFilters}
+                      >
+                        {t("settings.historyClearFilters")}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </>
         ) : null}
 
-        {/* ── Filters ──────────────────────────────────────────────────── */}
-        {history.length > 0 ? (
-          <div className="px-2 pt-2 space-y-1.5">
-            {/* search */}
-            <div className="relative">
-              <MdFilterList className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/50 text-sm" />
-              <input
-                type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                placeholder={t("settings.historySearchPlaceholder")}
-                className="w-full rounded-md border border-border/60 bg-muted/30 pl-6 pr-3 py-1 text-[0.6875rem] placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/50"
-              />
-            </div>
-
-            {/* kind + status toggles */}
-            <div className="flex gap-1.5 flex-wrap">
-              {/* kind */}
-              {(["all", "sync", "backup"] as const).map((k) => (
-                <button
-                  key={k}
-                  onClick={() => setFilterKind(k)}
-                  className={cn(
-                    "rounded-full px-2.5 py-0.5 text-[0.625rem] font-medium transition-colors",
-                    filterKind === k
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted/60 text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {k === "all"
-                    ? t("settings.historyAll")
-                    : kindLabels[k as EntryKind] ?? k}
-                </button>
-              ))}
-
-              <span className="w-px bg-border/50 mx-0.5 self-stretch" />
-
-              {/* status */}
-              {(["all", "success", "failed", "conflict"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setFilterStatus(s)}
-                  className={cn(
-                    "rounded-full px-2.5 py-0.5 text-[0.625rem] font-medium transition-colors",
-                    filterStatus === s
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted/60 text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {s === "all"
-                    ? t("settings.historyAll")
-                    : statusLabels[s as EntryStatus] ?? s}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {/* ── History list ─────────────────────────────────────────────── */}
-        <div className="p-2 space-y-1.5 pb-4">
+        <div className="space-y-2 p-2 pb-4">
           {loading ? (
             <div className="flex flex-col items-center justify-center gap-2 py-10 text-muted-foreground/60">
-              <MdRefresh className="animate-spin text-xl" />
-              <span className="text-[0.6875rem]">{t("common.loading")}</span>
+              <MdRefresh className="animate-spin text-2xl" />
+              <span className="text-sm">{t("common.loading")}</span>
             </div>
           ) : history.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/60 py-10 text-center">
-              <MdHistory className="text-2xl text-muted-foreground/30" />
-              <span className="text-[0.6875rem] text-muted-foreground">
-                {t("settings.noSyncHistory")}
-              </span>
+            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-10 text-center">
+              <MdHistory className="text-3xl text-muted-foreground/25" />
+              <span className="text-sm text-muted-foreground">{t("settings.noSyncHistory")}</span>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/60 py-8 text-center">
-              <MdFilterList className="text-xl text-muted-foreground/30" />
-              <span className="text-[0.6875rem] text-muted-foreground">
+            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 py-8 text-center">
+              <MdFilterList className="text-2xl text-muted-foreground/25" />
+              <div className="text-sm font-medium text-foreground/80">
+                {t("settings.historyNoResultsTitle")}
+              </div>
+              <div className="max-w-[18rem] text-sm text-muted-foreground">
                 {t("settings.noSyncHistoryMatchFilters")}
-              </span>
-              {hasFilters && (
+              </div>
+              {hasFilters ? (
                 <button
-                  className="text-[0.625rem] text-primary underline underline-offset-2"
-                  onClick={() => {
-                    setFilterKind("all");
-                    setFilterStatus("all");
-                    setSearchText("");
-                  }}
+                  type="button"
+                  className="text-xs font-medium text-primary underline underline-offset-2"
+                  onClick={clearFilters}
                 >
                   {t("settings.historyClearFilters")}
                 </button>
-              )}
+              ) : null}
             </div>
           ) : (
             <>
-              {hasFilters && (
-                <div className="text-[0.6rem] text-muted-foreground/60 text-right px-1">
+              {hasFilters ? (
+                <div className="px-1 text-right text-xs text-muted-foreground/70">
                   {t("settings.historyFilteredCount", {
                     shown: filtered.length,
                     total: history.length,
                   })}
                 </div>
-              )}
+              ) : null}
+
               {filtered.map((entry) => (
                 <HistoryEntryCard
                   key={entry.id}
@@ -547,8 +728,6 @@ function SyncBackupHistoryPanel() {
   );
 }
 
-// ─── HistoryEntryCard ─────────────────────────────────────────────────────────
-
 interface HistoryEntryCardProps {
   entry: CloudSyncHistoryEntry;
   kindLabels: Record<string, string>;
@@ -562,61 +741,122 @@ const HistoryEntryCard = memo(function HistoryEntryCard({
   statusLabels,
   t,
 }: HistoryEntryCardProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  const summary = buildHistorySummary(entry, kindLabels, statusLabels, t);
+  const normalizedMessage = normalizeHistoryMessage(entry.message);
+  const hasMessageDetails =
+    Boolean(normalizedMessage) && normalizeHistoryMessage(summary) !== normalizedMessage;
+  const hasExpandableDetails = hasMessageDetails || Boolean(entry.revision);
+
+  const handleCopyMessage = useCallback(() => {
+    navigator.clipboard
+      .writeText(entry.message)
+      .then(() => {
+        toast.success(t("settings.historyCopyErrorSuccess"));
+      })
+      .catch((error) => {
+        toast.error(getErrorMessage(error));
+      });
+  }, [entry.message, t]);
+
   return (
-    <div className="rounded-lg border border-border/50 bg-card/40 overflow-hidden hover:border-border/80 hover:bg-card/60 transition-colors">
-      {/* top row: badges + timestamp */}
-      <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-border/30">
+    <div
+      className={cn(
+        "overflow-hidden rounded-xl border transition-colors",
+        historyCardTone(entry.status),
+      )}
+    >
+      <div className="flex items-center gap-2 px-3 pt-3">
         <span
           className={cn(
-            "rounded-full px-1.5 py-0.5 text-[0.5875rem] font-semibold uppercase tracking-wide",
+            "rounded-full px-2 py-1 text-xs font-semibold uppercase tracking-[0.12em]",
             kindBadge(entry.kind),
           )}
         >
-          {kindLabels[entry.kind as keyof typeof kindLabels] ?? entry.kind}
+          {kindLabels[entry.kind as EntryKind] ?? entry.kind}
         </span>
         <span
           className={cn(
-            "rounded-full px-1.5 py-0.5 text-[0.5875rem] font-semibold",
+            "rounded-full px-2 py-1 text-xs font-semibold",
             entryStatusBadge(entry.status),
           )}
         >
-          {statusLabels[entry.status as keyof typeof statusLabels] ?? entry.status}
+          {statusLabels[entry.status as EntryStatus] ?? entry.status}
         </span>
-        <span className="ml-auto text-[0.6rem] text-muted-foreground/60 shrink-0 font-mono">
+        <span className="ml-auto shrink-0 text-xs font-mono text-muted-foreground/70">
           {formatTimestamp(entry.timestamp_ms) ?? t("settings.never")}
         </span>
       </div>
 
-      {/* message */}
-      {entry.message ? (
-        <div className="px-2.5 py-1.5 text-[0.6875rem] text-foreground/80 leading-relaxed">
-          {entry.message}
-        </div>
-      ) : null}
+      <div className="space-y-2.5 px-3 pb-3 pt-2.5">
+        <div className="text-sm font-medium leading-6 text-foreground/90">{summary}</div>
 
-      {/* metadata row */}
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 px-2.5 pb-2 text-[0.6rem] text-muted-foreground/60">
-        <span>
-          <span className="text-muted-foreground/40">{t("settings.triggerLabel")}: </span>
-          {entry.trigger}
-        </span>
-        {entry.provider ? (
-          <span>
-            <span className="text-muted-foreground/40">{t("settings.providerLabel")}: </span>
-            {formatCloudProvider(entry.provider)}
-          </span>
-        ) : null}
-        {entry.revision ? (
-          <span className="font-mono">
-            <span className="text-muted-foreground/40">{t("settings.revisionLabel")}: </span>
-            {shortValue(entry.revision, 8)}
-          </span>
-        ) : null}
-        {entry.duration_ms != null ? (
-          <span>
-            <span className="text-muted-foreground/40">{t("settings.durationLabel")}: </span>
-            {formatDuration(entry.duration_ms) ?? t("settings.none")}
-          </span>
+        <div className="flex flex-wrap gap-1.5">
+          <HistoryMetaChip label={t("settings.triggerLabel")} value={entry.trigger} />
+          {entry.provider ? (
+            <HistoryMetaChip
+              label={t("settings.providerLabel")}
+              value={formatCloudProvider(entry.provider)}
+            />
+          ) : null}
+          {entry.duration_ms != null ? (
+            <HistoryMetaChip
+              label={t("settings.durationLabel")}
+              value={formatDuration(entry.duration_ms) ?? t("settings.none")}
+            />
+          ) : null}
+        </div>
+
+        {hasExpandableDetails ? (
+          <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
+            <div className="flex flex-wrap gap-1.5">
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {detailsOpen ? <MdExpandLess /> : <MdExpandMore />}
+                  {detailsOpen
+                    ? t("settings.historyHideDetails")
+                    : t("settings.historyViewDetails")}
+                </Button>
+              </CollapsibleTrigger>
+
+              {hasMessageDetails ? (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={handleCopyMessage}
+                >
+                  <MdContentCopy />
+                  {t("settings.historyCopyError")}
+                </Button>
+              ) : null}
+            </div>
+
+            <CollapsibleContent className="mt-2 space-y-2 overflow-hidden data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0">
+              {hasMessageDetails ? (
+                <div className="rounded-lg border border-border/40 bg-muted/20 p-3">
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground/80">
+                    {entry.message}
+                  </pre>
+                </div>
+              ) : null}
+
+              {entry.revision ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <HistoryDetailField
+                    label={t("settings.revisionLabel")}
+                    value={entry.revision}
+                    monospace
+                  />
+                </div>
+              ) : null}
+            </CollapsibleContent>
+          </Collapsible>
         ) : null}
       </div>
     </div>
