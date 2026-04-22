@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import AboutDialog from "./components/dialog/app/AboutDialog";
 import LockScreen from "./components/dialog/app/LockScreen";
+import QuitConfirmDialog from "./components/dialog/app/QuitConfirmDialog";
 import UpdateDialog from "./components/dialog/app/UpdateDialog";
 import { OtpDialog, type OtpRequest } from "./components/dialog/connections/OtpDialog";
 import type { ActivityBarItem } from "./components/layout/ActivityBar";
@@ -37,9 +38,9 @@ import NetworkPanel from "./components/panel/NetworkPanel";
 import QuickCommands from "./components/panel/QuickCommands";
 import ResourceMonitor from "./components/panel/ResourceMonitor";
 import SerialSendPanel from "./components/panel/SendCommandPanel";
+import SyncBackupHistoryPanel from "./components/panel/SyncBackupHistoryPanel";
 import SavedConnections from "./components/panel/saved-connections";
 import SecurityAuthPanel from "./components/panel/security-auth";
-import SyncBackupHistoryPanel from "./components/panel/SyncBackupHistoryPanel";
 import TabWindowsWorkspace from "./components/terminal/TabWindowsWorkspace";
 import { useApp } from "./context/AppContext";
 import { TransferProvider } from "./context/TransferContext";
@@ -97,6 +98,15 @@ import type {
 
 /** Item IDs that are not regular panels — they have special action on click. */
 const NON_PANEL_IDS = new Set(["settings", "lock", "quickCmdBar", "serialSend", "recording"]);
+
+type TrayAction =
+  | { type: "open_new_session" }
+  | { type: "focus_session"; sessionId: string }
+  | { type: "open_panel"; panelId: "activeSessions" | "syncBackupHistory" }
+  | { type: "open_settings" }
+  | { type: "lock_screen" }
+  | { type: "check_updates" }
+  | { type: "request_quit" };
 
 function canCreateSessionFromPane(
   pane: Pick<SessionPane, "type" | "connectionId"> | null | undefined,
@@ -198,6 +208,7 @@ function App() {
   const [mobileRightOpen, setMobileRightOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [helpDotVisible, setHelpDotVisible] = useState(false);
   const lastCtrlWheelZoomAtRef = useRef(0);
@@ -235,6 +246,25 @@ function App() {
     }, 3000);
     return () => clearTimeout(timer);
   }, []);
+
+  const handleOpenPanel = useCallback(
+    (panelId: "activeSessions" | "syncBackupHistory") => {
+      updateUi((prev) => {
+        const side = getItemSide(panelId, prev.activity_bar_layout);
+        if (side === "right") {
+          return {
+            active_right_panel: panelId,
+            ...(prev.active_left_panel === panelId ? { active_left_panel: null } : {}),
+          };
+        }
+        return {
+          active_left_panel: panelId,
+          ...(prev.active_right_panel === panelId ? { active_right_panel: null } : {}),
+        };
+      });
+    },
+    [updateUi],
+  );
 
   // Cross-window event listeners
   useEffect(() => {
@@ -414,29 +444,13 @@ function App() {
 
       lastCloudConflictRevisionRef.current = conflict.remote_revision;
       toast.error(conflict.message);
-      updateUi((prev) => {
-        const side = getItemSide("syncBackupHistory", prev.activity_bar_layout);
-        if (side === "right") {
-          return {
-            active_right_panel: "syncBackupHistory",
-            ...(prev.active_left_panel === "syncBackupHistory"
-              ? { active_left_panel: null }
-              : {}),
-          };
-        }
-        return {
-          active_left_panel: "syncBackupHistory",
-          ...(prev.active_right_panel === "syncBackupHistory"
-            ? { active_right_panel: null }
-            : {}),
-        };
-      });
+      handleOpenPanel("syncBackupHistory");
     });
 
     return () => {
       unlisten.then((dispose) => dispose());
     };
-  }, [updateUi]);
+  }, [handleOpenPanel]);
 
   // Track modal child window open/close for overlay and focus enforcement.
   useEffect(() => {
@@ -491,9 +505,9 @@ function App() {
     tabsRef.current = tabs;
   }, [tabs]);
 
-  const handleNewSession = (_parentGroupId?: string) => {
+  const handleNewSession = useCallback((_parentGroupId?: string) => {
     openNewSession();
-  };
+  }, []);
 
   const handleEditConnection = useCallback(
     (conn: SavedConnection, autoConnect?: boolean, target?: NewSessionTarget) => {
@@ -873,6 +887,64 @@ function App() {
       setIsLocked(true);
     }
   }, [appSettings.security.enable_screen_lock, setIsLocked]);
+
+  const handleQuitApplication = useCallback(() => {
+    setShowQuitConfirm(false);
+    void invoke<void>("quit_application");
+  }, []);
+
+  const handleRequestQuit = useCallback(() => {
+    if (tabs.length > 0 && appSettings.general.confirm_on_close !== false) {
+      setShowQuitConfirm(true);
+      return;
+    }
+
+    handleQuitApplication();
+  }, [appSettings.general.confirm_on_close, handleQuitApplication, tabs.length]);
+
+  useEffect(() => {
+    const unlisten = listen<TrayAction>("tray-action", ({ payload }) => {
+      if (isLocked && payload.type !== "lock_screen" && payload.type !== "request_quit") {
+        return;
+      }
+
+      switch (payload.type) {
+        case "open_new_session":
+          handleNewSession();
+          break;
+        case "focus_session":
+          handleSessionClick(payload.sessionId);
+          break;
+        case "open_panel":
+          handleOpenPanel(payload.panelId);
+          break;
+        case "open_settings":
+          handleOpenSettings();
+          break;
+        case "lock_screen":
+          handleLockScreen();
+          break;
+        case "check_updates":
+          setShowUpdateDialog(true);
+          break;
+        case "request_quit":
+          handleRequestQuit();
+          break;
+      }
+    });
+
+    return () => {
+      unlisten.then((dispose) => dispose());
+    };
+  }, [
+    handleLockScreen,
+    handleNewSession,
+    handleOpenPanel,
+    handleOpenSettings,
+    handleRequestQuit,
+    handleSessionClick,
+    isLocked,
+  ]);
 
   // --- Tab context-menu callbacks ---
 
@@ -1914,6 +1986,12 @@ function App() {
           open={showUpdateDialog}
           onClose={() => setShowUpdateDialog(false)}
           onUpdateFound={(info) => setUpdateInfo(info)}
+        />
+
+        <QuitConfirmDialog
+          open={showQuitConfirm}
+          onOpenChange={setShowQuitConfirm}
+          onConfirm={handleQuitApplication}
         />
 
         <OtpDialog request={otpRequest} onDone={() => setOtpRequest(null)} />

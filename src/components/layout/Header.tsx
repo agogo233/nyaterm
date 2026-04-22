@@ -29,6 +29,8 @@ import {
   MdZoomOut,
 } from "react-icons/md";
 import packageJson from "@/../package.json";
+import QuitConfirmDialog from "@/components/dialog/app/QuitConfirmDialog";
+import { Button } from "@/components/ui/button";
 import { useApp } from "@/context/AppContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useConfigTransfer } from "@/hooks/useConfigTransfer";
@@ -45,16 +47,6 @@ import type { SavedConnection, Tab } from "@/types/global";
 import DragonflyLogo from "../DragonflyLogo";
 import ImportDialog from "../dialog/connections/ImportDialog";
 import { SYSTEM_ICONS } from "../icons";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "../ui/alert-dialog";
 import {
   Menubar,
   MenubarCheckboxItem,
@@ -392,13 +384,15 @@ export default function Header({
         <DragonflyLogo className="h-5 w-5 shrink-0" onDoubleClick={handleToggleMaximizeWindow} />
 
         {/* Mobile Left Toggle */}
-        <button
-          className="lg:hidden flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)]"
-          style={{ color: "var(--df-text-muted)" }}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="lg:hidden text-[var(--df-text-muted)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] hover:text-[var(--df-text-muted)]"
           onClick={onToggleLeft}
         >
           <MdMenu className="text-base" />
-        </button>
+        </Button>
 
         <Menubar className="border-none bg-transparent h-auto p-0 gap-1 shadow-none">
           {menuKeys.map(({ key, label }) => (
@@ -463,24 +457,32 @@ export default function Header({
 
       <div className="flex items-center gap-1 shrink-0" style={{ color: "var(--df-text-muted)" }}>
         {/* Mobile Right Toggle */}
-        <button
-          className="md:hidden flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)]"
-          style={{ color: "var(--df-text-muted)" }}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="md:hidden text-[var(--df-text-muted)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] hover:text-[var(--df-text-muted)]"
           onClick={onToggleRight}
         >
           <MdViewSidebar className="text-base" />
-        </button>
+        </Button>
 
-        <button
-          className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)]"
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="text-[var(--df-text-muted)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] hover:text-[var(--df-text-muted)]"
           aria-label={t("menu.minimize")}
           onClick={handleMinimizeWindow}
         >
           <span className="block h-px w-3.5 rounded-full bg-current" />
-        </button>
+        </Button>
 
-        <button
-          className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)]"
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="text-[var(--df-text-muted)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] hover:text-[var(--df-text-muted)]"
           aria-label={isMaximized ? t("menu.restore") : t("menu.maximize")}
           onClick={handleToggleMaximizeWindow}
         >
@@ -489,33 +491,27 @@ export default function Header({
           ) : (
             <MdCheckBoxOutlineBlank className="text-base" />
           )}
-        </button>
+        </Button>
 
-        <button
-          className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-red-500/90 hover:text-white"
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="text-[var(--df-text-muted)] hover:bg-red-500/90 hover:text-white"
           aria-label={t("common.close")}
           onClick={handleCloseWindow}
         >
           <MdClose className="text-base" />
-        </button>
+        </Button>
       </div>
       <ImportDialog open={showImportDialog} onClose={() => setShowImportDialog(false)} />
       {passwordAlert}
 
-      <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("dialog.confirmClose")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("dialog.confirmCloseDesc")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={handleConfirmClose}>
-              {t("dialog.confirmCloseAction")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <QuitConfirmDialog
+        open={showCloseConfirm}
+        onOpenChange={setShowCloseConfirm}
+        onConfirm={handleConfirmClose}
+      />
     </header>
   );
 }
