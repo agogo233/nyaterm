@@ -595,6 +595,8 @@
     "commandSuggestionsDesc": "Show autocomplete suggestions from command history and built-in commands while typing.",
     "commandSuggestionsMaxChars": "Max History Length",
     "commandSuggestionsMaxCharsDesc": "Only include history entries whose command length does not exceed this limit. Quick commands are unaffected.",
+    "commandSuggestionsMinChars": "Min History Length",
+    "commandSuggestionsMinCharsDesc": "Only include history entries whose command length is at least this limit. Quick commands are unaffected.",
     "configured": "Configured",
     "confirmOnClose": "Confirm on close",
     "confirmOnCloseDesc": "Show a confirmation dialog when closing the application with active sessions.",

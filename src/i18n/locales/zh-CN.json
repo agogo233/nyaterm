@@ -595,6 +595,8 @@
     "commandSuggestionsDesc": "输入命令时显示基于历史记录和内置命令的联想补全建议。",
     "commandSuggestionsMaxChars": "历史记录最大字数限制",
     "commandSuggestionsMaxCharsDesc": "仅将命令长度不超过该字数的历史记录纳入联想补全候选，快捷命令不受影响。",
+    "commandSuggestionsMinChars": "历史记录最小字数限制",
+    "commandSuggestionsMinCharsDesc": "仅将命令长度不小于该字数的历史记录纳入联想补全候选，快捷命令不受影响。",
     "configured": "已配置",
     "confirmOnClose": "关闭时确认",
     "confirmOnCloseDesc": "在有活动会话时关闭应用程序时显示确认对话框。",
