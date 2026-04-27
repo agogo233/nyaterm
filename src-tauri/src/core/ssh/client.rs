@@ -2,11 +2,12 @@ use crate::error::{AppError, AppResult};
 use russh::client;
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PublicKeyBase64};
 use russh::{cipher, kex, mac, Preferred};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 
 /// Connection parameters for SSH (host, port, user, auth method).
 #[derive(Debug, Clone, Deserialize)]
@@ -61,6 +62,44 @@ impl SshConnectionHandles {
 
 pub(crate) type SshHandle = Arc<SshConnectionHandles>;
 
+/// Manages pending host-key verification prompts awaiting user input from the frontend.
+pub struct HostKeyVerifyManager {
+    pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+}
+
+impl HostKeyVerifyManager {
+    pub fn new() -> Self {
+        Self {
+            pending: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub async fn register(&self, request_id: String) -> oneshot::Receiver<bool> {
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(request_id, tx);
+        rx
+    }
+
+    pub async fn respond(&self, request_id: &str, accepted: bool) -> bool {
+        if let Some(tx) = self.pending.lock().await.remove(request_id) {
+            tx.send(accepted).is_ok()
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostKeyVerifyPayload {
+    request_id: String,
+    host: String,
+    port: u16,
+    key_type: String,
+    fingerprint: String,
+    is_key_changed: bool,
+}
+
 /// russh client handler; performs TOFU known_hosts verification.
 pub struct SshHandler {
     app: AppHandle,
@@ -79,6 +118,28 @@ impl SshHandler {
             .home_dir()
             .ok()
             .map(|h: std::path::PathBuf| h.join(".dragonfly").join("known_hosts"))
+    }
+
+    fn append_known_host(&self, path: &std::path::Path, host_entry: &str) {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            if let Err(error) = writeln!(file, "{}", host_entry) {
+                tracing::warn!(
+                    host = %self.host,
+                    port = self.port,
+                    %error,
+                    "Failed to persist SSH host key to known_hosts"
+                );
+                let _ = self.app.emit(
+                    "ssh-error",
+                    format!("Failed to save known_hosts: {}", error),
+                );
+            }
+        }
     }
 }
 
@@ -114,6 +175,23 @@ fn check_known_host_entry(
     } else {
         KnownHostCheck::UnknownHost
     }
+}
+
+fn replace_known_host_entry(
+    path: &std::path::Path,
+    host_identifier: &str,
+    new_entry: &str,
+) -> std::io::Result<()> {
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let mut lines: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            parts.len() < 3 || parts[0] != host_identifier
+        })
+        .collect();
+    lines.push(new_entry);
+    std::fs::write(path, lines.join("\n") + "\n")
 }
 
 fn preferred_algorithms() -> Preferred {
@@ -215,67 +293,140 @@ impl client::Handler for SshHandler {
         let host_entry = format!("{} {} {}", host_identifier, key_type, key_base64);
         let content = std::fs::read_to_string(&path).unwrap_or_default();
 
-        match check_known_host_entry(&content, &host_identifier, &key_type, &key_base64) {
-            KnownHostCheck::Match => {
-                tracing::info!(
-                    host = %self.host,
-                    port = self.port,
-                    key_type,
-                    fingerprint = %fingerprint,
-                    "SSH host key verified"
-                );
-                return Ok(true);
-            }
-            KnownHostCheck::HostSeen => {
-                tracing::warn!(
-                    host = %self.host,
-                    port = self.port,
-                    key_type,
-                    fingerprint = %fingerprint,
-                    "SSH host key mismatch detected"
-                );
-                let _ = self.app.emit(
-                    "ssh-error",
-                    format!(
-                        "SECURITY ALERT: Host key for {}:{} has changed! New fingerprint: {}",
-                        self.host, self.port, fingerprint
-                    ),
-                );
-                return Ok(false);
-            }
-            KnownHostCheck::UnknownHost => {
-                tracing::info!(
-                    host = %self.host,
-                    port = self.port,
-                    key_type,
-                    fingerprint = %fingerprint,
-                    "Trusting new SSH host key and appending to known_hosts"
-                );
-            }
+        let policy = crate::config::load_app_settings(&self.app)
+            .map(|s| s.security.host_key_policy)
+            .unwrap_or_else(|_| "prompt".to_string());
+
+        let check = check_known_host_entry(&content, &host_identifier, &key_type, &key_base64);
+
+        if check == KnownHostCheck::Match {
+            tracing::info!(
+                host = %self.host,
+                port = self.port,
+                key_type,
+                fingerprint = %fingerprint,
+                "SSH host key verified"
+            );
+            return Ok(true);
         }
 
-        use std::io::Write;
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        {
-            if let Err(error) = writeln!(file, "{}", host_entry) {
-                tracing::warn!(
-                    host = %self.host,
-                    port = self.port,
-                    %error,
-                    "Failed to persist SSH host key to known_hosts"
+        let is_key_changed = check == KnownHostCheck::HostSeen;
+
+        match policy.as_str() {
+            "strict" => {
+                if is_key_changed {
+                    tracing::warn!(
+                        host = %self.host, port = self.port, key_type,
+                        fingerprint = %fingerprint,
+                        "SSH host key mismatch rejected (strict policy)"
+                    );
+                    let _ = self.app.emit(
+                        "ssh-error",
+                        format!(
+                            "SECURITY ALERT: Host key for {}:{} has changed! Fingerprint: {}",
+                            self.host, self.port, fingerprint
+                        ),
+                    );
+                } else {
+                    tracing::warn!(
+                        host = %self.host, port = self.port, key_type,
+                        fingerprint = %fingerprint,
+                        "Unknown SSH host rejected (strict policy)"
+                    );
+                    let _ = self.app.emit(
+                        "ssh-error",
+                        format!(
+                            "Unknown host key for {}:{} rejected by strict policy. Fingerprint: {}",
+                            self.host, self.port, fingerprint
+                        ),
+                    );
+                }
+                Ok(false)
+            }
+            "accept" => {
+                if is_key_changed {
+                    tracing::info!(
+                        host = %self.host, port = self.port, key_type,
+                        fingerprint = %fingerprint,
+                        "SSH host key changed, auto-accepting and updating known_hosts"
+                    );
+                    if let Err(error) =
+                        replace_known_host_entry(&path, &host_identifier, &host_entry)
+                    {
+                        tracing::warn!(
+                            host = %self.host, port = self.port, %error,
+                            "Failed to update known_hosts"
+                        );
+                    }
+                } else {
+                    tracing::info!(
+                        host = %self.host, port = self.port, key_type,
+                        fingerprint = %fingerprint,
+                        "Auto-accepting new SSH host key and appending to known_hosts"
+                    );
+                    self.append_known_host(&path, &host_entry);
+                }
+                Ok(true)
+            }
+            _ => {
+                // "prompt" mode: ask user via frontend dialog
+                let verify_mgr = self
+                    .app
+                    .try_state::<Arc<HostKeyVerifyManager>>()
+                    .ok_or_else(|| {
+                        russh::Error::Keys(russh::keys::Error::CouldNotReadKey)
+                    })?;
+
+                let request_id = uuid::Uuid::new_v4().to_string();
+                let rx = verify_mgr.register(request_id.clone()).await;
+
+                let payload = HostKeyVerifyPayload {
+                    request_id: request_id.clone(),
+                    host: self.host.clone(),
+                    port: self.port,
+                    key_type: key_type.clone(),
+                    fingerprint: fingerprint.to_string(),
+                    is_key_changed,
+                };
+
+                tracing::info!(
+                    host = %self.host, port = self.port,
+                    key_type, fingerprint = %fingerprint,
+                    is_key_changed,
+                    "Prompting user to verify SSH host key"
                 );
-                let _ = self.app.emit(
-                    "ssh-error",
-                    format!("Failed to save known_hosts: {}", error),
-                );
-                return Ok(false);
+
+                let _ = self.app.emit("host-key-verify", &payload);
+
+                let accepted = rx.await.unwrap_or(false);
+
+                if accepted {
+                    tracing::info!(
+                        host = %self.host, port = self.port,
+                        "User accepted SSH host key"
+                    );
+                    if is_key_changed {
+                        if let Err(error) =
+                            replace_known_host_entry(&path, &host_identifier, &host_entry)
+                        {
+                            tracing::warn!(
+                                host = %self.host, port = self.port, %error,
+                                "Failed to update known_hosts"
+                            );
+                        }
+                    } else {
+                        self.append_known_host(&path, &host_entry);
+                    }
+                    Ok(true)
+                } else {
+                    tracing::info!(
+                        host = %self.host, port = self.port,
+                        "User rejected SSH host key"
+                    );
+                    Ok(false)
+                }
             }
         }
-
-        Ok(true)
     }
 
     async fn kex_done(
