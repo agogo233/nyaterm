@@ -199,6 +199,32 @@ body,
   animation: breathing 2s ease-in-out infinite;
 }
 
+@keyframes thinking-sheen {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.df-thinking-text {
+  display: inline-block;
+  background: linear-gradient(
+    110deg,
+    var(--df-text-muted) 35%,
+    var(--df-primary) 50%,
+    var(--df-text-muted) 65%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-sheen 2.5s ease-in-out infinite;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
