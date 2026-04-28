@@ -8,12 +8,14 @@ import {
   MdInput,
   MdOutlineSettings,
   MdSave,
+  MdSearch,
   MdSend,
   MdStop,
 } from "react-icons/md";
 import { toast } from "sonner";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useApp } from "@/context/AppContext";
 import type { AIErrorDetectedDetail, AIOpenIntent } from "@/lib/aiEvents";
@@ -163,11 +165,14 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   const [messages, setMessages] = useState<AIMessage[]>([]);
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
   const [detectedError, setDetectedError] = useState<AIErrorDetectedDetail | null>(null);
   const handledIntentIdRef = useRef<string | null>(null);
+  const historyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const historyCardRef = useRef<HTMLDivElement | null>(null);
   const streamUnlistenRef = useRef<UnlistenFn | null>(null);
 
   const activeProfile = useMemo(
@@ -178,6 +183,16 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   );
 
   const activeSessionId = activePane?.sessionId ?? null;
+  const filteredSessions = useMemo(() => {
+    const keyword = historyQuery.trim().toLowerCase();
+    if (!keyword) return sessions;
+
+    return sessions.filter((session) =>
+      [session.title, session.createdAt, session.updatedAt, session.id].some((value) =>
+        value.toLowerCase().includes(keyword),
+      ),
+    );
+  }, [historyQuery, sessions]);
 
   useEffect(() => {
     return () => {
@@ -459,29 +474,44 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     await invoke("clear_ai_history");
     setMessages([]);
     setCurrentSessionId(null);
+    setHistoryQuery("");
     await loadSessions();
   }, [loadSessions]);
 
   return (
-    <div className="flex h-full flex-col" style={{ backgroundColor: "var(--df-bg-panel)" }}>
+    <div
+      className="relative flex h-full flex-col"
+      style={{ backgroundColor: "var(--df-bg-panel)" }}
+      onPointerDownCapture={(event) => {
+        if (!showHistory) return;
+        const target = event.target as Node;
+        if (
+          historyCardRef.current?.contains(target) ||
+          historyButtonRef.current?.contains(target)
+        ) {
+          return;
+        }
+        setShowHistory(false);
+      }}
+    >
       <PanelHeader
         title={t("ai.title")}
         meta={activeProfile?.name ?? t("ai.notConfigured")}
         actions={
           <>
             <Button
-              size="icon-xs"
+              ref={historyButtonRef}
+              size="icon-sm"
               variant="ghost"
-              className="h-6 w-6"
               onClick={() => setShowHistory((value) => !value)}
               title={t("ai.history")}
+              aria-expanded={showHistory}
             >
               <MdHistory />
             </Button>
             <Button
-              size="icon-xs"
+              size="icon-sm"
               variant="ghost"
-              className="h-6 w-6"
               onClick={() => openSettings("ai")}
               title={t("ai.settings")}
             >
@@ -491,17 +521,73 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
         }
       />
 
+      {showHistory ? (
+        <div
+          ref={historyCardRef}
+          className="absolute left-2 right-2 top-10 z-30 flex flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
+          style={{
+            borderColor: "var(--df-border)",
+            maxHeight: "min(22rem, calc(100% - 3rem))",
+          }}
+        >
+          <div className="border-b border-border/70 p-2">
+            <div className="relative">
+              <MdSearch className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground" />
+              <Input
+                value={historyQuery}
+                placeholder={t("ai.historySearchPlaceholder")}
+                className="h-8 pl-8 text-xs"
+                autoFocus
+                onChange={(event) => setHistoryQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setShowHistory(false);
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-2 border-b border-border/70 px-2 py-1.5">
+            <span className="text-xs font-medium">{t("ai.history")}</span>
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={sessions.length === 0}
+              onClick={() => void clearHistory()}
+            >
+              {t("common.delete")}
+            </Button>
+          </div>
+          <div className="min-h-0 overflow-auto p-2 terminal-scroll">
+            {filteredSessions.length === 0 ? (
+              <div className="py-4 text-center text-xs text-muted-foreground">
+                {sessions.length === 0 ? t("ai.noHistory") : t("ai.noHistoryMatches")}
+              </div>
+            ) : (
+              filteredSessions.map((session) => (
+                <button
+                  key={session.id}
+                  className="mb-1 block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/60"
+                  onClick={() => void loadSessionMessages(session.id)}
+                >
+                  <div className="truncate font-medium">{session.title}</div>
+                  <div className="truncate text-[0.6875rem] text-muted-foreground">
+                    {session.updatedAt}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {detectedError ? (
         <div className="border-b border-border/70 bg-amber-500/10 p-3 text-xs">
-          <div className="font-medium text-amber-600">
-            {t("ai.errorDetected")}
-          </div>
+          <div className="font-medium text-amber-600">{t("ai.errorDetected")}</div>
           <div className="mt-2 flex gap-1.5">
             <Button
               size="xs"
-              onClick={() =>
-                void startChat("analyze_error", t("ai.analyzeDetectedError"))
-              }
+              onClick={() => void startChat("analyze_error", t("ai.analyzeDetectedError"))}
             >
               {t("ai.analyze")}
             </Button>
@@ -509,35 +595,6 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
               {t("common.close")}
             </Button>
           </div>
-        </div>
-      ) : null}
-
-      {showHistory ? (
-        <div className="max-h-48 shrink-0 overflow-auto border-b border-border/70 p-2 terminal-scroll">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-xs font-medium">{t("ai.history")}</span>
-            <Button size="xs" variant="ghost" onClick={() => void clearHistory()}>
-              {t("common.delete")}
-            </Button>
-          </div>
-          {sessions.length === 0 ? (
-            <div className="py-4 text-center text-xs text-muted-foreground">
-              {t("ai.noHistory")}
-            </div>
-          ) : (
-            sessions.map((session) => (
-              <button
-                key={session.id}
-                className="mb-1 block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/60"
-                onClick={() => void loadSessionMessages(session.id)}
-              >
-                <div className="truncate font-medium">{session.title}</div>
-                <div className="truncate text-[0.6875rem] text-muted-foreground">
-                  {session.updatedAt}
-                </div>
-              </button>
-            ))
-          )}
         </div>
       ) : null}
 
@@ -586,10 +643,10 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             value={input}
             disabled={loading}
             placeholder={t("ai.placeholder")}
-            className="min-h-16 resize-none text-xs"
+            className="max-h-32 min-h-16 resize-none overflow-y-auto text-xs terminal-scroll"
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submit();
               }
