@@ -2366,6 +2366,19 @@ pub fn clear_ai_history(app: &AppHandle) -> AppResult<()> {
     crate::storage::save_json_doc(crate::storage::JSON_AI_HISTORY, &AiHistoryFile::default())
 }
 
+pub fn delete_ai_session(app: &AppHandle, session_id: String) -> AppResult<()> {
+    let _ = app;
+    crate::storage::update_json_doc::<AiHistoryFile, _, _>(
+        crate::storage::JSON_AI_HISTORY,
+        |history| {
+            history.sessions.retain(|s| s.id != session_id);
+            history.messages.retain(|m| m.session_id != session_id);
+            trim_history(history);
+            Ok(())
+        },
+    )
+}
+
 pub fn append_ai_audit(app: &AppHandle, request: AppendAiAuditRequest) -> AppResult<AiAuditLog> {
     let _ = app;
     let log = AiAuditLog {

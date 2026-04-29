@@ -49,6 +49,11 @@ pub fn clear_ai_history(app: tauri::AppHandle) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub fn delete_ai_session(app: tauri::AppHandle, session_id: String) -> AppResult<()> {
+    ai::delete_ai_session(&app, session_id)
+}
+
+#[tauri::command]
 pub fn append_ai_audit(
     app: tauri::AppHandle,
     request: AppendAiAuditRequest,

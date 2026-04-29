@@ -50,6 +50,7 @@ pub fn run() {
             cmd::ai::get_ai_sessions,
             cmd::ai::get_ai_messages,
             cmd::ai::clear_ai_history,
+            cmd::ai::delete_ai_session,
             cmd::ai::append_ai_audit,
             cmd::ai::get_ai_audit_logs,
             cmd::clipboard::read_clipboard_text,
