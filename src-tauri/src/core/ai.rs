@@ -450,6 +450,16 @@ pub fn start_chat_stream(
         .unwrap_or_else(|| format!("ai-session-{}", uuid()));
     request.session_id = Some(session_id.clone());
 
+    tracing::info!(
+        stream_id = %stream_id,
+        session_id = %session_id,
+        mode = ?request.mode,
+        action = ?request.action,
+        connection_id = ?request.connection_id,
+        terminal_session_id = ?request.terminal_session_id,
+        "Starting AI chat stream"
+    );
+
     let (cancel_tx, cancel_rx) = oneshot::channel();
     {
         let mut streams = active_streams().lock().unwrap();
@@ -512,6 +522,16 @@ async fn run_chat_stream(
     settings: AiSettings,
     mut cancel_rx: oneshot::Receiver<()>,
 ) {
+    tracing::info!(
+        stream_id = %stream_id,
+        session_id = %session_id,
+        action = ?request.action,
+        language = %request.options.language,
+        safety_mode = %request.options.safety_mode,
+        history_turns = request.options.history_turns,
+        "Running AI chat stream"
+    );
+
     emit_stream_event(
         &app,
         &stream_id,
@@ -534,10 +554,24 @@ async fn run_chat_stream(
     }
 
     if settings.record_history {
-        let _ = save_user_message(&app, &session_id, &request);
+        if let Err(error) = save_user_message(&app, &session_id, &request) {
+            tracing::warn!(
+                stream_id = %stream_id,
+                session_id = %session_id,
+                error = %error,
+                "Failed to save AI user message before streaming"
+            );
+        }
     }
 
     let result = run_model_stream(&app, &stream_id, &request, &settings, &mut cancel_rx).await;
+
+    tracing::debug!(
+        stream_id = %stream_id,
+        session_id = %session_id,
+        success = result.is_ok(),
+        "AI chat stream model execution finished"
+    );
 
     match result {
         Ok(stream_result) => {
@@ -567,6 +601,14 @@ async fn run_chat_stream(
 
             let (text, reasoning_content, mut command_cards) =
                 parse_model_output(&stream_result.text, stream_result.reasoning_content);
+            tracing::debug!(
+                stream_id = %stream_id,
+                session_id = %session_id,
+                text_len = text.len(),
+                has_reasoning = reasoning_content.is_some(),
+                command_card_count = command_cards.len(),
+                "Parsed AI chat stream output"
+            );
             for card in &mut command_cards {
                 let risk = check_command_risk(CommandRiskRequest {
                     command: card.command.clone(),
@@ -587,7 +629,14 @@ async fn run_chat_stream(
             };
 
             if settings.record_history {
-                let _ = append_message(&app, message.clone());
+                if let Err(error) = append_message(&app, message.clone()) {
+                    tracing::warn!(
+                        stream_id = %stream_id,
+                        session_id = %session_id,
+                        error = %error,
+                        "Failed to append AI assistant message"
+                    );
+                }
             }
 
             emit_stream_event(
@@ -607,6 +656,12 @@ async fn run_chat_stream(
             );
         }
         Err(error) => {
+            tracing::warn!(
+                stream_id = %stream_id,
+                session_id = %session_id,
+                error = %error,
+                "AI chat stream failed"
+            );
             active_streams().lock().unwrap().remove(&stream_id);
             emit_stream_event(
                 &app,
@@ -649,6 +704,12 @@ async fn execute_command_on_session(
     command: &str,
     timeout_ms: u64,
 ) -> AppResult<CommandObservation> {
+    tracing::debug!(
+        terminal_session_id = %terminal_session_id,
+        timeout_ms,
+        command_preview = %safe_command_preview(command),
+        "Preparing to execute agent command"
+    );
     let (session_type, ssh_handle, cwd) = {
         let sessions = session_manager.sessions.lock().await;
         let session = sessions.get(terminal_session_id).ok_or_else(|| {
@@ -660,6 +721,15 @@ async fn execute_command_on_session(
             session.cwd.clone(),
         )
     };
+
+    let has_cwd = cwd.lock().await.is_some();
+    tracing::debug!(
+        terminal_session_id = %terminal_session_id,
+        session_type = ?session_type,
+        has_ssh_handle = ssh_handle.is_some(),
+        has_cwd,
+        "Resolved terminal session for agent command"
+    );
 
     match session_type {
         SessionType::SSH => exec_via_ssh_channel(ssh_handle, cwd, command, timeout_ms).await,
@@ -696,6 +766,13 @@ async fn exec_via_ssh_channel(
         Some(dir) if !dir.is_empty() => format!("cd {} && {}", shell_quote(dir), command),
         _ => command.to_string(),
     };
+
+    tracing::debug!(
+        timeout_ms,
+        has_cwd_prefix = full_cmd != command,
+        command_preview = %safe_command_preview(command),
+        "Executing agent command over SSH exec channel"
+    );
 
     channel
         .exec(true, full_cmd.as_bytes())
@@ -737,10 +814,18 @@ async fn exec_via_ssh_channel(
         format!("{stdout}\n{stderr}")
     };
 
+    let duration_ms = start.elapsed().as_millis() as u64;
+    tracing::debug!(
+        exit_code,
+        duration_ms,
+        output_len = output.len(),
+        "SSH agent command finished"
+    );
+
     Ok(CommandObservation {
         output,
         exit_code,
-        duration_ms: start.elapsed().as_millis() as u64,
+        duration_ms,
     })
 }
 
@@ -751,6 +836,13 @@ async fn exec_via_subprocess(
     timeout_ms: u64,
 ) -> AppResult<CommandObservation> {
     let working_dir = cwd.lock().await.clone();
+
+    tracing::debug!(
+        timeout_ms,
+        working_dir = ?working_dir,
+        command_preview = %safe_command_preview(command),
+        "Executing agent command via local subprocess"
+    );
 
     let start = std::time::Instant::now();
 
@@ -777,9 +869,9 @@ async fn exec_via_subprocess(
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
-    let child = cmd.spawn().map_err(|e| {
-        AppError::Channel(format!("Failed to spawn subprocess: {e}"))
-    })?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| AppError::Channel(format!("Failed to spawn subprocess: {e}")))?;
 
     let timeout_dur = Duration::from_millis(timeout_ms);
     match tokio::time::timeout(timeout_dur, child.wait_with_output()).await {
@@ -793,18 +885,33 @@ async fn exec_via_subprocess(
             } else {
                 format!("{stdout}\n{stderr}")
             };
+            let exit_code = output.status.code();
+            let duration_ms = start.elapsed().as_millis() as u64;
+            tracing::debug!(
+                exit_code,
+                duration_ms,
+                output_len = combined.len(),
+                "Local agent subprocess finished"
+            );
             Ok(CommandObservation {
                 output: combined,
-                exit_code: output.status.code(),
-                duration_ms: start.elapsed().as_millis() as u64,
+                exit_code,
+                duration_ms,
             })
         }
-        Ok(Err(e)) => Err(AppError::Channel(format!("Subprocess error: {e}"))),
-        Err(_) => Ok(CommandObservation {
-            output: "(command timed out)".to_string(),
-            exit_code: None,
-            duration_ms: start.elapsed().as_millis() as u64,
-        }),
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "Local agent subprocess failed");
+            Err(AppError::Channel(format!("Subprocess error: {e}")))
+        }
+        Err(_) => {
+            let duration_ms = start.elapsed().as_millis() as u64;
+            tracing::warn!(timeout_ms, duration_ms, "Local agent subprocess timed out");
+            Ok(CommandObservation {
+                output: "(command timed out)".to_string(),
+                exit_code: None,
+                duration_ms,
+            })
+        }
     }
 }
 
@@ -818,7 +925,24 @@ fn shell_quote(s: &str) -> String {
 }
 
 fn is_cancelled(cancel_rx: &mut oneshot::Receiver<()>) -> bool {
-    matches!(cancel_rx.try_recv(), Ok(()) | Err(oneshot::error::TryRecvError::Closed))
+    matches!(
+        cancel_rx.try_recv(),
+        Ok(()) | Err(oneshot::error::TryRecvError::Closed)
+    )
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+fn safe_command_preview(command: &str) -> String {
+    redact_sensitive_text(&truncate_for_log(command, 200))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -831,6 +955,15 @@ async fn run_agent_stream(
     settings: AiSettings,
     mut cancel_rx: oneshot::Receiver<()>,
 ) {
+    tracing::info!(
+        stream_id = %stream_id,
+        session_id = %session_id,
+        action = ?request.action,
+        connection_id = ?request.connection_id,
+        terminal_session_id = ?request.terminal_session_id,
+        "Running AI agent stream"
+    );
+
     emit_stream_event(
         &app,
         &stream_id,
@@ -853,13 +986,25 @@ async fn run_agent_stream(
     }
 
     if settings.record_history {
-        let _ = save_user_message(&app, &session_id, &request);
+        if let Err(error) = save_user_message(&app, &session_id, &request) {
+            tracing::warn!(
+                stream_id = %stream_id,
+                session_id = %session_id,
+                error = %error,
+                "Failed to save agent user message before execution"
+            );
+        }
     }
 
     let terminal_session_id = match &request.terminal_session_id {
         Some(id) if !id.trim().is_empty() => id.clone(),
         _ => {
-            emit_agent_error(&app, &stream_id, &session_id, "Agent mode requires a terminal session");
+            emit_agent_error(
+                &app,
+                &stream_id,
+                &session_id,
+                "Agent mode requires a terminal session",
+            );
             return;
         }
     };
@@ -873,8 +1018,21 @@ async fn run_agent_stream(
     };
 
     let max_steps = settings.max_agent_steps.unwrap_or(DEFAULT_MAX_AGENT_STEPS);
-    let step_timeout = settings.agent_step_timeout_ms.unwrap_or(DEFAULT_AGENT_STEP_TIMEOUT_MS);
+    let step_timeout = settings
+        .agent_step_timeout_ms
+        .unwrap_or(DEFAULT_AGENT_STEP_TIMEOUT_MS);
     let allowed_risk = &request.options.allowed_command_risk_level;
+
+    tracing::info!(
+        stream_id = %stream_id,
+        session_id = %session_id,
+        model_name = %resolved_model.model_name,
+        provider_kind = ?resolved_model.provider_kind,
+        max_steps,
+        step_timeout,
+        allowed_risk = ?allowed_risk,
+        "AI agent stream resolved configuration"
+    );
 
     let mut conversation = vec![ChatMessage::system(AGENT_SYSTEM_PROMPT)];
     let initial_prompt = build_agent_prompt(&request, &settings);
@@ -884,6 +1042,14 @@ async fn run_agent_stream(
     let mut all_steps: Vec<AgentStepPayload> = Vec::new();
 
     for step_index in 0..max_steps {
+        tracing::debug!(
+            stream_id = %stream_id,
+            session_id = %session_id,
+            step_index,
+            conversation_len = conversation.len(),
+            "Starting AI agent step"
+        );
+
         if is_cancelled(&mut cancel_rx) {
             emit_agent_error(&app, &stream_id, &session_id, "AI stream cancelled");
             return;
@@ -904,17 +1070,18 @@ async fn run_agent_stream(
 
         let stream_result = match tokio::time::timeout(
             Duration::from_millis(settings.timeout_ms),
-            client.exec_chat_stream(
-                &resolved_model.model_name,
-                chat_req,
-                Some(&chat_options),
-            ),
+            client.exec_chat_stream(&resolved_model.model_name, chat_req, Some(&chat_options)),
         )
         .await
         {
             Ok(Ok(result)) => result,
             Ok(Err(e)) => {
-                emit_agent_error(&app, &stream_id, &session_id, &format!("AI request failed: {e}"));
+                emit_agent_error(
+                    &app,
+                    &stream_id,
+                    &session_id,
+                    &format!("AI request failed: {e}"),
+                );
                 return;
             }
             Err(_) => {
@@ -980,13 +1147,22 @@ async fn run_agent_stream(
             }
         }
 
-        let candidate = extract_json_object(&raw_output)
-            .unwrap_or_else(|| raw_output.trim().to_string());
+        let candidate =
+            extract_json_object(&raw_output).unwrap_or_else(|| raw_output.trim().to_string());
 
         let parsed: AgentLlmResponse = match serde_json::from_str(&candidate) {
             Ok(r) => r,
-            Err(_) => {
-                let (text, _, _) = parse_model_output(&raw_output, trim_string_to_option(reasoning_output));
+            Err(error) => {
+                tracing::warn!(
+                    stream_id = %stream_id,
+                    session_id = %session_id,
+                    step_index,
+                    error = %error,
+                    raw_output_len = raw_output.len(),
+                    "Failed to parse AI agent step response as JSON; falling back to final text"
+                );
+                let (text, _, _) =
+                    parse_model_output(&raw_output, trim_string_to_option(reasoning_output));
                 final_answer = Some(text);
                 break;
             }
@@ -994,9 +1170,27 @@ async fn run_agent_stream(
 
         conversation.push(ChatMessage::assistant(&raw_output));
 
+        tracing::debug!(
+            stream_id = %stream_id,
+            session_id = %session_id,
+            step_index,
+            action = %parsed.action,
+            has_command = parsed.command.as_ref().is_some_and(|value| !value.trim().is_empty()),
+            has_answer = parsed.answer.as_ref().is_some_and(|value| !value.trim().is_empty()),
+            reasoning_len = reasoning_output.len(),
+            "Parsed AI agent step response"
+        );
+
         match parsed.action.as_str() {
             "final_answer" => {
                 let answer = parsed.answer.unwrap_or_default();
+                tracing::info!(
+                    stream_id = %stream_id,
+                    session_id = %session_id,
+                    step_index,
+                    answer_len = answer.len(),
+                    "AI agent produced final answer"
+                );
                 let step = AgentStepPayload {
                     stream_id: stream_id.clone(),
                     session_id: Some(session_id.clone()),
@@ -1021,7 +1215,12 @@ async fn run_agent_stream(
                 let command = match &parsed.command {
                     Some(c) if !c.trim().is_empty() => c.trim().to_string(),
                     _ => {
-                        emit_agent_error(&app, &stream_id, &session_id, "Agent returned execute_command without a command");
+                        emit_agent_error(
+                            &app,
+                            &stream_id,
+                            &session_id,
+                            "Agent returned execute_command without a command",
+                        );
                         return;
                     }
                 };
@@ -1030,6 +1229,17 @@ async fn run_agent_stream(
                     command: command.clone(),
                     context: request.context.clone(),
                 });
+
+                tracing::info!(
+                    stream_id = %stream_id,
+                    session_id = %session_id,
+                    step_index,
+                    risk_level = ?risk.risk_level,
+                    blocked = risk.blocked,
+                    needs_approval = !is_risk_allowed(&risk.risk_level, allowed_risk),
+                    command_preview = %safe_command_preview(&command),
+                    "AI agent proposed command"
+                );
 
                 if risk.blocked {
                     let step = AgentStepPayload {
@@ -1138,11 +1348,31 @@ async fn run_agent_stream(
                         emit_agent_step(&app, &stream_id, step.clone());
                         all_steps.push(step);
 
+                        tracing::warn!(
+                            stream_id = %stream_id,
+                            session_id = %session_id,
+                            step_index,
+                            error = %e,
+                            command_preview = %safe_command_preview(&command),
+                            "AI agent command execution failed"
+                        );
+
                         let err_msg = format!("命令执行失败：{}。请分析原因并给出下一步。", e);
                         conversation.push(ChatMessage::user(err_msg));
                         continue;
                     }
                 };
+
+                tracing::info!(
+                    stream_id = %stream_id,
+                    session_id = %session_id,
+                    step_index,
+                    exit_code = obs.exit_code,
+                    duration_ms = obs.duration_ms,
+                    output_len = obs.output.len(),
+                    command_preview = %safe_command_preview(&command),
+                    "AI agent command executed successfully"
+                );
 
                 let completed_step = AgentStepPayload {
                     stream_id: stream_id.clone(),
@@ -1179,9 +1409,16 @@ async fn run_agent_stream(
 
     active_streams().lock().unwrap().remove(&stream_id);
 
-    let answer_text = final_answer.unwrap_or_else(|| {
-        "Agent 已达到最大步数限制，任务可能未完成。".to_string()
-    });
+    tracing::info!(
+        stream_id = %stream_id,
+        session_id = %session_id,
+        step_count = all_steps.len(),
+        has_final_answer = final_answer.is_some(),
+        "AI agent stream finished loop"
+    );
+
+    let answer_text =
+        final_answer.unwrap_or_else(|| "Agent 已达到最大步数限制，任务可能未完成。".to_string());
 
     let message = AiMessage {
         id: format!("msg-{}", uuid()),
@@ -1194,7 +1431,14 @@ async fn run_agent_stream(
     };
 
     if settings.record_history {
-        let _ = append_message(&app, message.clone());
+        if let Err(error) = append_message(&app, message.clone()) {
+            tracing::warn!(
+                stream_id = %stream_id,
+                session_id = %session_id,
+                error = %error,
+                "Failed to append AI agent assistant message"
+            );
+        }
     }
 
     emit_stream_event(
@@ -1215,6 +1459,12 @@ async fn run_agent_stream(
 }
 
 fn emit_agent_error(app: &AppHandle, stream_id: &str, session_id: &str, error: &str) {
+    tracing::warn!(
+        stream_id = %stream_id,
+        session_id = %session_id,
+        error = %error,
+        "AI agent stream failed"
+    );
     active_streams().lock().unwrap().remove(stream_id);
     emit_stream_event(
         app,
@@ -1263,6 +1513,13 @@ async fn run_model_stream(
     settings: &AiSettings,
     cancel_rx: &mut oneshot::Receiver<()>,
 ) -> AppResult<AiStreamResult> {
+    tracing::debug!(
+        stream_id = %stream_id,
+        action = ?request.action,
+        session_id = ?request.session_id,
+        "Preparing AI model stream"
+    );
+
     let resolved_model = resolve_request_model(settings, request)?;
     let client = build_client(&resolved_model)?;
     let prompt = build_prompt(request, settings);
@@ -1298,6 +1555,14 @@ async fn run_model_stream(
     }
 
     messages.push(ChatMessage::user(prompt));
+
+    tracing::debug!(
+        stream_id = %stream_id,
+        message_count = messages.len(),
+        model_name = %resolved_model.model_name,
+        provider_kind = ?resolved_model.provider_kind,
+        "Dispatching AI model stream request"
+    );
 
     let chat_req = ChatRequest::new(messages);
     let chat_options = ChatOptions::default()
@@ -1382,6 +1647,13 @@ async fn run_model_stream(
         }
     }
 
+    tracing::debug!(
+        stream_id = %stream_id,
+        text_len = output.len(),
+        reasoning_len = reasoning_output.len(),
+        "AI model stream completed"
+    );
+
     Ok(AiStreamResult {
         text: output,
         reasoning_content: trim_string_to_option(reasoning_output),
@@ -1399,6 +1671,13 @@ fn resolve_request_model(
     settings: &AiSettings,
     request: &AiChatRequest,
 ) -> AppResult<ResolvedAiModel> {
+    tracing::debug!(
+        requested_model_id = ?request.model_id,
+        default_model_id = ?settings.default_model_id,
+        enabled_model_count = settings.models.iter().filter(|model| model.enabled).count(),
+        "Resolving AI model for request"
+    );
+
     let selected_model = request
         .model_id
         .as_deref()
@@ -1437,6 +1716,15 @@ fn resolve_request_model(
             ))
         })?;
     validate_model_credential(&provider_kind, credential.as_ref())?;
+
+    tracing::info!(
+        requested_model_id = ?request.model_id,
+        resolved_model_id = %selected_model.id,
+        resolved_model_name = %selected_model.name,
+        provider_kind = ?provider_kind,
+        credential_id = ?credential.as_ref().map(|item| item.id.as_str()),
+        "Resolved AI model"
+    );
 
     Ok(ResolvedAiModel {
         model_name: selected_model.name.clone(),
@@ -1529,6 +1817,18 @@ fn validate_model_credential(
 }
 
 fn build_client(model: &ResolvedAiModel) -> AppResult<Client> {
+    tracing::debug!(
+        model_name = %model.model_name,
+        provider_kind = ?model.provider_kind,
+        has_credential = model.credential.is_some(),
+        has_base_url = model
+            .credential
+            .as_ref()
+            .and_then(|credential| credential.base_url.as_deref())
+            .is_some_and(|value| !value.trim().is_empty()),
+        "Building AI client"
+    );
+
     let adapter_kind = adapter_kind(&model.provider_kind);
     let mapped_model = model.model_name.clone();
     let api_key = model
@@ -1599,12 +1899,13 @@ pub async fn list_model_names(app: &AppHandle) -> AppResult<Vec<AiModelDiscovery
         if base_url.is_empty() {
             continue;
         }
-        let api_key = credential
-            .api_key
-            .clone()
-            .filter(|v| !v.trim().is_empty());
+        let api_key = credential.api_key.clone().filter(|v| !v.trim().is_empty());
         let label = credential.name.as_str();
-        tracing::info!(credential = label, url = base_url, "Fetching model list from custom provider");
+        tracing::info!(
+            credential = label,
+            url = base_url,
+            "Fetching model list from custom provider"
+        );
         match fetch_openai_compatible_models(&base_url, api_key.as_deref()).await {
             Ok(names) => {
                 tracing::info!(
@@ -2277,6 +2578,13 @@ fn trim_history(history: &mut AiHistoryFile) {
 }
 
 fn save_user_message(app: &AppHandle, session_id: &str, request: &AiChatRequest) -> AppResult<()> {
+    tracing::debug!(
+        session_id = %session_id,
+        connection_id = ?request.connection_id,
+        action = ?request.action,
+        "Persisting AI user message"
+    );
+
     let now = now_rfc3339();
     let title = request
         .user_input
@@ -2328,6 +2636,15 @@ fn save_user_message(app: &AppHandle, session_id: &str, request: &AiChatRequest)
 }
 
 fn append_message(app: &AppHandle, message: AiMessage) -> AppResult<()> {
+    tracing::debug!(
+        session_id = %message.session_id,
+        role = ?message.role,
+        content_len = message.content.len(),
+        command_card_count = message.command_cards.len(),
+        has_reasoning = message.reasoning_content.is_some(),
+        "Persisting AI message"
+    );
+
     let _ = app;
     crate::storage::update_json_doc::<AiHistoryFile, _, _>(
         crate::storage::JSON_AI_HISTORY,
@@ -2380,6 +2697,16 @@ pub fn delete_ai_session(app: &AppHandle, session_id: String) -> AppResult<()> {
 }
 
 pub fn append_ai_audit(app: &AppHandle, request: AppendAiAuditRequest) -> AppResult<AiAuditLog> {
+    tracing::info!(
+        connection_id = ?request.connection_id,
+        action = %request.action,
+        risk_level = ?request.risk_level,
+        inserted_to_terminal = request.inserted_to_terminal,
+        executed = request.executed,
+        blocked = request.blocked,
+        "Appending AI audit log"
+    );
+
     let _ = app;
     let log = AiAuditLog {
         id: format!("audit-{}", uuid()),
