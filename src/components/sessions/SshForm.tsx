@@ -492,7 +492,9 @@ export function SshForm({
                   <div className="rounded-md border border-dashed bg-background/70 px-3 py-2">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-[0.6875rem] font-medium">{t("dialog.autoFillOtp")}</div>
+                        <div className="text-[0.6875rem] font-medium">
+                          {t("dialog.autoFillOtp")}
+                        </div>
                         <div className="text-[0.625rem] text-muted-foreground">
                           {otpId ? t("dialog.twoFactorAuth") : t("dialog.noOtp")}
                         </div>
