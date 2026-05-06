@@ -629,3 +629,180 @@ jobs:
             });
 
             console.log(`Uploaded latest.json to updater-beta release for ${tag}.`);
+
+  publish-r2:
+    name: Publish release assets to Cloudflare R2
+    needs: publish-beta-updater
+    runs-on: ubuntu-latest
+
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: read
+
+    env:
+      R2_BUCKET: nyaterm
+      DOWNLOAD_BASE_URL: https://downloads.nyaterm.app
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+    steps:
+      - name: Download GitHub release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          rm -rf release-assets
+          mkdir -p release-assets
+
+          gh release download "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir release-assets \
+            --clobber
+
+          echo "Downloaded release assets:"
+          find release-assets -maxdepth 1 -type f -print
+
+      - name: Build R2 latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const tag = process.env.GITHUB_REF_NAME;
+          const baseUrl = (process.env.DOWNLOAD_BASE_URL || '').replace(/\/$/, '');
+
+          const inputPath = 'release-assets/latest.json';
+          const outputPath = 'release-assets/r2-latest.json';
+
+          if (!fs.existsSync(inputPath)) {
+            throw new Error(`Missing ${inputPath}`);
+          }
+
+          const manifest = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+
+          if (!manifest.platforms || typeof manifest.platforms !== 'object') {
+            throw new Error('latest.json does not contain platforms');
+          }
+
+          for (const [platform, item] of Object.entries(manifest.platforms)) {
+            if (!item.url) {
+              throw new Error(`Missing url for platforms.${platform}`);
+            }
+
+            const oldUrl = new URL(item.url);
+            const filename = decodeURIComponent(oldUrl.pathname.split('/').pop());
+
+            const localFile = path.join('release-assets', filename);
+
+            if (!fs.existsSync(localFile)) {
+              throw new Error(`Installer referenced by latest.json not found: ${filename}`);
+            }
+
+            item.url = `${baseUrl}/releases/${tag}/${encodeURIComponent(filename)}`;
+          }
+
+          fs.writeFileSync(outputPath, JSON.stringify(manifest, null, 2) + '\n');
+
+          console.log(`Wrote ${outputPath}`);
+          console.log(`Version: ${manifest.version}`);
+          console.log(`Platforms: ${Object.keys(manifest.platforms).join(', ')}`);
+          NODE
+
+      - name: Upload installers to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          for file_path in release-assets/*; do
+            file="$(basename "$file_path")"
+
+            case "$file" in
+              latest.json|r2-latest.json|*.sig)
+                continue
+                ;;
+            esac
+
+            content_type="application/octet-stream"
+
+            case "$file" in
+              *.dmg)
+                content_type="application/x-apple-diskimage"
+                ;;
+              *.exe)
+                content_type="application/vnd.microsoft.portable-executable"
+                ;;
+              *.AppImage)
+                content_type="application/octet-stream"
+                ;;
+              *.deb)
+                content_type="application/vnd.debian.binary-package"
+                ;;
+              *.rpm)
+                content_type="application/x-rpm"
+                ;;
+              *.tar.gz|*.gz)
+                content_type="application/gzip"
+                ;;
+              *.zip)
+                content_type="application/zip"
+                ;;
+            esac
+
+            echo "Uploading installer: $file"
+
+            aws s3 cp "$file_path" "s3://${R2_BUCKET}/releases/${GITHUB_REF_NAME}/${file}" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --content-type "$content_type" \
+              --cache-control "public, max-age=31536000, immutable" \
+              --content-disposition "attachment; filename=\"${file}\"" \
+              --no-progress
+          done
+
+      - name: Upload latest.json to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Uploading latest.json"
+
+          aws s3 cp release-assets/r2-latest.json "s3://${R2_BUCKET}/latest.json" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --content-type "application/json; charset=utf-8" \
+            --cache-control "public, max-age=60, must-revalidate" \
+            --no-progress
+
+          echo "Uploading versioned latest.json"
+
+          aws s3 cp release-assets/r2-latest.json "s3://${R2_BUCKET}/releases/${GITHUB_REF_NAME}/latest.json" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --content-type "application/json; charset=utf-8" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --no-progress
+
+      - name: Verify R2 latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl -fsSL "${DOWNLOAD_BASE_URL}/latest.json" | node -e "
+            let input = '';
+            process.stdin.on('data', chunk => input += chunk);
+            process.stdin.on('end', () => {
+              const json = JSON.parse(input);
+              console.log('R2 latest.json version:', json.version);
+              console.log('Platforms:', Object.keys(json.platforms || {}).join(', '));
+            });
+          "
