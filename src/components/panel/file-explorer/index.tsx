@@ -1901,17 +1901,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
 
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div
-            ref={listContainerRef}
-            className="relative flex-1 overflow-y-auto p-2 text-sm terminal-scroll outline-none"
-            tabIndex={canBrowseFiles ? 0 : -1}
-            onMouseDown={() => {
-              if (canBrowseFiles) {
-                listContainerRef.current?.focus();
-              }
-            }}
-            onKeyDown={handleListKeyDown}
-          >
+          <div className="relative min-h-0 flex-1">
             {isExternalDropActive && canBrowseFiles && (
               <div
                 className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-lg border-2 border-dashed px-4 text-center text-xs font-medium"
@@ -1924,86 +1914,110 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
                 {t("fileExplorer.externalDropOverlay")}
               </div>
             )}
-            {!activeSessionId ? (
-              <div className="text-center py-8 text-xs" style={{ color: "var(--df-text-dimmed)" }}>
-                <MdFolderOff className="text-xl block mx-auto mb-2" />
-                <div className="text-sm block mb-2">{t("fileExplorer.connectToSession")}</div>
-              </div>
-            ) : hasUnsupportedSession ? (
-              <div className="text-center py-8 text-xs" style={{ color: "var(--df-text-dimmed)" }}>
-                <MdFolderOff className="text-xl block mx-auto mb-2" />
-                <div className="text-sm block mb-2">{t("fileExplorer.unsupportedSession")}</div>
-                <div>{t("fileExplorer.unsupportedSessionDesc")}</div>
-              </div>
-            ) : directoryLoading ? (
-              <div className="text-center py-4 text-xs" style={{ color: "var(--df-text-dimmed)" }}>
-                {t("fileExplorer.loading")}
-              </div>
-            ) : error ? (
-              <div className="text-center text-red-400 py-4 text-xs">{error}</div>
-            ) : displayEntries.length === 0 ? (
-              <div className="text-center py-4 text-xs" style={{ color: "var(--df-text-dimmed)" }}>
-                {t("fileExplorer.emptyDirectory")}
-              </div>
-            ) : (
-              <ul
-                style={{
-                  paddingTop: virtualListPadding.top,
-                  paddingBottom: virtualListPadding.bottom,
-                }}
-              >
-                {visibleEntries.map((entry) => (
-                  <FileListItem
-                    key={entry.name}
-                    entry={entry}
-                    isSelected={selectedFiles.has(entry.name)}
-                    isParentDirectoryEntry={isParentDirectoryEntry(entry)}
-                    activeSessionId={activeSessionId}
-                    onSelectionStart={handleSelectionStart}
-                    onSelectionDrag={handleSelectionDrag}
-                    onContextMenuSelect={handleContextMenuSelection}
-                    onItemClick={handleItemClick}
-                    onOpenDefault={handleOpenDefault}
-                    onRefresh={() => void refreshCurrentDirectory()}
-                    onUpload={handleUploadFiles}
-                    onUploadFolder={handleUploadFolder}
-                    onDownload={handleDownloadFromContextMenu}
-                    onRename={(entry) => {
-                      if (activeSessionId)
-                        setRenameDialogData({
-                          sessionId: activeSessionId,
-                          oldPath: getEntryFullPath(entry),
-                          name: entry.name,
-                          currentDirPath: currentPath,
-                        });
-                    }}
-                    onMove={(entry) => {
-                      if (activeSessionId)
-                        setMoveDialogData({
-                          sessionId: activeSessionId,
-                          oldPath: getEntryFullPath(entry),
-                          name: entry.name,
-                        });
-                    }}
-                    onDelete={handleDeleteFromContextMenu}
-                    onCopyPath={handleCopyPath}
-                    onSendToTerminal={handleSendToTerminal}
-                    onProperties={(entry) => {
-                      if (activeSessionId) {
-                        setPropertiesDialogData({
-                          sessionId: activeSessionId,
-                          fullPath: getEntryFullPath(entry),
-                          name: entry.name,
-                          is_dir: entry.is_dir,
-                        });
-                      }
-                    }}
-                    aiActions={getEntryAiActions(entry)}
-                    onAIAction={(entry, action) => void handleFileAIAction(entry, action)}
-                  />
-                ))}
-              </ul>
-            )}
+            <div
+              ref={listContainerRef}
+              className="h-full overflow-y-auto p-2 text-sm terminal-scroll outline-none"
+              tabIndex={canBrowseFiles ? 0 : -1}
+              onMouseDown={() => {
+                if (canBrowseFiles) {
+                  listContainerRef.current?.focus();
+                }
+              }}
+              onKeyDown={handleListKeyDown}
+            >
+              {!activeSessionId ? (
+                <div
+                  className="text-center py-8 text-xs"
+                  style={{ color: "var(--df-text-dimmed)" }}
+                >
+                  <MdFolderOff className="text-xl block mx-auto mb-2" />
+                  <div className="text-sm block mb-2">{t("fileExplorer.connectToSession")}</div>
+                </div>
+              ) : hasUnsupportedSession ? (
+                <div
+                  className="text-center py-8 text-xs"
+                  style={{ color: "var(--df-text-dimmed)" }}
+                >
+                  <MdFolderOff className="text-xl block mx-auto mb-2" />
+                  <div className="text-sm block mb-2">{t("fileExplorer.unsupportedSession")}</div>
+                  <div>{t("fileExplorer.unsupportedSessionDesc")}</div>
+                </div>
+              ) : directoryLoading ? (
+                <div
+                  className="text-center py-4 text-xs"
+                  style={{ color: "var(--df-text-dimmed)" }}
+                >
+                  {t("fileExplorer.loading")}
+                </div>
+              ) : error ? (
+                <div className="text-center text-red-400 py-4 text-xs">{error}</div>
+              ) : displayEntries.length === 0 ? (
+                <div
+                  className="text-center py-4 text-xs"
+                  style={{ color: "var(--df-text-dimmed)" }}
+                >
+                  {t("fileExplorer.emptyDirectory")}
+                </div>
+              ) : (
+                <ul
+                  style={{
+                    paddingTop: virtualListPadding.top,
+                    paddingBottom: virtualListPadding.bottom,
+                  }}
+                >
+                  {visibleEntries.map((entry) => (
+                    <FileListItem
+                      key={entry.name}
+                      entry={entry}
+                      isSelected={selectedFiles.has(entry.name)}
+                      isParentDirectoryEntry={isParentDirectoryEntry(entry)}
+                      activeSessionId={activeSessionId}
+                      onSelectionStart={handleSelectionStart}
+                      onSelectionDrag={handleSelectionDrag}
+                      onContextMenuSelect={handleContextMenuSelection}
+                      onItemClick={handleItemClick}
+                      onOpenDefault={handleOpenDefault}
+                      onRefresh={() => void refreshCurrentDirectory()}
+                      onUpload={handleUploadFiles}
+                      onUploadFolder={handleUploadFolder}
+                      onDownload={handleDownloadFromContextMenu}
+                      onRename={(entry) => {
+                        if (activeSessionId)
+                          setRenameDialogData({
+                            sessionId: activeSessionId,
+                            oldPath: getEntryFullPath(entry),
+                            name: entry.name,
+                            currentDirPath: currentPath,
+                          });
+                      }}
+                      onMove={(entry) => {
+                        if (activeSessionId)
+                          setMoveDialogData({
+                            sessionId: activeSessionId,
+                            oldPath: getEntryFullPath(entry),
+                            name: entry.name,
+                          });
+                      }}
+                      onDelete={handleDeleteFromContextMenu}
+                      onCopyPath={handleCopyPath}
+                      onSendToTerminal={handleSendToTerminal}
+                      onProperties={(entry) => {
+                        if (activeSessionId) {
+                          setPropertiesDialogData({
+                            sessionId: activeSessionId,
+                            fullPath: getEntryFullPath(entry),
+                            name: entry.name,
+                            is_dir: entry.is_dir,
+                          });
+                        }
+                      }}
+                      aiActions={getEntryAiActions(entry)}
+                      onAIAction={(entry, action) => void handleFileAIAction(entry, action)}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </ContextMenuTrigger>
         {canBrowseFiles && (
