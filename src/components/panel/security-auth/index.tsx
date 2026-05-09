@@ -16,8 +16,7 @@ export default function SecurityAuthPanel() {
   const [passwordCount, setPasswordCount] = useState(0);
   const [credentialCount, setCredentialCount] = useState(0);
   const [otpCount, setOtpCount] = useState(0);
-  const [passwordsUnlocked, setPasswordsUnlocked] = useState(false);
-  const [credentialsUnlocked, setCredentialsUnlocked] = useState(false);
+  const [secretsUnlocked, setSecretsUnlocked] = useState(false);
 
   const displayCount =
     activeTab === "keys"
@@ -30,8 +29,6 @@ export default function SecurityAuthPanel() {
 
   const handleTabChange = (value: string) => {
     setActiveTab(value as SecurityAuthTab);
-    setPasswordsUnlocked(false);
-    setCredentialsUnlocked(false);
   };
 
   return (
@@ -69,18 +66,18 @@ export default function SecurityAuthPanel() {
           <TabsContent value="passwords" className="mt-3 flex min-h-0 flex-1 overflow-hidden">
             <PasswordManagementTab
               onCountChange={setPasswordCount}
-              secretsUnlocked={passwordsUnlocked}
-              onLockSecrets={() => setPasswordsUnlocked(false)}
-              onUnlockSecrets={() => setPasswordsUnlocked(true)}
+              secretsUnlocked={secretsUnlocked}
+              onLockSecrets={() => setSecretsUnlocked(false)}
+              onUnlockSecrets={() => setSecretsUnlocked(true)}
               showSecretUnlockFooter
             />
           </TabsContent>
           <TabsContent value="credentials" className="mt-3 flex min-h-0 flex-1 overflow-hidden">
             <CredentialManagementTab
               onCountChange={setCredentialCount}
-              secretsUnlocked={credentialsUnlocked}
-              onLockSecrets={() => setCredentialsUnlocked(false)}
-              onUnlockSecrets={() => setCredentialsUnlocked(true)}
+              secretsUnlocked={secretsUnlocked}
+              onLockSecrets={() => setSecretsUnlocked(false)}
+              onUnlockSecrets={() => setSecretsUnlocked(true)}
             />
           </TabsContent>
           <TabsContent
