@@ -30,6 +30,10 @@ interface SerialFormProps {
   setStopBits: (v: string) => void;
 }
 
+function RequiredMark() {
+  return <span className="ml-0.5 text-destructive">*</span>;
+}
+
 export function SerialForm({
   serialPortName,
   setSerialPortName,
@@ -49,11 +53,12 @@ export function SerialForm({
   const { t } = useTranslation();
 
   return (
-    <div className="space-y-4 w-full">
+    <div className="space-y-3 w-full">
       <div className="flex flex-wrap gap-3">
         <div className="min-w-[14rem] flex-[2_1_15rem]">
-          <Label className="text-[0.6875rem] text-muted-foreground">
+          <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.serialPort", "Serial Port")}
+            <RequiredMark />
           </Label>
           <Select
             value={serialPortName || undefined}
@@ -101,7 +106,7 @@ export function SerialForm({
           )}
         </div>
         <div className="min-w-[9rem] flex-[1_1_9rem]">
-          <Label className="text-[0.6875rem] text-muted-foreground">
+          <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.baudRate", "Baud Rate")}
           </Label>
           <Select value={baudRate} onValueChange={setBaudRate}>
@@ -120,7 +125,7 @@ export function SerialForm({
       </div>
       <div className="flex flex-wrap gap-3">
         <div className="min-w-[7rem] flex-[0.9_1_7rem]">
-          <Label className="text-[0.6875rem] text-muted-foreground">
+          <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.dataBits", "Data Bits")}
           </Label>
           <Select value={dataBits} onValueChange={setDataBits}>
@@ -136,7 +141,7 @@ export function SerialForm({
           </Select>
         </div>
         <div className="min-w-[10rem] flex-[1.4_1_10rem]">
-          <Label className="text-[0.6875rem] text-muted-foreground">
+          <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.parity", "Parity")}
           </Label>
           <Select value={parity} onValueChange={setParity}>
@@ -153,7 +158,7 @@ export function SerialForm({
           </Select>
         </div>
         <div className="min-w-[7rem] flex-[0.9_1_7rem]">
-          <Label className="text-[0.6875rem] text-muted-foreground">
+          <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.stopBits", "Stop Bits")}
           </Label>
           <Select value={stopBits} onValueChange={setStopBits}>

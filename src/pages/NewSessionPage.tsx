@@ -1,6 +1,6 @@
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FaServer } from "react-icons/fa6";
 import { MdAdd, MdExpandMore } from "react-icons/md";
@@ -18,10 +18,13 @@ import { TelnetForm } from "@/components/sessions/TelnetForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { invoke } from "@/lib/invoke";
 import type { Group, OtpEntry, ProxyConfig, SavedConnection } from "@/types/global";
+
+const isValidPort = (value: number) => Number.isInteger(value) && value >= 1 && value <= 65535;
 
 export default function NewSessionPage() {
   const { t } = useTranslation();
@@ -51,7 +54,6 @@ export default function NewSessionPage() {
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
@@ -82,23 +84,6 @@ export default function NewSessionPage() {
   // Local Terminal States
   const [shellPath, setShellPath] = useState("powershell.exe");
   const [workingDir, setWorkingDir] = useState("");
-
-  const groupRef = useRef<HTMLDivElement>(null);
-  const iconPickerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (groupRef.current && !groupRef.current.contains(e.target as Node)) {
-        setShowGroupDropdown(false);
-        setNewGroupName("");
-      }
-      if (iconPickerRef.current && !iconPickerRef.current.contains(e.target as Node)) {
-        setShowIconPicker(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   useEffect(() => {
     invoke<Group[]>("get_groups")
@@ -219,7 +204,6 @@ export default function NewSessionPage() {
     setShowIconPicker(false);
     setError("");
     setConnecting(false);
-    setSaveSuccess(false);
   }, []);
 
   const serialPortOptions: { unavailable?: boolean; value: string }[] = serialPorts.map((port) => ({
@@ -233,6 +217,23 @@ export default function NewSessionPage() {
   }
 
   const groupsById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
+
+  const selectedGroupLabel = useMemo(() => {
+    if (groupId === "new") {
+      return newGroupNamePending || t("dialog.newGroupPlaceholder");
+    }
+    if (!groupId) {
+      return t("dialog.none");
+    }
+    return buildGroupPath(groupId, groupsById) || t("dialog.none");
+  }, [groupId, groupsById, newGroupNamePending, t]);
+
+  const newGroupParentLabel = useMemo(() => {
+    if (!groupId || groupId === "new") {
+      return "";
+    }
+    return buildGroupPath(groupId, groupsById);
+  }, [groupId, groupsById]);
 
   const jumpHostOptions = useMemo<ConnectionOption[]>(() => {
     return savedConnections
@@ -271,21 +272,75 @@ export default function NewSessionPage() {
     getCurrentWindow().close();
   };
 
-  const handleSave = async () => {
-    if ((currentTab === "ssh" || currentTab === "telnet") && !host) {
-      setError(t("dialog.hostRequired"));
-      return;
+  const getValidationError = useCallback(() => {
+    if (currentTab === "ssh") {
+      if (!host.trim()) {
+        return t("dialog.hostRequired");
+      }
+      if (!isValidPort(sshPort)) {
+        return t("dialog.portInvalid", "Port must be between 1 and 65535");
+      }
+      if (!username.trim()) {
+        return t("dialog.usernameRequired", "Username is required");
+      }
+      if (authType === "password" && !passwordId && !password && !hasPassword) {
+        return t("dialog.passwordRequired", "Enter a password or select a saved password");
+      }
+      if (authType === "key" && !keyId) {
+        return t("dialog.privateKeyRequired", "Private key is required");
+      }
     }
-    if (currentTab === "serial" && !serialPortName) {
-      setError(t("dialog.serialPortRequired", "Serial port is required"));
+
+    if (currentTab === "telnet") {
+      if (!host.trim()) {
+        return t("dialog.hostRequired");
+      }
+      if (!isValidPort(telnetPort)) {
+        return t("dialog.portInvalid", "Port must be between 1 and 65535");
+      }
+    }
+
+    if (currentTab === "serial" && !serialPortName.trim()) {
+      return t("dialog.serialPortRequired", "Serial port is required");
+    }
+
+    return "";
+  }, [
+    authType,
+    currentTab,
+    hasPassword,
+    host,
+    keyId,
+    password,
+    passwordId,
+    serialPortName,
+    sshPort,
+    telnetPort,
+    t,
+    username,
+  ]);
+
+  const validationError = getValidationError();
+  const saveDisabled = connecting || !!validationError;
+
+  const handleSave = async () => {
+    const nextValidationError = getValidationError();
+    if (nextValidationError) {
+      setError(nextValidationError);
       return;
     }
 
     setError("");
-    setSaveSuccess(false);
     setConnecting(true);
 
     try {
+      const normalizedName = name.trim();
+      const normalizedDescription = description.trim();
+      const normalizedHost = host.trim();
+      const normalizedUsername = username.trim();
+      const normalizedSerialPortName = serialPortName.trim();
+      const normalizedShellPath = shellPath.trim();
+      const normalizedWorkingDir = workingDir.trim();
       let finalGroupId = groupId;
       if (groupId === "new" && newGroupNamePending) {
         finalGroupId = await invoke<string>("save_group", {
@@ -302,10 +357,10 @@ export default function NewSessionPage() {
         currentTab === "local"
           ? t("dialog.localTerminal")
           : currentTab === "serial"
-            ? serialPortName
+            ? normalizedSerialPortName
             : currentTab === "telnet"
-              ? `${host}:${telnetPort}`
-              : `${host}:${sshPort}`;
+              ? `${normalizedHost}:${telnetPort}`
+              : `${normalizedHost}:${sshPort}`;
 
       const typeTag =
         currentTab === "ssh"
@@ -331,21 +386,25 @@ export default function NewSessionPage() {
 
       const connection: SavedConnection = {
         id: initialData?.id || "",
-        name: name || defaultName,
+        name: normalizedName || defaultName,
         type: typeTag as SavedConnection["type"],
         group_id: finalGroupId || undefined,
-        description: description || undefined,
+        description: normalizedDescription || undefined,
         icon: iconKey || undefined,
         ...(currentTab === "ssh"
           ? {
-              host,
+              host: normalizedHost,
               port: sshPort,
-              username,
+              username: normalizedUsername,
               auth: {
                 mode: authType,
-                password_id: authType === "password" ? passwordId || "" : undefined,
+                password_id: authType === "password" ? passwordId || "" : "",
                 password:
-                  authType === "password" ? password || (hasPassword ? undefined : "") : undefined,
+                  authType === "password"
+                    ? passwordId
+                      ? ""
+                      : password || (hasPassword ? undefined : "")
+                    : "",
                 key_id: authType === "key" && keyId ? keyId : undefined,
                 otp_id: otpId || undefined,
                 auto_fill_otp: otpId ? autoFillOtp : undefined,
@@ -353,13 +412,13 @@ export default function NewSessionPage() {
               network,
             }
           : {}),
-        ...(currentTab === "telnet" ? { host, port: telnetPort } : {}),
+        ...(currentTab === "telnet" ? { host: normalizedHost, port: telnetPort } : {}),
         ...(currentTab === "local"
-          ? { shell_path: shellPath, working_dir: workingDir || undefined }
+          ? { shell_path: normalizedShellPath, working_dir: normalizedWorkingDir || undefined }
           : {}),
         ...(currentTab === "serial"
           ? {
-              port_name: serialPortName,
+              port_name: normalizedSerialPortName,
               baud_rate: Number(baudRate),
               data_bits: Number(dataBits),
               parity,
@@ -418,39 +477,46 @@ export default function NewSessionPage() {
           </TabsList>
         </div>
 
-        <div className="flex-1 min-h-0 w-full space-y-4 overflow-y-auto p-4 sm:p-5">
+        <div className="flex-1 min-h-0 w-full space-y-3 overflow-y-auto p-4 pb-20 sm:p-5 sm:pb-20">
           <div className="flex flex-wrap items-end gap-3">
             {/* Name + Group */}
-            <div className="relative shrink-0" ref={iconPickerRef}>
-              <Label className="text-[0.6875rem] text-muted-foreground block mb-1">
+            <div className="shrink-0">
+              <Label className="mb-1 block text-xs font-medium text-foreground/80">
                 {t("dialog.icon")}
               </Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-8 w-8 p-0 flex items-center justify-center"
-                onClick={() => setShowIconPicker(!showIconPicker)}
-                title={iconKey || t("dialog.none")}
-              >
-                {iconKey && SYSTEM_ICONS[iconKey] ? (
-                  (() => {
-                    const IconComp = SYSTEM_ICONS[iconKey].icon;
-                    return (
-                      <IconComp
-                        style={{ color: SYSTEM_ICONS[iconKey].color }}
-                        className="text-sm"
-                      />
-                    );
-                  })()
-                ) : (
-                  <FaServer className="text-sm text-muted-foreground" />
-                )}
-              </Button>
-              {showIconPicker && (
-                <div className="absolute top-full left-0 z-20 mt-1 w-56 max-w-[calc(100vw-2rem)] rounded-md border bg-popover p-2 shadow-xl">
+              <Popover open={showIconPicker} onOpenChange={setShowIconPicker}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex h-8 w-8 items-center justify-center p-0"
+                    title={iconKey || t("dialog.none")}
+                  >
+                    {iconKey && SYSTEM_ICONS[iconKey] ? (
+                      (() => {
+                        const IconComp = SYSTEM_ICONS[iconKey].icon;
+                        return (
+                          <IconComp
+                            style={{ color: SYSTEM_ICONS[iconKey].color }}
+                            className="text-sm"
+                          />
+                        );
+                      })()
+                    ) : (
+                      <FaServer className="text-sm text-muted-foreground" />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  collisionPadding={16}
+                  className="w-56 max-w-[calc(100vw-2rem)] p-2"
+                >
                   <div className="grid grid-cols-7 gap-0.5">
                     <button
-                      className={`w-7 h-7 flex items-center justify-center rounded transition-colors hover:bg-accent ${!iconKey ? "bg-primary/15 ring-1 ring-primary/40" : ""}`}
+                      type="button"
+                      className={`flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-accent ${!iconKey ? "bg-primary/15 ring-1 ring-primary/40" : ""}`}
                       title={t("dialog.none")}
                       onClick={() => {
                         setIconKey("");
@@ -464,7 +530,8 @@ export default function NewSessionPage() {
                       return (
                         <button
                           key={key}
-                          className={`w-7 h-7 flex items-center justify-center rounded transition-colors hover:bg-accent ${iconKey === key ? "bg-primary/15 ring-1 ring-primary/40" : ""}`}
+                          type="button"
+                          className={`flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-accent ${iconKey === key ? "bg-primary/15 ring-1 ring-primary/40" : ""}`}
                           title={key}
                           onClick={() => {
                             setIconKey(key);
@@ -476,11 +543,11 @@ export default function NewSessionPage() {
                       );
                     })}
                   </div>
-                </div>
-              )}
+                </PopoverContent>
+              </Popover>
             </div>
             <div className="min-w-[12rem] flex-1">
-              <Label className="text-[0.6875rem] text-muted-foreground">
+              <Label className="text-xs font-medium text-foreground/80">
                 {t("dialog.connectionName")}
               </Label>
               <Input
@@ -490,85 +557,90 @@ export default function NewSessionPage() {
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
-            <div className="relative min-w-[12rem] flex-1 sm:max-w-[18rem]" ref={groupRef}>
-              <Label className="text-[0.6875rem] text-muted-foreground">{t("dialog.group")}</Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full mt-1 h-8 justify-between text-xs font-normal"
-                onClick={() => setShowGroupDropdown(!showGroupDropdown)}
+            <div className="min-w-[12rem] flex-1 sm:max-w-[18rem]">
+              <Label className="text-xs font-medium text-foreground/80">{t("dialog.group")}</Label>
+              <Popover
+                open={showGroupDropdown}
+                onOpenChange={(open) => {
+                  setShowGroupDropdown(open);
+                  if (!open) {
+                    setNewGroupName("");
+                  }
+                }}
               >
-                <span className={`truncate ${groupId ? "" : "text-muted-foreground"}`}>
-                  {groupId === "new"
-                    ? newGroupNamePending
-                    : groupId
-                      ? (() => {
-                          const parts: string[] = [];
-                          let cur: string | undefined = groupId;
-                          while (cur) {
-                            const g = groups.find((g) => g.id === cur);
-                            if (!g) break;
-                            parts.unshift(g.name);
-                            cur = g.parent_id;
-                          }
-                          return parts.join(" / ");
-                        })()
-                      : t("dialog.none")}
-                </span>
-                <MdExpandMore className="text-xs text-muted-foreground shrink-0" />
-              </Button>
-              {showGroupDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 border rounded-md shadow-xl z-10 overflow-hidden bg-popover max-h-60 overflow-y-auto">
-                  <div
-                    className={`px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent ${!groupId ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
-                    onClick={() => {
-                      setGroupId("");
-                      setNewGroupNamePending("");
-                      setNewGroupParentId("");
-                      setShowGroupDropdown(false);
-                    }}
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-1 h-8 w-full justify-between text-xs font-normal"
                   >
-                    {t("dialog.none")}
+                    <span className={`truncate ${groupId ? "" : "text-muted-foreground"}`}>
+                      {selectedGroupLabel}
+                    </span>
+                    <MdExpandMore className="shrink-0 text-xs text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={4}
+                  collisionPadding={16}
+                  className="w-[var(--radix-popover-trigger-width)] min-w-[12rem] overflow-hidden p-0"
+                >
+                  <div className="max-h-48 overflow-y-auto">
+                    <button
+                      type="button"
+                      className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent ${!groupId ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                      onClick={() => {
+                        setGroupId("");
+                        setNewGroupNamePending("");
+                        setNewGroupParentId("");
+                        setShowGroupDropdown(false);
+                      }}
+                    >
+                      {t("dialog.none")}
+                    </button>
+                    {(() => {
+                      const getDepth = (g: Group): number => {
+                        let d = 0;
+                        let cur: string | undefined = g.parent_id;
+                        while (cur) {
+                          d++;
+                          const parent = groups.find((x) => x.id === cur);
+                          cur = parent?.parent_id;
+                        }
+                        return d;
+                      };
+                      const sorted = [...groups].sort((a, b) => a.sort_order - b.sort_order);
+                      const buildTree = (parentId: string | undefined): Group[] => {
+                        const children = sorted.filter(
+                          (g) => (g.parent_id || undefined) === parentId,
+                        );
+                        return children.flatMap((g) => [g, ...buildTree(g.id)]);
+                      };
+                      const ordered = buildTree(undefined);
+                      return ordered.map((g) => {
+                        const depth = getDepth(g);
+                        return (
+                          <button
+                            key={g.id}
+                            type="button"
+                            className={`w-full py-1.5 text-left text-xs transition-colors hover:bg-accent ${groupId === g.id ? "bg-primary/15 text-primary" : ""}`}
+                            style={{ paddingLeft: `${12 + depth * 16}px`, paddingRight: "12px" }}
+                            onClick={() => {
+                              setGroupId(g.id);
+                              setNewGroupNamePending("");
+                              setNewGroupParentId("");
+                              setShowGroupDropdown(false);
+                            }}
+                          >
+                            {g.name}
+                          </button>
+                        );
+                      });
+                    })()}
                   </div>
-                  {(() => {
-                    const getDepth = (g: Group): number => {
-                      let d = 0;
-                      let cur: string | undefined = g.parent_id;
-                      while (cur) {
-                        d++;
-                        const parent = groups.find((x) => x.id === cur);
-                        cur = parent?.parent_id;
-                      }
-                      return d;
-                    };
-                    const sorted = [...groups].sort((a, b) => a.sort_order - b.sort_order);
-                    const buildTree = (parentId: string | undefined): Group[] => {
-                      const children = sorted.filter(
-                        (g) => (g.parent_id || undefined) === parentId,
-                      );
-                      return children.flatMap((g) => [g, ...buildTree(g.id)]);
-                    };
-                    const ordered = buildTree(undefined);
-                    return ordered.map((g) => {
-                      const depth = getDepth(g);
-                      return (
-                        <div
-                          key={g.id}
-                          className={`py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent ${groupId === g.id ? "bg-primary/15 text-primary" : ""}`}
-                          style={{ paddingLeft: `${12 + depth * 16}px`, paddingRight: "12px" }}
-                          onClick={() => {
-                            setGroupId(g.id);
-                            setNewGroupNamePending("");
-                            setNewGroupParentId("");
-                            setShowGroupDropdown(false);
-                          }}
-                        >
-                          {g.name}
-                        </div>
-                      );
-                    });
-                  })()}
-                  <div className="p-1.5 border-t">
+                  <div className="border-t p-1.5">
                     <div className="flex items-center gap-1.5">
                       <Input
                         className="flex-1 min-w-0 h-7 text-xs"
@@ -602,13 +674,18 @@ export default function NewSessionPage() {
                         <MdAdd className="text-sm" />
                       </Button>
                     </div>
+                    <p className="px-1 pt-1 text-[0.6875rem] leading-snug text-muted-foreground">
+                      {newGroupParentLabel
+                        ? t("dialog.newGroupParentHint", { group: newGroupParentLabel })
+                        : t("dialog.newGroupRootHint")}
+                    </p>
                   </div>
-                </div>
-              )}
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
-          <TabsContent value="ssh" className="space-y-4 m-0 border-0 outline-none w-full">
+          <TabsContent value="ssh" className="space-y-3 m-0 border-0 outline-none w-full">
             <SshForm
               host={host}
               setHost={setHost}
@@ -640,7 +717,7 @@ export default function NewSessionPage() {
             />
           </TabsContent>
 
-          <TabsContent value="local" className="space-y-4 m-0 border-0 outline-none w-full">
+          <TabsContent value="local" className="space-y-3 m-0 border-0 outline-none w-full">
             <LocalTerminal
               shellPath={shellPath}
               setShellPath={setShellPath}
@@ -649,11 +726,11 @@ export default function NewSessionPage() {
             />
           </TabsContent>
 
-          <TabsContent value="telnet" className="space-y-4 m-0 border-0 outline-none w-full">
+          <TabsContent value="telnet" className="space-y-3 m-0 border-0 outline-none w-full">
             <TelnetForm host={host} setHost={setHost} port={telnetPort} setPort={setTelnetPort} />
           </TabsContent>
 
-          <TabsContent value="serial" className="space-y-4 m-0 border-0 outline-none w-full">
+          <TabsContent value="serial" className="space-y-3 m-0 border-0 outline-none w-full">
             <SerialForm
               serialPortName={serialPortName}
               setSerialPortName={setSerialPortName}
@@ -674,10 +751,10 @@ export default function NewSessionPage() {
             />
           </TabsContent>
 
-          <div className="mt-6 space-y-4">
+          <div className="mt-5 space-y-3">
             {/* Description */}
             <div>
-              <Label className="text-[0.6875rem] text-muted-foreground">
+              <Label className="text-xs font-medium text-foreground/80">
                 {t("dialog.description")}
               </Label>
               <Textarea
@@ -694,11 +771,6 @@ export default function NewSessionPage() {
                 {error}
               </div>
             )}
-            {saveSuccess && (
-              <div className="p-2 bg-green-500/10 border border-green-500/30 rounded text-xs text-green-400">
-                {t("dialog.connectionSaved")}
-              </div>
-            )}
           </div>
         </div>
       </Tabs>
@@ -712,11 +784,8 @@ export default function NewSessionPage() {
           size="sm"
           className="text-xs px-4"
           onClick={handleSave}
-          disabled={
-            connecting ||
-            ((currentTab === "ssh" || currentTab === "telnet") && !host) ||
-            (currentTab === "serial" && !serialPortName)
-          }
+          disabled={saveDisabled}
+          title={validationError || undefined}
         >
           {connecting ? t("dialog.saving") : t("dialog.save")}
         </Button>

@@ -1,26 +1,30 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronsUpDownIcon } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MdChevronRight, MdClose, MdExpandMore, MdSettings } from "react-icons/md";
+import { MdCheck, MdChevronRight, MdClose, MdExpandMore, MdSettings } from "react-icons/md";
 import { ConnectionCombobox, type ConnectionOption } from "@/components/dialog/network/shared";
 import { KeyManagementTab } from "@/components/panel/security-auth/KeyManagementTab";
 import { PasswordManagementTab } from "@/components/panel/security-auth/PasswordManagementTab";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { invoke } from "@/lib/invoke";
+import { cn } from "@/lib/utils";
 import type { OtpEntry, ProxyConfig, SavedPassword, SshKey } from "@/types/global";
 
 interface SshFormProps {
@@ -51,6 +55,138 @@ interface SshFormProps {
   autoFillOtp: boolean;
   setAutoFillOtp: (v: boolean) => void;
   otpEntries: OtpEntry[];
+}
+
+function RequiredMark() {
+  return <span className="ml-0.5 text-destructive">*</span>;
+}
+
+interface AdvancedComboboxOption {
+  id: string;
+  label: string;
+  searchText: string;
+  subtitle: string;
+}
+
+function AdvancedCombobox({
+  value,
+  options,
+  placeholder,
+  searchPlaceholder,
+  emptyText,
+  missingSelectionLabel,
+  clearLabel,
+  onChange,
+}: {
+  value: string;
+  options: AdvancedComboboxOption[];
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyText: string;
+  missingSelectionLabel: string;
+  clearLabel: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.id === value);
+  const displayLabel = selected ? selected.label : value ? missingSelectionLabel : placeholder;
+  const displaySubtitle = selected?.subtitle ?? "";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-auto min-h-10 w-full justify-between px-3 py-2 font-normal"
+        >
+          <div className="min-w-0 text-left">
+            <div
+              className={cn(
+                "truncate text-sm",
+                !selected && !value ? "text-muted-foreground" : "text-foreground",
+              )}
+            >
+              {displayLabel}
+            </div>
+            {(selected || value) && (
+              <div className="truncate text-xs text-muted-foreground">
+                {displaySubtitle || missingSelectionLabel}
+              </div>
+            )}
+          </div>
+          <ChevronsUpDownIcon className="ml-3 shrink-0 text-sm text-muted-foreground opacity-70" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side="bottom"
+        collisionPadding={16}
+        className="w-[min(32rem,calc(100vw-2rem))] p-0"
+      >
+        <Command>
+          <CommandInput placeholder={searchPlaceholder} />
+          <CommandList className="max-h-72">
+            <CommandEmpty>{emptyText}</CommandEmpty>
+            <CommandGroup className="p-0">
+              <CommandItem
+                value={clearLabel}
+                className="items-start gap-3 px-3 py-2"
+                onSelect={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{clearLabel}</div>
+                </div>
+                {!value ? <MdCheck className="mt-0.5 text-sm text-primary" /> : null}
+              </CommandItem>
+            </CommandGroup>
+            <CommandGroup className="p-0">
+              {options.map((option) => (
+                <CommandItem
+                  key={option.id}
+                  value={`${option.label} ${option.searchText}`}
+                  className="items-start gap-3 px-3 py-2"
+                  onSelect={() => {
+                    onChange(option.id);
+                    setOpen(false);
+                  }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm">{option.label}</div>
+                    <div className="truncate text-xs text-muted-foreground">{option.subtitle}</div>
+                  </div>
+                  {option.id === value ? <MdCheck className="mt-0.5 text-sm text-primary" /> : null}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function formatProxySubtitle(proxy: ProxyConfig) {
+  return [`${proxy.protocol.toUpperCase()} ${proxy.host}:${proxy.port}`, proxy.username]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatOtpLabel(entry: OtpEntry) {
+  return entry.issuer && entry.username
+    ? `${entry.issuer} (${entry.username})`
+    : entry.issuer || entry.username || entry.id;
+}
+
+function formatOtpSubtitle(entry: OtpEntry) {
+  return [entry.otp_type.toUpperCase(), entry.algorithm, `${entry.digits}`]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export function SshForm({
@@ -90,8 +226,9 @@ export function SshForm({
   const [showKeyManagement, setShowKeyManagement] = useState(false);
   const [showPasswordManagement, setShowPasswordManagement] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const keyRef = useRef<HTMLDivElement>(null);
-  const passwordRef = useRef<HTMLDivElement>(null);
+  const [passwordSource, setPasswordSource] = useState<"direct" | "saved">(
+    passwordId ? "saved" : "direct",
+  );
 
   const loadSshKeys = useCallback(async () => {
     try {
@@ -118,17 +255,10 @@ export function SshForm({
   }, [passwordId, setPasswordId]);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (keyRef.current && !keyRef.current.contains(e.target as Node)) {
-        setShowKeyDropdown(false);
-      }
-      if (passwordRef.current && !passwordRef.current.contains(e.target as Node)) {
-        setShowPasswordDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    if (passwordId) {
+      setPasswordSource("saved");
+    }
+  }, [passwordId]);
 
   useEffect(() => {
     let unlisten: () => void;
@@ -151,15 +281,34 @@ export function SshForm({
 
   const selectedKeyName = sshKeys.find((k) => k.id === keyId)?.name;
   const selectedPasswordName = savedPasswords.find((p) => p.id === passwordId)?.name;
-  const selectedProxyName = proxies.find((proxy) => proxy.id === proxyId)?.name;
+  const selectedProxy = proxies.find((proxy) => proxy.id === proxyId);
   const selectedJumpHost = jumpHostOptions.find((option) => option.connection.id === jumpHostId);
-  const selectedOtpLabel = otpEntries.find((entry) => entry.id === otpId);
+  const selectedOtpEntry = otpEntries.find((entry) => entry.id === otpId);
+  const proxyOptions = proxies.map((proxy) => ({
+    id: proxy.id,
+    label: proxy.name,
+    searchText: [proxy.name, proxy.protocol, proxy.host, proxy.port, proxy.username]
+      .filter(Boolean)
+      .join(" "),
+    subtitle: formatProxySubtitle(proxy),
+  }));
+  const otpOptions = otpEntries.map((entry) => ({
+    id: entry.id,
+    label: formatOtpLabel(entry),
+    searchText: [entry.issuer, entry.username, entry.otp_type, entry.algorithm]
+      .filter(Boolean)
+      .join(" "),
+    subtitle: formatOtpSubtitle(entry),
+  }));
 
   return (
-    <div className="space-y-4 w-full">
+    <div className="space-y-3 w-full">
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="min-w-0 flex-1">
-          <Label className="text-[0.6875rem] text-muted-foreground">{t("dialog.host")}</Label>
+          <Label className="text-xs font-medium text-foreground/80">
+            {t("dialog.host")}
+            <RequiredMark />
+          </Label>
           <Input
             className="mt-1 text-xs h-8"
             placeholder="192.168.1.100"
@@ -168,7 +317,10 @@ export function SshForm({
           />
         </div>
         <div className="w-full sm:w-32">
-          <Label className="text-[0.6875rem] text-muted-foreground">{t("dialog.port")}</Label>
+          <Label className="text-xs font-medium text-foreground/80">
+            {t("dialog.port")}
+            <RequiredMark />
+          </Label>
           <NumberInput
             className="mt-1 [&_button]:h-8 [&_button]:w-8 [&_input]:h-8 [&_input]:text-xs"
             value={port}
@@ -179,7 +331,10 @@ export function SshForm({
         </div>
       </div>
       <div>
-        <Label className="text-[0.6875rem] text-muted-foreground">{t("dialog.username")}</Label>
+        <Label className="text-xs font-medium text-foreground/80">
+          {t("dialog.username")}
+          <RequiredMark />
+        </Label>
         <Input
           className="mt-1 text-xs h-8"
           value={username}
@@ -187,8 +342,9 @@ export function SshForm({
         />
       </div>
       <div>
-        <Label className="text-[0.6875rem] text-muted-foreground">
+        <Label className="text-xs font-medium text-foreground/80">
           {t("dialog.authentication")}
+          <RequiredMark />
         </Label>
         <Tabs
           value={authType}
@@ -204,163 +360,215 @@ export function SshForm({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="password" className="mt-3 border-0 outline-none space-y-3">
-            <div>
-              <Label className="text-[0.6875rem] text-muted-foreground">
-                {t("dialog.inputPassword")}
-              </Label>
-              <div className="relative mt-1">
-                <Input
-                  type="password"
-                  className="text-xs h-8 pr-8"
-                  placeholder={
-                    hasPassword && !password
-                      ? t("dialog.passwordAlreadySet")
-                      : t("dialog.passwordPlaceholder")
-                  }
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    if (e.target.value) {
-                      setPasswordId("");
-                      setHasPassword(false);
+          <TabsContent value="password" className="mt-3 border-0 outline-none">
+            <Label className="text-xs font-medium text-foreground/80">
+              {t("dialog.passwordSource")}
+              <RequiredMark />
+            </Label>
+            <Tabs
+              value={passwordSource}
+              onValueChange={(value) => {
+                const nextSource = value as "direct" | "saved";
+                setPasswordSource(nextSource);
+                if (nextSource === "direct") {
+                  setPasswordId("");
+                } else {
+                  setPassword("");
+                  setHasPassword(false);
+                }
+              }}
+              className="mt-1 w-full"
+            >
+              <TabsList className="grid h-8 w-full grid-cols-2 pointer-events-auto">
+                <TabsTrigger value="direct" className="text-xs">
+                  {t("dialog.directPassword")}
+                </TabsTrigger>
+                <TabsTrigger value="saved" className="text-xs">
+                  {t("dialog.savedPassword")}
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="direct" className="mt-3 border-0 outline-none">
+                <Label className="text-xs font-medium text-foreground/80">
+                  {t("dialog.password")}
+                  <RequiredMark />
+                </Label>
+                <div className="relative mt-1">
+                  <Input
+                    type="password"
+                    className="text-xs h-8 pr-8"
+                    placeholder={
+                      hasPassword && !password
+                        ? t("dialog.passwordAlreadySet")
+                        : t("dialog.passwordPlaceholder")
                     }
-                  }}
-                />
-                {(password || hasPassword) && (
-                  <button
-                    type="button"
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded-sm text-muted-foreground hover:text-foreground transition-colors"
-                    onClick={() => {
-                      setPassword("");
-                      setHasPassword(false);
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setPasswordId("");
+                      if (e.target.value) {
+                        setHasPassword(false);
+                      }
                     }}
-                  >
-                    <MdClose className="text-sm" />
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="relative" ref={passwordRef}>
-              <Label className="text-[0.6875rem] text-muted-foreground">
-                {t("dialog.selectPassword")}
-              </Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full mt-1 h-8 justify-between text-xs font-normal"
-                onClick={() => setShowPasswordDropdown(!showPasswordDropdown)}
-              >
-                <span className={`truncate ${passwordId ? "" : "text-muted-foreground"}`}>
-                  {selectedPasswordName || t("dialog.selectPassword")}
-                </span>
-                <MdExpandMore className="text-xs text-muted-foreground shrink-0" />
-              </Button>
-              {showPasswordDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 border rounded-md shadow-xl z-20 overflow-hidden bg-popover flex flex-col max-h-36">
-                  <div className="overflow-y-auto overflow-x-hidden flex-1">
-                    <div
-                      className={`px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent ${!passwordId ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                  />
+                  {(password || hasPassword) && (
+                    <button
+                      type="button"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded-sm text-muted-foreground hover:text-foreground transition-colors"
+                      title={t("dialog.clearPassword", "Clear password")}
                       onClick={() => {
-                        setPasswordId("");
-                        setShowPasswordDropdown(false);
+                        setPassword("");
+                        setHasPassword(false);
                       }}
                     >
-                      {t("dialog.none")}
-                    </div>
-                    {savedPasswords.map((p) => (
-                      <div
-                        key={p.id}
-                        className={`px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent ${passwordId === p.id ? "bg-primary/15 text-primary" : ""}`}
+                      <MdClose className="text-sm" />
+                    </button>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="saved" className="mt-3 border-0 outline-none">
+                <Label className="text-xs font-medium text-foreground/80">
+                  {t("dialog.savedPassword")}
+                  <RequiredMark />
+                </Label>
+                <Popover open={showPasswordDropdown} onOpenChange={setShowPasswordDropdown}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mt-1 h-8 w-full justify-between text-xs font-normal"
+                    >
+                      <span className={`truncate ${passwordId ? "" : "text-muted-foreground"}`}>
+                        {selectedPasswordName || t("dialog.selectPassword")}
+                      </span>
+                      <MdExpandMore className="shrink-0 text-xs text-muted-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="start"
+                    side="bottom"
+                    sideOffset={4}
+                    collisionPadding={16}
+                    className="w-[var(--radix-popover-trigger-width)] min-w-[14rem] overflow-hidden p-0"
+                  >
+                    <div className="max-h-40 overflow-y-auto overflow-x-hidden">
+                      <button
+                        type="button"
+                        className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent ${!passwordId ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
                         onClick={() => {
-                          setPasswordId(p.id);
-                          setPassword("");
+                          setPasswordId("");
                           setShowPasswordDropdown(false);
                         }}
                       >
-                        {p.name}
-                      </div>
-                    ))}
-                    {savedPasswords.length === 0 && (
-                      <div className="px-3 py-2 text-xs text-muted-foreground">
-                        {t("dialog.noPasswords")}
-                      </div>
-                    )}
-                  </div>
-                  <div
-                    className="px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent text-primary border-t flex items-center gap-1.5 shrink-0 bg-popover"
-                    onClick={() => {
-                      setShowPasswordDropdown(false);
-                      setShowPasswordManagement(true);
-                    }}
-                  >
-                    <MdSettings className="text-sm" />
-                    {t("dialog.managePasswords")}
-                  </div>
-                </div>
-              )}
-            </div>
+                        {t("dialog.none")}
+                      </button>
+                      {savedPasswords.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent ${passwordId === p.id ? "bg-primary/15 text-primary" : ""}`}
+                          onClick={() => {
+                            setPasswordId(p.id);
+                            setPassword("");
+                            setHasPassword(false);
+                            setShowPasswordDropdown(false);
+                          }}
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                      {savedPasswords.length === 0 && (
+                        <div className="px-3 py-2 text-xs text-muted-foreground">
+                          {t("dialog.noPasswords")}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="flex w-full shrink-0 items-center gap-1.5 border-t bg-popover px-3 py-1.5 text-left text-xs text-primary transition-colors hover:bg-accent"
+                      onClick={() => {
+                        setShowPasswordDropdown(false);
+                        setShowPasswordManagement(true);
+                      }}
+                    >
+                      <MdSettings className="text-sm" />
+                      {t("dialog.managePasswords")}
+                    </button>
+                  </PopoverContent>
+                </Popover>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="key" className="mt-3 border-0 outline-none">
-            <div className="relative" ref={keyRef}>
-              <Label className="text-[0.6875rem] text-muted-foreground">
-                {t("dialog.privateKey")}
-              </Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full mt-1 h-8 justify-between text-xs font-normal"
-                onClick={() => setShowKeyDropdown(!showKeyDropdown)}
+            <Label className="text-xs font-medium text-foreground/80">
+              {t("dialog.privateKey")}
+              <RequiredMark />
+            </Label>
+            <Popover open={showKeyDropdown} onOpenChange={setShowKeyDropdown}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-1 h-8 w-full justify-between text-xs font-normal"
+                >
+                  <span className={`truncate ${keyId ? "" : "text-muted-foreground"}`}>
+                    {selectedKeyName || t("dialog.selectKey")}
+                  </span>
+                  <MdExpandMore className="shrink-0 text-xs text-muted-foreground" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                side="bottom"
+                sideOffset={4}
+                collisionPadding={16}
+                className="w-[var(--radix-popover-trigger-width)] min-w-[14rem] overflow-hidden p-0"
               >
-                <span className={`truncate ${keyId ? "" : "text-muted-foreground"}`}>
-                  {selectedKeyName || t("dialog.selectKey")}
-                </span>
-                <MdExpandMore className="text-xs text-muted-foreground shrink-0" />
-              </Button>
-              {showKeyDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 border rounded-md shadow-xl z-20 overflow-hidden bg-popover flex flex-col max-h-36">
-                  <div className="overflow-y-auto overflow-x-hidden flex-1">
-                    <div
-                      className={`px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent ${!keyId ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                <div className="max-h-40 overflow-y-auto overflow-x-hidden">
+                  <button
+                    type="button"
+                    className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent ${!keyId ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                    onClick={() => {
+                      setKeyId("");
+                      setShowKeyDropdown(false);
+                    }}
+                  >
+                    {t("dialog.none")}
+                  </button>
+                  {sshKeys.map((k) => (
+                    <button
+                      key={k.id}
+                      type="button"
+                      className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent ${keyId === k.id ? "bg-primary/15 text-primary" : ""}`}
                       onClick={() => {
-                        setKeyId("");
+                        setKeyId(k.id);
                         setShowKeyDropdown(false);
                       }}
                     >
-                      {t("dialog.none")}
+                      {k.name}
+                    </button>
+                  ))}
+                  {sshKeys.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      {t("dialog.noKeys")}
                     </div>
-                    {sshKeys.map((k) => (
-                      <div
-                        key={k.id}
-                        className={`px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent ${keyId === k.id ? "bg-primary/15 text-primary" : ""}`}
-                        onClick={() => {
-                          setKeyId(k.id);
-                          setShowKeyDropdown(false);
-                        }}
-                      >
-                        {k.name}
-                      </div>
-                    ))}
-                    {sshKeys.length === 0 && (
-                      <div className="px-3 py-2 text-xs text-muted-foreground">
-                        {t("dialog.noKeys")}
-                      </div>
-                    )}
-                  </div>
-                  <div
-                    className="px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent text-primary border-t flex items-center gap-1.5 shrink-0 bg-popover"
-                    onClick={() => {
-                      setShowKeyDropdown(false);
-                      setShowKeyManagement(true);
-                    }}
-                  >
-                    <MdSettings className="text-sm" />
-                    {t("dialog.manageKeys")}
-                  </div>
+                  )}
                 </div>
-              )}
-            </div>
+                <button
+                  type="button"
+                  className="flex w-full shrink-0 items-center gap-1.5 border-t bg-popover px-3 py-1.5 text-left text-xs text-primary transition-colors hover:bg-accent"
+                  onClick={() => {
+                    setShowKeyDropdown(false);
+                    setShowKeyManagement(true);
+                  }}
+                >
+                  <MdSettings className="text-sm" />
+                  {t("dialog.manageKeys")}
+                </button>
+              </PopoverContent>
+            </Popover>
           </TabsContent>
         </Tabs>
       </div>
@@ -392,30 +600,26 @@ export function SshForm({
                   <div className="text-xs font-medium">{t("dialog.proxySelect")}</div>
                   <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
                     {proxyId
-                      ? `${selectedProxyName ?? t("dialog.proxySelect")}`
+                      ? (selectedProxy?.name ?? t("dialog.proxySelect"))
                       : t("dialog.noProxy")}
                   </p>
                 </div>
                 <div className="mt-3">
-                  <Label className="text-[0.6875rem] text-muted-foreground">
+                  <Label className="text-xs font-medium text-foreground/80">
                     {t("dialog.proxySelect")}
                   </Label>
-                  <Select
-                    value={proxyId || "__none__"}
-                    onValueChange={(value) => setProxyId(value === "__none__" ? "" : value)}
-                  >
-                    <SelectTrigger className="mt-1 h-8 bg-background/85 text-xs">
-                      <SelectValue placeholder={t("dialog.noProxy")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">{t("dialog.noProxy")}</SelectItem>
-                      {proxies.map((proxy) => (
-                        <SelectItem key={proxy.id} value={proxy.id}>
-                          {proxy.name} ({proxy.protocol.toUpperCase()} {proxy.host}:{proxy.port})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="mt-1">
+                    <AdvancedCombobox
+                      value={proxyId}
+                      options={proxyOptions}
+                      placeholder={t("dialog.noProxy")}
+                      searchPlaceholder={t("network.searchProxies")}
+                      emptyText={t("network.noProxyConfigs")}
+                      missingSelectionLabel={t("dialog.selectedItemMissing")}
+                      clearLabel={t("dialog.noProxy")}
+                      onChange={setProxyId}
+                    />
+                  </div>
                 </div>
               </div>
             </TabsContent>
@@ -433,7 +637,7 @@ export function SshForm({
                   </p>
                 </div>
                 <div className="mt-3">
-                  <Label className="text-[0.6875rem] text-muted-foreground">
+                  <Label className="text-xs font-medium text-foreground/80">
                     {t("dialog.selectProxyJump")}
                   </Label>
                   <div className="mt-1">
@@ -457,44 +661,37 @@ export function SshForm({
                 <div className="space-y-0.5">
                   <div className="text-xs font-medium">{t("dialog.twoFactorAuth")}</div>
                   <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                    {otpId && selectedOtpLabel
-                      ? `${selectedOtpLabel.issuer} (${selectedOtpLabel.username})`
+                    {otpId && selectedOtpEntry
+                      ? formatOtpLabel(selectedOtpEntry)
                       : t("dialog.noOtp")}
                   </p>
                 </div>
                 <div className="mt-3 space-y-3">
                   <div>
-                    <Label className="text-[0.6875rem] text-muted-foreground">
+                    <Label className="text-xs font-medium text-foreground/80">
                       {t("dialog.selectOtp")}
                     </Label>
-                    <Select
-                      value={otpId || "__none__"}
-                      onValueChange={(value) => {
-                        const id = value === "__none__" ? "" : value;
-                        setOtpId(id);
-                        if (!id) setAutoFillOtp(false);
-                      }}
-                    >
-                      <SelectTrigger className="mt-1 h-8 bg-background/85 text-xs">
-                        <SelectValue placeholder={t("dialog.noOtp")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">{t("dialog.noOtp")}</SelectItem>
-                        {otpEntries.map((entry) => (
-                          <SelectItem key={entry.id} value={entry.id}>
-                            {entry.issuer} ({entry.username})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="mt-1">
+                      <AdvancedCombobox
+                        value={otpId}
+                        options={otpOptions}
+                        placeholder={t("dialog.noOtp")}
+                        searchPlaceholder={t("dialog.searchOtpEntries")}
+                        emptyText={t("dialog.noOtpEntries")}
+                        missingSelectionLabel={t("dialog.selectedItemMissing")}
+                        clearLabel={t("dialog.noOtp")}
+                        onChange={(id) => {
+                          setOtpId(id);
+                          if (!id) setAutoFillOtp(false);
+                        }}
+                      />
+                    </div>
                   </div>
 
                   <div className="rounded-md border border-dashed bg-background/70 px-3 py-2">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-[0.6875rem] font-medium">
-                          {t("dialog.autoFillOtp")}
-                        </div>
+                        <div className="text-xs font-medium">{t("dialog.autoFillOtp")}</div>
                         <div className="text-[0.625rem] text-muted-foreground">
                           {otpId ? t("dialog.twoFactorAuth") : t("dialog.noOtp")}
                         </div>

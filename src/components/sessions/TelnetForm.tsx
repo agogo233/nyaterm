@@ -10,13 +10,20 @@ interface TelnetFormProps {
   setPort: (v: number) => void;
 }
 
+function RequiredMark() {
+  return <span className="ml-0.5 text-destructive">*</span>;
+}
+
 export function TelnetForm({ host, setHost, port, setPort }: TelnetFormProps) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-4 w-full">
+    <div className="space-y-3 w-full">
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="min-w-0 flex-1">
-          <Label className="text-[0.6875rem] text-muted-foreground">{t("dialog.host")}</Label>
+          <Label className="text-xs font-medium text-foreground/80">
+            {t("dialog.host")}
+            <RequiredMark />
+          </Label>
           <Input
             className="mt-1 text-xs h-8"
             placeholder="192.168.1.100"
@@ -25,7 +32,10 @@ export function TelnetForm({ host, setHost, port, setPort }: TelnetFormProps) {
           />
         </div>
         <div className="w-full sm:w-32">
-          <Label className="text-[0.6875rem] text-muted-foreground">{t("dialog.port")}</Label>
+          <Label className="text-xs font-medium text-foreground/80">
+            {t("dialog.port")}
+            <RequiredMark />
+          </Label>
           <NumberInput
             className="mt-1 [&_button]:h-8 [&_button]:w-8 [&_input]:h-8 [&_input]:text-xs"
             value={port}
