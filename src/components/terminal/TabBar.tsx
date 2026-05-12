@@ -51,12 +51,14 @@ interface TabBarProps {
   onDuplicateSession: (tab: Tab) => void | Promise<void>;
   onReconnectSession: (tab: Tab) => void | Promise<void>;
   onSplitSession: (tab: Tab, direction: PaneSplitDirection) => void | Promise<void>;
+  onUnsplit?: () => void;
   onCloseSession: (tab: Tab) => void | Promise<void>;
   onCloseAll: () => void | Promise<void>;
   onCloseInactive: (keepTabId: string) => void | Promise<void>;
   onCloseRight: (tabId: string) => void | Promise<void>;
   onSessionInfo: (tab: Tab) => void | Promise<void>;
   onReorderTabs: (fromTabId: string, toIndex: number) => void;
+  onMoveTabHere?: (fromTabId: string, toIndex: number) => void;
 }
 
 interface ConnectionGroupNode {
@@ -178,12 +180,14 @@ function TabBar({
   onDuplicateSession,
   onReconnectSession,
   onSplitSession,
+  onUnsplit,
   onCloseSession,
   onCloseAll,
   onCloseInactive,
   onCloseRight,
   onSessionInfo,
   onReorderTabs,
+  onMoveTabHere,
 }: TabBarProps) {
   const { t } = useTranslation();
   const { appSettings, savedConnections, savedGroups, syncGroups, broadcastToAll } = useApp();
@@ -343,28 +347,37 @@ function TabBar({
   }, []);
 
   const handleDropAtIndex = useCallback(
-    (insertionIndex: number) => {
-      if (!draggedTabId) return;
+    (insertionIndex: number, event?: DragEvent<HTMLDivElement>) => {
+      const externalTabId = event?.dataTransfer.getData("application/nyaterm-tab");
+      const effectiveTabId = draggedTabId || externalTabId;
+      if (!effectiveTabId) return;
 
-      const fromIndex = tabs.findIndex((tab) => tab.id === draggedTabId);
+      const fromIndex = tabs.findIndex((tab) => tab.id === effectiveTabId);
       if (fromIndex === -1) {
+        if (onMoveTabHere) {
+          onMoveTabHere(effectiveTabId, insertionIndex);
+          requestAnimationFrame(() => {
+            window.dispatchEvent(new CustomEvent("nyaterm:refresh-terminals"));
+          });
+        }
         resetDragState();
         return;
       }
 
       const nextIndex = insertionIndex > fromIndex ? insertionIndex - 1 : insertionIndex;
-      onReorderTabs(draggedTabId, nextIndex);
+      onReorderTabs(effectiveTabId, nextIndex);
       requestAnimationFrame(() => {
         window.dispatchEvent(new CustomEvent("nyaterm:refresh-terminals"));
       });
       resetDragState();
     },
-    [draggedTabId, onReorderTabs, resetDragState, tabs],
+    [draggedTabId, onMoveTabHere, onReorderTabs, resetDragState, tabs],
   );
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, tabId: string) => {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", tabId);
+    event.dataTransfer.setData("application/nyaterm-tab", tabId);
     setDraggedTabId(tabId);
     setDropIndex(tabs.findIndex((tab) => tab.id === tabId));
   };
@@ -511,7 +524,8 @@ function TabBar({
           measureOnly
             ? undefined
             : (event) => {
-                if (!draggedTabId) return;
+                if (!draggedTabId && !event.dataTransfer.types.includes("application/nyaterm-tab"))
+                  return;
                 event.preventDefault();
                 setDropIndex(getInsertionIndex(event, index));
               }
@@ -521,7 +535,7 @@ function TabBar({
             ? undefined
             : (event) => {
                 event.preventDefault();
-                handleDropAtIndex(getInsertionIndex(event, index));
+                handleDropAtIndex(getInsertionIndex(event, index), event);
               }
         }
       >
@@ -595,7 +609,7 @@ function TabBar({
 
     return (
       <div key={tab.id} className="relative flex shrink-0">
-        {draggedTabId && dropIndex === index && (
+        {dropIndex === index && (draggedTabId || dropIndex !== null) && (
           <div
             className="pointer-events-none absolute inset-y-1 left-0 z-20 w-0.5 rounded-full"
             style={{ backgroundColor: "var(--df-primary)" }}
@@ -608,6 +622,7 @@ function TabBar({
           onDuplicateSession={onDuplicateSession}
           onReconnectSession={onReconnectSession}
           onSplitSession={onSplitSession}
+          onUnsplit={onUnsplit}
           onCloseSession={onCloseSession}
           onCloseAll={onCloseAll}
           onCloseInactive={onCloseInactive}
@@ -724,16 +739,17 @@ function TabBar({
         <div
           className="relative flex min-w-6 flex-1 shrink-0"
           onDragOver={(event) => {
-            if (!draggedTabId) return;
+            if (!draggedTabId && !event.dataTransfer.types.includes("application/nyaterm-tab"))
+              return;
             event.preventDefault();
             setDropIndex(tabs.length);
           }}
           onDrop={(event) => {
             event.preventDefault();
-            handleDropAtIndex(tabs.length);
+            handleDropAtIndex(tabs.length, event);
           }}
         >
-          {draggedTabId && dropIndex === tabs.length && (
+          {(draggedTabId || dropIndex !== null) && dropIndex === tabs.length && (
             <div
               className="pointer-events-none absolute inset-y-1 left-0 z-20 w-0.5 rounded-full"
               style={{ backgroundColor: "var(--df-primary)" }}
