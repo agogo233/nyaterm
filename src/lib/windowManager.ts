@@ -21,6 +21,10 @@ export function isModalChildLabel(label: string) {
   return MODAL_CHILD_LABELS.has(label) || label.startsWith(AUTO_UPLOAD_WINDOW_PREFIX);
 }
 
+function needsAlwaysOnTop(label: string) {
+  return label.startsWith(AUTO_UPLOAD_WINDOW_PREFIX);
+}
+
 async function getMainWindow() {
   return (await WebviewWindow.getByLabel(MAIN_WINDOW_LABEL)) ?? getCurrentWindow();
 }
@@ -48,7 +52,7 @@ async function applyModalWindowState(excludedLabel?: string) {
   if (hasModalChild) {
     const topModalWindow = remainingModalWindows[remainingModalWindows.length - 1];
     await topModalWindow.show().catch(() => {});
-    await topModalWindow.setAlwaysOnTop(true).catch(() => {});
+    await topModalWindow.setAlwaysOnTop(needsAlwaysOnTop(topModalWindow.label)).catch(() => {});
     await topModalWindow.setFocus().catch(() => {});
     return;
   }
@@ -71,17 +75,16 @@ export async function bounceTopModalWindow() {
   if (!topModalWindow) return;
 
   await topModalWindow.requestUserAttention(UserAttentionType.Critical).catch(() => {});
-  await topModalWindow.setAlwaysOnTop(true).catch(() => {});
+  await topModalWindow.setAlwaysOnTop(needsAlwaysOnTop(topModalWindow.label)).catch(() => {});
   await topModalWindow.setFocus().catch(() => {});
 }
 
 export async function openChildWindow(opts: ChildWindowOptions) {
-  const isModalChild = isModalChildLabel(opts.label);
   const existing = await WebviewWindow.getByLabel(opts.label);
   if (existing) {
     await existing.setTitle(opts.title).catch(() => {});
     await existing.show().catch(() => {});
-    await existing.setAlwaysOnTop(isModalChild).catch(() => {});
+    await existing.setAlwaysOnTop(needsAlwaysOnTop(opts.label)).catch(() => {});
     await existing.setFocus().catch(() => {});
     await syncMainWindowModalState().catch(() => {});
     return existing;
@@ -98,12 +101,12 @@ export async function openChildWindow(opts: ChildWindowOptions) {
     titleBarStyle: isMacOS ? "overlay" : undefined,
     hiddenTitle: isMacOS || undefined,
     resizable: opts.resizable ?? true,
-    alwaysOnTop: isModalChild,
+    alwaysOnTop: needsAlwaysOnTop(opts.label),
     parent: parentWindow,
   });
   win.once("tauri://created", () => {
     emit("child-window-opened", { label: opts.label });
-    void win.setAlwaysOnTop(isModalChild).catch(() => {});
+    void win.setAlwaysOnTop(needsAlwaysOnTop(opts.label)).catch(() => {});
     void win.setFocus().catch(() => {});
     void syncMainWindowModalState();
   });
