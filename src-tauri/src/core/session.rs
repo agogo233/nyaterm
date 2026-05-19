@@ -115,6 +115,8 @@ pub struct SessionHandle {
     pub ssh_handle: Option<Arc<dyn Any + Send + Sync>>,
     /// Current working directory cached from directory updates emitted by the session.
     pub cwd: SharedCwd,
+    /// Lazily-initialised remote file system (auto-fallback across SFTP / SCP backends).
+    pub remote_fs: Option<Arc<crate::core::sftp::AutoRemoteFs>>,
 }
 
 #[derive(Debug, Default)]
@@ -533,6 +535,7 @@ mod tests {
             ssh_config: None,
             ssh_handle: None,
             cwd: Arc::new(Mutex::new(None)),
+            remote_fs: None,
         }
     }
 

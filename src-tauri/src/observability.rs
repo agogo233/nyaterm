@@ -16,7 +16,7 @@ use tracing_subscriber::{fmt as subscriber_fmt, util::SubscriberInitExt, EnvFilt
 use zip::write::SimpleFileOptions;
 
 use crate::config::{self, DiagnosticsLogLevel, DiagnosticsSettings};
-use crate::core::ssh::sftp;
+use crate::core::sftp;
 use crate::core::{SessionInfo, SessionManager, SessionType};
 use crate::error::{AppError, AppResult};
 

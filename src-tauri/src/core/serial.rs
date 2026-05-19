@@ -99,6 +99,7 @@ pub async fn create_serial_session(
         ssh_config: None,
         ssh_handle: None,
         cwd,
+        remote_fs: None,
     };
     manager.add_session(session_handle).await;
 

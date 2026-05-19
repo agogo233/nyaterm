@@ -96,6 +96,7 @@ pub async fn create_local_session(
         ssh_config: None,
         ssh_handle: None,
         cwd: cwd.clone(),
+        remote_fs: None,
     };
     manager.add_session(session_handle).await;
 

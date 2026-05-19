@@ -35,7 +35,7 @@ pub fn open_download_dir(app: tauri::AppHandle) -> AppResult<()> {
 
 #[tauri::command]
 pub fn open_transfer_target_directory(transfer_id: String) -> AppResult<()> {
-    let path = crate::core::ssh::sftp::transfer_target_directory(&transfer_id)?;
+    let path = crate::core::sftp::transfer_target_directory(&transfer_id)?;
     open_folder(&path)
 }
 

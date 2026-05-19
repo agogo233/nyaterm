@@ -16,6 +16,7 @@ mod quick_commands;
 mod recording;
 pub mod serial;
 mod session;
+pub mod sftp;
 pub mod ssh;
 pub mod stats;
 pub mod telnet;

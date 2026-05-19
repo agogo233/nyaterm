@@ -165,6 +165,7 @@ pub async fn create_ssh_session(
         ssh_config: Some(ssh_config_arc),
         ssh_handle: Some(ssh_handle_arc),
         cwd: cwd.clone(),
+        remote_fs: None,
     };
     manager.add_session(session_handle).await;
 
