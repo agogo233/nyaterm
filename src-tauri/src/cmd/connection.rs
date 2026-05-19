@@ -60,6 +60,7 @@ pub fn save_connection(
                 .and_then(|a| a.password.clone()),
             _ => None,
         };
+        auth.has_password = false;
     }
 
     if let Some(ex) = cfg.connections.iter_mut().find(|c| c.id == target_id) {

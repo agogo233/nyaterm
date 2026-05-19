@@ -82,13 +82,17 @@ pub struct ConnectionAuth {
     pub otp_id: Option<String>,
     #[serde(default)]
     pub auto_fill_otp: bool,
-    /// Transient flag: true when an inline password exists on disk (never serialized).
-    #[serde(default, skip_serializing)]
+    /// Transient flag: true when an inline password exists on disk.
+    #[serde(default, skip_serializing_if = "is_false")]
     pub has_password: bool,
 }
 
 fn default_auth_mode() -> String {
     "password".to_string()
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 // ── Network block ───────────────────────────────────────────────────────────
@@ -196,7 +200,13 @@ pub fn load_sessions(app: &AppHandle) -> AppResult<SessionsConfig> {
 /// Saves sessions config to disk.
 pub fn save_sessions(app: &AppHandle, config: &SessionsConfig) -> AppResult<()> {
     let _ = app;
-    save_json_doc(crate::storage::JSON_SESSIONS, config)
+    let mut sanitized = config.clone();
+    for conn in &mut sanitized.connections {
+        if let Some(auth) = &mut conn.auth {
+            auth.has_password = false;
+        }
+    }
+    save_json_doc(crate::storage::JSON_SESSIONS, &sanitized)
 }
 
 /// Loads the main app config (sessions + groups).

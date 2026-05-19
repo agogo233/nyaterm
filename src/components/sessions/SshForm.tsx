@@ -16,7 +16,13 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
@@ -26,6 +32,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { invoke } from "@/lib/invoke";
 import { cn } from "@/lib/utils";
 import type { OtpEntry, ProxyConfig, SavedPassword, SshKey } from "@/types/global";
+
+const MASKED_PASSWORD_PLACEHOLDER = "••••••••";
 
 interface SshFormProps {
   host: string;
@@ -399,7 +407,7 @@ export function SshForm({
                     className="text-xs h-8 pr-8"
                     placeholder={
                       hasPassword && !password
-                        ? t("dialog.passwordAlreadySet")
+                        ? MASKED_PASSWORD_PLACEHOLDER
                         : t("dialog.passwordPlaceholder")
                     }
                     value={password}

@@ -383,6 +383,28 @@ export default function NewSessionPage() {
               return Object.keys(nextNetwork).length > 0 ? nextNetwork : undefined;
             })()
           : undefined;
+      const auth =
+        currentTab === "ssh"
+          ? (() => {
+              const nextAuth: NonNullable<SavedConnection["auth"]> = {
+                mode: authType,
+                password_id: authType === "password" ? passwordId || "" : "",
+                key_id: authType === "key" && keyId ? keyId : undefined,
+                otp_id: otpId || undefined,
+                auto_fill_otp: otpId ? autoFillOtp : undefined,
+              };
+
+              if (authType !== "password" || passwordId) {
+                nextAuth.password = "";
+              } else if (password) {
+                nextAuth.password = password;
+              } else if (!hasPassword) {
+                nextAuth.password = "";
+              }
+
+              return nextAuth;
+            })()
+          : undefined;
 
       const connection: SavedConnection = {
         id: initialData?.id || "",
@@ -396,19 +418,7 @@ export default function NewSessionPage() {
               host: normalizedHost,
               port: sshPort,
               username: normalizedUsername,
-              auth: {
-                mode: authType,
-                password_id: authType === "password" ? passwordId || "" : "",
-                password:
-                  authType === "password"
-                    ? passwordId
-                      ? ""
-                      : password || (hasPassword ? undefined : "")
-                    : "",
-                key_id: authType === "key" && keyId ? keyId : undefined,
-                otp_id: otpId || undefined,
-                auto_fill_otp: otpId ? autoFillOtp : undefined,
-              },
+              auth,
               network,
             }
           : {}),
