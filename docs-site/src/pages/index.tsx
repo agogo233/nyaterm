@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import clsx from 'clsx';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import useBaseUrl from '@docusaurus/useBaseUrl';
@@ -19,9 +19,9 @@ type FeatureTab = {
   darkImage: string;
 };
 
-type SummaryCard = {
-  title: string;
-  description: string;
+type FeatureTabWithUrls = FeatureTab & {
+  lightImageUrl: string;
+  darkImageUrl: string;
 };
 
 type DownloadPlatformKey =
@@ -72,6 +72,90 @@ const downloadPlatforms: DownloadPlatform[] = [
 
 const featureAutoplayStoppedKey = 'nyaterm-home-feature-tabs-autoplay-stopped';
 const featureAutoplayIntervalMs = 4200;
+const featurePreviewImageCache = new Map<string, 'loaded' | Promise<boolean>>();
+
+type ThemeMode = 'light' | 'dark';
+
+function resolveAssetUrl(baseUrl: string, assetPath: string) {
+  if (/^(?:[a-z]+:)?\/\//i.test(assetPath)) {
+    return assetPath;
+  }
+
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  const normalizedPath = assetPath.startsWith('/') ? assetPath.slice(1) : assetPath;
+  return `${normalizedBase}${normalizedPath}`;
+}
+
+function isFeaturePreviewImageLoaded(url: string) {
+  return featurePreviewImageCache.get(url) === 'loaded';
+}
+
+function preloadFeaturePreviewImage(url: string): Promise<boolean> {
+  if (!url) {
+    return Promise.resolve(false);
+  }
+
+  const cached = featurePreviewImageCache.get(url);
+  if (cached === 'loaded') {
+    return Promise.resolve(true);
+  }
+
+  if (cached) {
+    return cached;
+  }
+
+  if (typeof Image === 'undefined') {
+    return Promise.resolve(false);
+  }
+
+  const pending = new Promise<boolean>((resolve) => {
+    const image = new Image();
+
+    image.onload = () => {
+      featurePreviewImageCache.set(url, 'loaded');
+      resolve(true);
+    };
+
+    image.onerror = () => {
+      featurePreviewImageCache.delete(url);
+      resolve(false);
+    };
+
+    image.src = url;
+  });
+
+  featurePreviewImageCache.set(url, pending);
+  return pending;
+}
+
+function getThemeModeFromDom(): ThemeMode {
+  if (typeof document === 'undefined') {
+    return 'light';
+  }
+
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+function useThemeMode() {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => getThemeModeFromDom());
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const root = document.documentElement;
+    const syncThemeMode = () => setThemeMode(getThemeModeFromDom());
+    syncThemeMode();
+
+    const observer = new MutationObserver(syncThemeMode);
+    observer.observe(root, {attributes: true, attributeFilter: ['data-theme']});
+
+    return () => observer.disconnect();
+  }, []);
+
+  return themeMode;
+}
 
 function detectDownloadPlatform(): DownloadPlatform {
   if (typeof navigator === 'undefined') {
@@ -168,7 +252,7 @@ function DownloadButton() {
 
     entropyPromise
       ?.then((values) => {
-        const detectedOs = values.platform?.toLowerCase() ?? userAgentData.platform?.toLowerCase() ?? '';
+        const detectedOs = values.platform?.toLowerCase() ?? userAgentData?.platform?.toLowerCase() ?? '';
         const architecture = values.architecture?.toLowerCase() ?? '';
 
         if (detectedOs) {
@@ -229,31 +313,83 @@ function DownloadButton() {
 
 function FeaturePreview({
   title,
-  lightImage,
-  darkImage,
+  lightImageUrl,
+  darkImageUrl,
 }: {
   title: string;
-  lightImage: string;
-  darkImage: string;
+  lightImageUrl: string;
+  darkImageUrl: string;
 }) {
-  const lightImageUrl = useBaseUrl(lightImage);
-  const darkImageUrl = useBaseUrl(darkImage);
+  const themeMode = useThemeMode();
+  const targetImageUrl = themeMode === 'dark' ? darkImageUrl : lightImageUrl;
+  const [displayedImageUrl, setDisplayedImageUrl] = useState(() =>
+    isFeaturePreviewImageLoaded(targetImageUrl) ? targetImageUrl : '',
+  );
+  const [isLoading, setIsLoading] = useState(() => !isFeaturePreviewImageLoaded(targetImageUrl));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!targetImageUrl) {
+      setDisplayedImageUrl('');
+      setIsLoading(false);
+      return;
+    }
+
+    if (isFeaturePreviewImageLoaded(targetImageUrl)) {
+      setDisplayedImageUrl(targetImageUrl);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+
+    void preloadFeaturePreviewImage(targetImageUrl).then((loaded) => {
+      if (cancelled) {
+        return;
+      }
+
+      if (loaded) {
+        setDisplayedImageUrl(targetImageUrl);
+      }
+
+      setIsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetImageUrl]);
 
   return (
-    <div className={styles.featurePreview} aria-label={title}>
-      <div className={clsx(styles.featurePreviewImageSlot, styles.featurePreviewLight)}>
-        <img
-          className={styles.featurePreviewImage}
-          src={lightImageUrl}
-          alt={translate({message: 'NyaTerm 日间主题功能截图'})}
-        />
-      </div>
-      <div className={clsx(styles.featurePreviewImageSlot, styles.featurePreviewDark)}>
-        <img
-          className={styles.featurePreviewImage}
-          src={darkImageUrl}
-          alt={translate({message: 'NyaTerm 夜间主题功能截图'})}
-        />
+    <div className={styles.featurePreview} aria-label={title} aria-busy={isLoading}>
+      <div className={clsx(styles.featurePreviewStage, isLoading && styles.featurePreviewStageLoading)}>
+        {displayedImageUrl ? (
+          <img
+            key={displayedImageUrl}
+            className={styles.featurePreviewImage}
+            src={displayedImageUrl}
+            alt={
+              themeMode === 'dark'
+                ? translate({message: 'NyaTerm 夜间主题功能截图'})
+                : translate({message: 'NyaTerm 日间主题功能截图'})
+            }
+          />
+        ) : (
+          <div className={styles.featurePreviewPlaceholder} aria-hidden="true" />
+        )}
+
+        {isLoading ? (
+          <div className={styles.featurePreviewLoadingOverlay} aria-hidden="true">
+            <div className={styles.featurePreviewLoadingShimmer} />
+            <div className={styles.featurePreviewLoadingGlass}>
+              <span className={styles.featurePreviewSpinner} />
+              <span className={styles.featurePreviewLoadingText}>
+                <Translate>加载预览中</Translate>
+              </span>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -352,15 +488,25 @@ function HomepageHeader() {
 }
 
 function FeaturesSection({features}: {features: FeatureTab[]}) {
+  const baseUrl = useBaseUrl('/');
+  const resolvedFeatures = useMemo<FeatureTabWithUrls[]>(
+    () =>
+      features.map((feature) => ({
+        ...feature,
+        lightImageUrl: resolveAssetUrl(baseUrl, feature.lightImage),
+        darkImageUrl: resolveAssetUrl(baseUrl, feature.darkImage),
+      })),
+    [baseUrl, features],
+  );
   const [activeValue, setActiveValue] = useState(features[0]?.value ?? '');
   const [autoplayStopped, setAutoplayStopped] = useState(false);
 
   const activeIndex = Math.max(
     0,
-    features.findIndex((feature) => feature.value === activeValue),
+    resolvedFeatures.findIndex((feature) => feature.value === activeValue),
   );
-  const activeFeature = features[activeIndex] ?? features[0];
-  const isAutoplaying = !autoplayStopped && features.length > 1;
+  const activeFeature = resolvedFeatures[activeIndex] ?? resolvedFeatures[0];
+  const isAutoplaying = !autoplayStopped && resolvedFeatures.length > 1;
 
   const stopAutoplay = useCallback(() => {
     setAutoplayStopped(true);
@@ -380,14 +526,14 @@ function FeaturesSection({features}: {features: FeatureTab[]}) {
 
   const selectFeatureByOffset = useCallback(
     (offset: number) => {
-      const nextIndex = (activeIndex + offset + features.length) % features.length;
-      const nextValue = features[nextIndex]?.value;
+      const nextIndex = (activeIndex + offset + resolvedFeatures.length) % resolvedFeatures.length;
+      const nextValue = resolvedFeatures[nextIndex]?.value;
 
       if (nextValue) {
         selectFeature(nextValue);
       }
     },
-    [activeIndex, features, selectFeature],
+    [activeIndex, resolvedFeatures, selectFeature],
   );
 
   useEffect(() => {
@@ -399,10 +545,17 @@ function FeaturesSection({features}: {features: FeatureTab[]}) {
   }, []);
 
   useEffect(() => {
-    if (!features.some((feature) => feature.value === activeValue)) {
-      setActiveValue(features[0]?.value ?? '');
+    if (!resolvedFeatures.some((feature) => feature.value === activeValue)) {
+      setActiveValue(resolvedFeatures[0]?.value ?? '');
     }
-  }, [activeValue, features]);
+  }, [activeValue, resolvedFeatures]);
+
+  useEffect(() => {
+    resolvedFeatures.forEach((feature) => {
+      void preloadFeaturePreviewImage(feature.lightImageUrl);
+      void preloadFeaturePreviewImage(feature.darkImageUrl);
+    });
+  }, [resolvedFeatures]);
 
   useEffect(() => {
     if (autoplayStopped) {
@@ -438,14 +591,14 @@ function FeaturesSection({features}: {features: FeatureTab[]}) {
 
     const intervalId = window.setInterval(() => {
       setActiveValue((currentValue) => {
-        const currentIndex = features.findIndex((feature) => feature.value === currentValue);
-        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % features.length : 0;
-        return features[nextIndex]?.value ?? currentValue;
+        const currentIndex = resolvedFeatures.findIndex((feature) => feature.value === currentValue);
+        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % resolvedFeatures.length : 0;
+        return resolvedFeatures[nextIndex]?.value ?? currentValue;
       });
     }, featureAutoplayIntervalMs);
 
     return () => window.clearInterval(intervalId);
-  }, [features, isAutoplaying]);
+  }, [isAutoplaying, resolvedFeatures]);
 
   if (!activeFeature) {
     return null;
@@ -456,7 +609,7 @@ function FeaturesSection({features}: {features: FeatureTab[]}) {
       <div className="container">
         <div className={styles.featureShowcase}>
           <div className={styles.featureTabs} role="tablist" aria-label={translate({message: '功能展示'})}>
-            {features.map((feature, index) => {
+            {resolvedFeatures.map((feature, index) => {
               const isActive = feature.value === activeFeature.value;
 
               return (
@@ -482,12 +635,12 @@ function FeaturesSection({features}: {features: FeatureTab[]}) {
 
                     if (event.key === 'Home') {
                       event.preventDefault();
-                      selectFeature(features[0]?.value ?? feature.value);
+                      selectFeature(resolvedFeatures[0]?.value ?? feature.value);
                     }
 
                     if (event.key === 'End') {
                       event.preventDefault();
-                      selectFeature(features[features.length - 1]?.value ?? feature.value);
+                      selectFeature(resolvedFeatures[resolvedFeatures.length - 1]?.value ?? feature.value);
                     }
                   }}>
                   <span className={styles.featureTabIndex}>{String(index + 1).padStart(2, '0')}</span>
@@ -523,8 +676,8 @@ function FeaturesSection({features}: {features: FeatureTab[]}) {
 
             <FeaturePreview
               title={activeFeature.title}
-              lightImage={activeFeature.lightImage}
-              darkImage={activeFeature.darkImage}
+              lightImageUrl={activeFeature.lightImageUrl}
+              darkImageUrl={activeFeature.darkImageUrl}
             />
           </div>
         </div>
@@ -583,25 +736,6 @@ function JourneySection() {
 }
 
 export default function Home(): React.ReactElement {
-  const overviewCards: SummaryCard[] = [
-    {
-      title: translate({message: '多种终端会话'}),
-      description: translate({message: '支持 SSH、本地 shell、Telnet 和串口会话，可在标签页和分屏中同时工作。'}),
-    },
-    {
-      title: translate({message: '终端输出阅读'}),
-      description: translate({message: '提供搜索、命令历史建议、时间戳、关键词高亮和大输出保护。'}),
-    },
-    {
-      title: translate({message: '文件、认证与网络'}),
-      description: translate({message: '包含 SFTP、OTP、代理、跳板机、端口转发和主机密钥校验。'}),
-    },
-    {
-      title: translate({message: '配置同步与备份'}),
-      description: translate({message: '可通过 WebDAV 或 S3 兼容存储保存加密配置快照。'}),
-    },
-  ];
-
   const featureTabs: FeatureTab[] = [
     {
       value: 'workspace',
@@ -615,6 +749,19 @@ export default function Home(): React.ReactElement {
       ],
       lightImage: '/img/home/overview-light.png',
       darkImage: '/img/home/overview-dark.png',
+    },
+    {
+      value: 'appearance',
+      label: translate({message: '外观'}),
+      title: translate({message: '用背景图定制主窗口氛围'}),
+      description: translate({message: '主窗口支持本地背景图，可在保留面板可读性的同时营造更个性化的工作区视觉效果。'}),
+      bullets: [
+        translate({message: '使用本地图片作为主窗口的 Background Image'}),
+        translate({message: '通过 cover、contain、stretch 和 tile 控制图片铺法'}),
+        translate({message: '分别调整 Image Opacity 和 Background Content Opacity'}),
+      ],
+      lightImage: '/img/home/cover-light.png',
+      darkImage: '/img/home/cover-dark.png',
     },
     {
       value: 'terminal',

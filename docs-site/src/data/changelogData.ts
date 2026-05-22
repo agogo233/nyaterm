@@ -10,6 +10,63 @@ export type ChangelogRelease = {
 
 const changelogReleasesEn: ChangelogRelease[] = [
   {
+    version: '[1.0.7] - 2026-05-21',
+    sections: [
+      {
+        title: 'Changed',
+        items: [
+          '**appearance:** Improve font selection UI and show a `Loading system fonts...` state while system fonts are being discovered.',
+          '**otp:** Improve OTP input slot layout and OTP code panel responsiveness on narrower screens.',
+          '**profiles:** Add multiple Cargo build profiles for debugging and release workflows.',
+        ],
+      },
+      {
+        title: 'Fixed',
+        items: ['**csp:** Correct CSP asset protocol handling so local assets such as background images load reliably.'],
+      },
+      {
+        title: 'Performance',
+        items: ['**appearance:** Load system fonts asynchronously to keep the Appearance tab responsive.'],
+      },
+    ],
+  },
+  {
+    version: '[1.0.6] - 2026-05-21',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          '**appearance:** Add `Background Image` customization for the main window, including `Image Sizing`, `Image Opacity`, and `Background Content Opacity` controls.',
+          '**sessions:** Add `Backspace Mode` selection for Telnet and Serial sessions with `Ctrl+H (BS)` and `DEL (0x7F)` options.',
+        ],
+      },
+      {
+        title: 'Changed',
+        items: ['**resource-monitor:** Refresh the resource monitor with clearer cards and improved visual hierarchy.'],
+      },
+      {
+        title: 'Fixed',
+        items: [
+          '**shortcuts:** Prevent Shift-modified terminal input from being mistaken for application shortcuts, restoring uppercase input such as `Shift+C`, `Shift+V`, and `Shift+X`.',
+        ],
+      },
+    ],
+  },
+  {
+    version: '[1.0.5] - 2026-05-19',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          '**ai:** Capture AI command execution events and render inline terminal output during agent-driven workflows.',
+          '**ai:** Add the `Terminal Output Lines` setting to control how many inline output lines are shown for AI-executed commands.',
+          '**terminal:** Add AI Execution Profile selection to terminal session forms.',
+          '**window:** Improve main-window modal management so child windows keep the workspace in a clearer modal state.',
+        ],
+      },
+    ],
+  },
+  {
     version: '[1.0.4] - 2026-05-19',
     sections: [
       {
@@ -948,6 +1005,63 @@ const changelogReleasesEn: ChangelogRelease[] = [
 ];
 
 const changelogReleasesZhCN: ChangelogRelease[] = [
+  {
+    version: '[1.0.7] - 2026-05-21',
+    sections: [
+      {
+        title: '变更',
+        items: [
+          '**appearance:** 改进字体选择界面，并在系统字体发现过程中显示 `Loading system fonts...` 加载状态。',
+          '**otp:** 优化 OTP 输入槽位布局和 OTP 代码面板在窄屏下的响应式表现。',
+          '**profiles:** 为调试和发布流程新增多个 Cargo 构建 profile。',
+        ],
+      },
+      {
+        title: '修复',
+        items: ['**csp:** 修正 CSP 中的资源协议处理，确保背景图等本地资源可以稳定加载。'],
+      },
+      {
+        title: '性能',
+        items: ['**appearance:** 改为异步加载系统字体，保持外观设置页的响应速度。'],
+      },
+    ],
+  },
+  {
+    version: '[1.0.6] - 2026-05-21',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**appearance:** 为主窗口新增 `Background Image` 自定义能力，支持 `Image Sizing`、`Image Opacity` 和 `Background Content Opacity` 控制。',
+          '**sessions:** 为 Telnet 和串口会话新增 `Backspace Mode` 选项，可在 `Ctrl+H (BS)` 与 `DEL (0x7F)` 之间切换。',
+        ],
+      },
+      {
+        title: '变更',
+        items: ['**resource-monitor:** 刷新资源监控面板的卡片样式和视觉层级。'],
+      },
+      {
+        title: '修复',
+        items: [
+          '**shortcuts:** 修复 Shift 修饰键输入被误判为应用快捷键的问题，恢复 `Shift+C`、`Shift+V`、`Shift+X` 等大写输入。',
+        ],
+      },
+    ],
+  },
+  {
+    version: '[1.0.5] - 2026-05-19',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**ai:** 捕获 AI 命令执行事件，并在 Agent 工作流中渲染终端内联输出。',
+          '**ai:** 新增 `Terminal Output Lines` 设置，用于控制 AI 执行命令时显示的内联输出行数。',
+          '**terminal:** 为终端会话表单新增 AI Execution Profile 选择。',
+          '**window:** 改进主窗口模态管理，让子窗口触发时工作区的模态状态更清晰。',
+        ],
+      },
+    ],
+  },
   {
     version: '[1.0.4] - 2026-05-19',
     sections: [

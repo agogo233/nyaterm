@@ -47,6 +47,27 @@ NyaTerm provides two related helpers for session workflows.
 
 While typing, NyaTerm can suggest commands based on history. This is useful for repeated operational commands, build commands, and troubleshooting scripts.
 
+## AI Assistant from the terminal
+
+NyaTerm can invoke AI workflows directly from terminal context instead of forcing you to copy text into a separate tool.
+
+### Common entry points
+
+- **Explain recent output** when you want the latest terminal activity summarized immediately
+- **Explain selected text** for a highlighted log fragment or command result
+- **Analyze error** when terminal output already contains a failure you want help with
+- **Generate command** when you want AI to propose the next step from the current session context
+
+### Inline terminal capture
+
+During Agent execution, NyaTerm can capture AI command execution events and show a compact inline preview of command output close to the terminal workflow.
+
+The amount of inline output is controlled by `Terminal Output Lines` in **Settings → AI → Agent Settings**:
+
+- `Terminal Output Lines` sets how many output lines are shown after each AI-executed command
+- Set it to `0` to disable inline terminal previews
+- This setting changes the AI workflow feedback, not the underlying shell execution itself
+
 ## Optional terminal enhancements
 
 These features are intentionally opt-in rather than enabled all at once.

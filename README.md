@@ -47,7 +47,9 @@ NyaTerm includes an AI Assistant panel for command generation, terminal output e
 
 - **Ask mode** for one-off help such as generating commands, explaining selected output, and analyzing errors
 - **Agent mode** for multi-step work using an observe-decide-run loop against the active terminal session
+- **Recent-output actions** so you can ask AI to explain the latest terminal output without manually copying it
 - **Structured command cards** with risk levels, execution controls, and optional save-to-quick-command support
+- **Inline terminal capture** during Agent execution with configurable `Terminal Output Lines`
 - **Session mentions** with `@` to bring other terminal sessions into the AI context
 - **Provider management** for built-in providers and custom OpenAI-compatible endpoints
 - **Risk control** for high-impact commands, including approval gates and safer alternatives
@@ -88,6 +90,7 @@ NyaTerm is built for people who move between servers, local commands, devices, a
 - SSH, Local Terminal, Telnet, and Serial session support
 - Multi-tab workspace with horizontal and vertical pane splits
 - Saved connections with folders, icons, metadata, duplication, reconnect, and import flows
+- Main-window `Background Image` customization with `cover` / `contain` / `stretch` / `tile` sizing and adjustable `Background Content Opacity`
 - Left and right activity bars for file explorer, network, Security/Auth, Sync & Backup, AI Assistant, saved connections, active sessions, command history, and resource monitoring
 - Child windows for settings, new-session creation, quick-command editing, and auto-upload prompts
 - Tray support with optional minimize-to-tray behavior
@@ -99,10 +102,11 @@ NyaTerm is built for people who move between servers, local commands, devices, a
 - Optional line-number and timestamp gutter
 - Optional action links for IPv4 addresses, `host:port`, and archive filenames
 - Optional keyword highlighting with built-in presets and custom rules
+- AI shortcuts for explaining recent output, plus inline Agent command output with configurable `Terminal Output Lines`
 - Large-output protection, configurable scrollback, SSH keep-alive, and session recording
 - Online search and translation from selected terminal text
 - Zmodem file transfer support directly from the terminal
-- Customizable keyboard shortcuts for terminal and UI actions
+- Customizable keyboard shortcuts for terminal and UI actions, including `Backspace Mode` selection for Telnet and Serial sessions
 
 ## SFTP and File Workflows
 
@@ -144,6 +148,18 @@ Manage SSH, local shell, Telnet, and Serial sessions inside one tabbed and split
     <source media="(prefers-color-scheme: dark)" srcset="./docs-site/static/img/home/overview-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="./docs-site/static/img/home/overview-light.png">
     <img alt="NyaTerm workspace overview" src="./docs-site/static/img/home/overview-light.png">
+  </picture>
+</p>
+
+## Appearance and Background Image
+
+Use a local wallpaper behind the main window, tune `Image Sizing`, `Image Opacity`, and `Background Content Opacity`, and keep child windows readable with solid surfaces.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs-site/static/img/home/cover-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./docs-site/static/img/home/cover-light.png">
+    <img alt="NyaTerm background image customization" src="./docs-site/static/img/home/cover-light.png">
   </picture>
 </p>
 
@@ -217,8 +233,8 @@ Download installers from [nyaterm.app](https://nyaterm.app) or the [Releases](ht
 |------|-------------|-------|
 | SSH | Linux / Unix remote servers | Supports SFTP, OTP, resource monitor, proxy, jump host, and tunnels |
 | Local Terminal | Local shell workflows | Uses your local shell path and working directory |
-| Telnet | Legacy network devices or lab systems | Lightweight terminal session without SSH-only features |
-| Serial | Routers, boards, embedded devices | Configurable port, baud rate, data bits, parity, and stop bits |
+| Telnet | Legacy network devices or lab systems | Lightweight terminal session without SSH-only features, with `Backspace Mode` for `Ctrl+H (BS)` or `DEL (0x7F)` |
+| Serial | Routers, boards, embedded devices | Configurable port, baud rate, data bits, parity, stop bits, and `Backspace Mode` |
 
 ---
 

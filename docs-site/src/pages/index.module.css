@@ -468,7 +468,7 @@
 
 .featureTabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: 0.55rem;
   padding: 0.45rem;
   border: 1px solid rgba(148, 163, 184, 0.28);
@@ -742,20 +742,29 @@
   padding: 0.65rem;
 }
 
-.featurePreviewImageSlot {
+.featurePreviewStage {
+  position: relative;
   width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 52%),
+    linear-gradient(180deg, rgba(226, 232, 240, 0.95) 0%, rgba(241, 245, 249, 0.94) 100%);
+  isolation: isolate;
 }
 
-.featurePreviewDark {
-  display: none;
+[data-theme='dark'] .featurePreviewStage {
+  background:
+    radial-gradient(circle at top left, rgba(143, 194, 255, 0.14), transparent 48%),
+    linear-gradient(180deg, rgba(17, 23, 32, 0.98) 0%, rgba(22, 28, 36, 0.98) 100%);
 }
 
-[data-theme='dark'] .featurePreviewLight {
-  display: none;
-}
-
-[data-theme='dark'] .featurePreviewDark {
-  display: block;
+.featurePreviewPlaceholder {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.3) 8%, rgba(255, 255, 255, 0.68) 18%, rgba(255, 255, 255, 0.28) 33%),
+    linear-gradient(180deg, rgba(241, 245, 249, 0.5), rgba(226, 232, 240, 0.72));
 }
 
 .featurePreviewImage {
@@ -765,6 +774,122 @@
   border-radius: 6px;
   object-fit: contain;
   object-position: center;
+  transition:
+    filter 0.26s ease,
+    opacity 0.26s ease,
+    transform 0.26s ease;
+  animation: featurePreviewImageFadeIn 0.32s ease both;
+}
+
+.featurePreviewStageLoading .featurePreviewImage {
+  filter: blur(12px) saturate(0.82);
+  opacity: 0.38;
+  transform: scale(1.015);
+}
+
+.featurePreviewLoadingOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(248, 250, 252, 0.24);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+[data-theme='dark'] .featurePreviewLoadingOverlay {
+  background: rgba(8, 12, 18, 0.28);
+}
+
+.featurePreviewLoadingGlass {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.56);
+  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.14);
+}
+
+[data-theme='dark'] .featurePreviewLoadingGlass {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(20, 27, 36, 0.62);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.24);
+}
+
+.featurePreviewSpinner {
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 2px solid rgba(37, 99, 235, 0.16);
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: featurePreviewSpinner 0.9s linear infinite;
+}
+
+[data-theme='dark'] .featurePreviewSpinner {
+  border-color: rgba(143, 194, 255, 0.16);
+  border-top-color: #8fc2ff;
+}
+
+.featurePreviewLoadingText {
+  color: #0f172a;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+[data-theme='dark'] .featurePreviewLoadingText {
+  color: #eef3f8;
+}
+
+.featurePreviewLoadingShimmer {
+  position: absolute;
+  inset: -35%;
+  background: linear-gradient(115deg, transparent 28%, rgba(255, 255, 255, 0.58) 50%, transparent 72%);
+  opacity: 0.8;
+  transform: translateX(-46%);
+  animation: featurePreviewShimmer 1.9s linear infinite;
+}
+
+[data-theme='dark'] .featurePreviewLoadingShimmer {
+  background: linear-gradient(115deg, transparent 28%, rgba(143, 194, 255, 0.22) 50%, transparent 72%);
+}
+
+@keyframes featurePreviewImageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes featurePreviewSpinner {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes featurePreviewShimmer {
+  from {
+    transform: translateX(-46%);
+  }
+
+  to {
+    transform: translateX(46%);
+  }
 }
 
 /* Journey */

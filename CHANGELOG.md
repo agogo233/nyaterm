@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 This changelog is inferred from release bump commits in git history (for example `chore: bump version to vX.Y.Z`) and grouped by Conventional Commit type.
 
+## [1.0.7] - 2026-05-21
+
+### Changed
+
+- **appearance:** Improve font selection UI and show a `Loading system fonts...` state while system fonts are being discovered.
+- **otp:** Improve OTP input slot layout and OTP code panel responsiveness on narrower screens.
+- **profiles:** Add multiple Cargo build profiles for debugging and release workflows.
+
+### Fixed
+
+- **csp:** Correct CSP asset protocol handling so local assets such as background images load reliably.
+
+### Performance
+
+- **appearance:** Load system fonts asynchronously to keep the Appearance tab responsive.
+
+## [1.0.6] - 2026-05-21
+
+### Added
+
+- **appearance:** Add `Background Image` customization for the main window, including `Image Sizing`, `Image Opacity`, and `Background Content Opacity` controls.
+- **sessions:** Add `Backspace Mode` selection for Telnet and Serial sessions with `Ctrl+H (BS)` and `DEL (0x7F)` options.
+
+### Changed
+
+- **resource-monitor:** Refresh the resource monitor with clearer cards and improved visual hierarchy.
+
+### Fixed
+
+- **shortcuts:** Prevent Shift-modified terminal input from being mistaken for application shortcuts, restoring uppercase input such as `Shift+C`, `Shift+V`, and `Shift+X`.
+
+## [1.0.5] - 2026-05-19
+
+### Added
+
+- **ai:** Capture AI command execution events and render inline terminal output during agent-driven workflows.
+- **ai:** Add the `Terminal Output Lines` setting to control how many inline output lines are shown for AI-executed commands.
+- **terminal:** Add AI Execution Profile selection to terminal session forms.
+- **window:** Improve main-window modal management so child windows keep the workspace in a clearer modal state.
+
 ## [1.0.4] - 2026-05-19
 
 ### Added
@@ -74,14 +114,6 @@ This changelog is inferred from release bump commits in git history (for example
 - **highlighting:** Update operator colors and regex pattern for keyword highlighting.
 - **docs:** Update changelog with new releases and enhancements.
 - **ci:** Update Docusaurus dependencies and remove optional Umami config.
-
-## [1.0.4] - 2026-05-19
-
-## [1.0.3] - 2026-05-18
-
-## [1.0.2] - 2026-05-17
-
-## [1.0.1] - 2026-05-16
 
 ## [1.0.0] - 2026-05-06
 

@@ -19,8 +19,8 @@ Understanding the differences helps explain why some panels or enhancements only
 |--------------|------------------|------------------|
 | SSH | Remote Linux / Unix administration | SFTP, OTP, resource monitoring, proxy, jump host, tunnels |
 | Local Terminal | Local shell work, scripts, builds | Shared terminal UI, command history, split panes |
-| Telnet | Legacy devices, lab environments, compatibility troubleshooting | Terminal workspace features, but not SSH-only features |
-| Serial | Routers, switches, boards, embedded debug ports | Serial port settings plus terminal workspace features |
+| Telnet | Legacy devices, lab environments, compatibility troubleshooting | Terminal workspace features with `Backspace Mode`, but not SSH-only features |
+| Serial | Routers, switches, boards, embedded debug ports | Serial port settings, `Backspace Mode`, and terminal workspace features |
 
 ## SSH
 
@@ -77,6 +77,8 @@ You still get NyaTerm's terminal workspace model, but not SSH-specific security 
 
 If your goal is simply to open a traditional remote terminal quickly, Telnet can be the more direct choice.
 
+For devices that expect specific erase behavior, Telnet also exposes `Backspace Mode` so you can choose `Ctrl+H (BS)` or `DEL (0x7F)`.
+
 ## Serial
 
 Serial sessions are useful for connecting to:
@@ -92,6 +94,7 @@ When creating a serial session, you can configure:
 - Data bits
 - Parity
 - Stop bits
+- `Backspace Mode`
 
 Serial sessions still live inside NyaTerm's tabbed and split workspace, so you can watch serial output in one pane while running commands in an SSH or local terminal pane.
 

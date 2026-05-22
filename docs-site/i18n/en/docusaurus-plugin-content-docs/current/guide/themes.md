@@ -15,6 +15,17 @@ In **Settings → Appearance**, you can configure these separately:
 
 If you just want a quick theme switch, you can also use **View → Theme** from the top menu.
 
+## Background image
+
+In **Settings → Appearance**, the main window can now use a local wallpaper. The controls are easiest to follow by their exact UI names:
+
+- `Background Image` — choose the local file rendered behind the main workspace
+- `Image Sizing` — choose how the image is shown with `cover`, `contain`, `stretch`, or `tile`
+- `Image Opacity` — control how strongly the wallpaper shows through the theme
+- `Background Content Opacity` — control how translucent workspace panels and content surfaces become
+
+This only affects the main window workspace. Settings and child windows stay solid so forms, dialogs, and secondary windows remain readable.
+
 ## Fonts and font size
 
 In **Settings → Appearance**, you can adjust:
@@ -30,6 +41,8 @@ NyaTerm includes these built-in fonts:
 - `Inter`
 
 System-installed fonts are also listed so you can extend the fallback chain.
+
+System font discovery now runs asynchronously, so you may briefly see `Loading system fonts...` when opening the font picker. That simply means the app is still collecting installed fonts in the background.
 
 ## Cursor and ligatures
 

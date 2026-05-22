@@ -173,6 +173,24 @@
   "在侧边区域查看会话列表、文件和资源信息": {
     "message": "View session lists, files, and resource information in side panels"
   },
+  "外观": {
+    "message": "Appearance"
+  },
+  "用背景图定制主窗口氛围": {
+    "message": "Customize the workspace mood with a background image"
+  },
+  "主窗口支持本地背景图，可在保留面板可读性的同时营造更个性化的工作区视觉效果。": {
+    "message": "The main window supports a local background image so you can create a more personal workspace look without sacrificing panel readability."
+  },
+  "使用本地图片作为主窗口的 Background Image": {
+    "message": "Use a local image as the main window Background Image"
+  },
+  "通过 cover、contain、stretch 和 tile 控制图片铺法": {
+    "message": "Control the image layout with cover, contain, stretch, and tile"
+  },
+  "分别调整 Image Opacity 和 Background Content Opacity": {
+    "message": "Adjust Image Opacity and Background Content Opacity separately"
+  },
   "终端": {
     "message": "Terminal"
   },
@@ -244,6 +262,9 @@
   },
   "支持 `.dgfy` 导入导出，并处理远端与本地版本冲突": {
     "message": "Supports `.dgfy` import/export and handles version conflicts between remote and local data"
+  },
+  "加载预览中": {
+    "message": "Loading preview"
   },
   "支持 SSH、串口、本地 shell、SFTP 和配置备份的桌面终端客户端": {
     "message": "A desktop terminal client for SSH, serial, local shell, SFTP, and configuration backups"
