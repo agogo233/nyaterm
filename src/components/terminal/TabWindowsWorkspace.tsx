@@ -21,6 +21,7 @@ interface TabWindowsWorkspaceProps {
   onTabClose: (tab: Tab) => void | Promise<void>;
   onDuplicateSession: (tab: Tab) => void | Promise<void>;
   onReconnectSession: (tab: Tab) => void | Promise<void>;
+  onDisconnectSession: (tab: Tab) => void | Promise<void>;
   onSplitSession: (tab: Tab, direction: PaneSplitDirection) => void | Promise<void>;
   onUnsplit?: () => void;
   onCloseSession: (tab: Tab) => void | Promise<void>;
@@ -48,6 +49,7 @@ function SplitWindow({
   onTabClose,
   onDuplicateSession,
   onReconnectSession,
+  onDisconnectSession,
   onSplitSession,
   onUnsplit,
   onCloseSession,
@@ -96,6 +98,7 @@ function SplitWindow({
           onTabClose={onTabClose}
           onDuplicateSession={onDuplicateSession}
           onReconnectSession={onReconnectSession}
+          onDisconnectSession={onDisconnectSession}
           onSplitSession={onSplitSession}
           onUnsplit={onUnsplit}
           onCloseSession={onCloseSession}
@@ -125,6 +128,7 @@ function SplitWindow({
           onTabClose={onTabClose}
           onDuplicateSession={onDuplicateSession}
           onReconnectSession={onReconnectSession}
+          onDisconnectSession={onDisconnectSession}
           onSplitSession={onSplitSession}
           onUnsplit={onUnsplit}
           onCloseSession={onCloseSession}
@@ -156,6 +160,7 @@ function LeafWindow({
   onTabClose,
   onDuplicateSession,
   onReconnectSession,
+  onDisconnectSession,
   onSplitSession,
   onUnsplit,
   onCloseSession,
@@ -207,6 +212,7 @@ function LeafWindow({
         onConnectConnection={(connection) => onConnectConnection(leaf.id, connection)}
         onDuplicateSession={onDuplicateSession}
         onReconnectSession={onReconnectSession}
+        onDisconnectSession={onDisconnectSession}
         onSplitSession={onSplitSession}
         onUnsplit={onUnsplit}
         onCloseSession={onCloseSession}
@@ -253,6 +259,7 @@ function WindowNodeView({
   onTabClose,
   onDuplicateSession,
   onReconnectSession,
+  onDisconnectSession,
   onSplitSession,
   onUnsplit,
   onCloseSession,
@@ -283,6 +290,7 @@ function WindowNodeView({
         onTabClose={onTabClose}
         onDuplicateSession={onDuplicateSession}
         onReconnectSession={onReconnectSession}
+        onDisconnectSession={onDisconnectSession}
         onSplitSession={onSplitSession}
         onUnsplit={onUnsplit}
         onCloseSession={onCloseSession}
@@ -313,6 +321,7 @@ function WindowNodeView({
       onTabClose={onTabClose}
       onDuplicateSession={onDuplicateSession}
       onReconnectSession={onReconnectSession}
+      onDisconnectSession={onDisconnectSession}
       onSplitSession={onSplitSession}
       onUnsplit={onUnsplit}
       onCloseSession={onCloseSession}

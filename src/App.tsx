@@ -987,6 +987,22 @@ function App() {
     ],
   );
 
+  const handleDisconnectSession = useCallback(
+    async (tab: Tab) => {
+      const pane = getActivePane(tab);
+      if (!pane || pane.connecting || pane.connectError) return;
+
+      const closed = await closePaneBackendSession(pane);
+      if (!closed) {
+        toast.error(t("tabCtx.disconnectFailed"));
+        return;
+      }
+
+      toast.success(t("tabCtx.disconnectSuccess"));
+    },
+    [closePaneBackendSession, t],
+  );
+
   const handleReconnectSessionById = useCallback(
     async (sessionId: string) => {
       const tab = findTabBySessionId(tabs, sessionId);
@@ -1576,6 +1592,7 @@ function App() {
           onTabClose: handleCloseWorkspaceTab,
           onDuplicateSession: handleDuplicateSession,
           onReconnectSession: handleReconnectSession,
+          onDisconnectSession: handleDisconnectSession,
           onSplitSession: handleSplitSession,
           onUnsplit: handleUnsplit,
           onCloseSession: handleCloseSession,

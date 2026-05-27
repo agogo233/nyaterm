@@ -41,7 +41,7 @@ import {
   resyncFromTerminalLine,
 } from "@/lib/terminalInputTracker";
 import { XTERM_PERFORMANCE_CONFIG } from "@/lib/xtermPerformance";
-import type { AiCaptureEvent } from "@/types/global";
+import type { AiCaptureEvent, SessionType } from "@/types/global";
 import ActionLinkMenu from "./ActionLinkMenu";
 import ActionLinkTooltip from "./ActionLinkTooltip";
 import CommandSuggestions from "./CommandSuggestions";
@@ -65,6 +65,7 @@ interface XTerminalProps {
   sessionId: string;
   active: boolean;
   visible?: boolean;
+  sessionType: SessionType;
   connectionId?: string;
   onReconnected?: (oldSessionId: string, newSessionId: string) => void;
   syncPeerSessionIds?: string[];
@@ -236,6 +237,7 @@ export default function XTerminal({
   sessionId,
   active,
   visible = true,
+  sessionType,
   connectionId,
   onReconnected,
   syncPeerSessionIds,
@@ -276,6 +278,7 @@ export default function XTerminal({
   const outputWriteQueueRef = useRef(Promise.resolve());
   const outputWriteInFlightRef = useRef(false);
   const lineTimestampsRef = useRef<Map<number, number>>(new Map());
+  const sessionTypeRef = useRef(sessionType);
   const connectionIdRef = useRef(connectionId);
   const onReconnectedRef = useRef(onReconnected);
   const sessionIdRef = useRef(sessionId);
@@ -291,6 +294,10 @@ export default function XTerminal({
   const handleVisibilityChangeRef = useRef<(() => void) | null>(null);
   const replaceInputCommandRef = useRef<((command: string) => void) | null>(null);
   const lastErrorNoticeAtRef = useRef(0);
+
+  useEffect(() => {
+    sessionTypeRef.current = sessionType;
+  }, [sessionType]);
 
   useEffect(() => {
     connectionIdRef.current = connectionId;
@@ -627,6 +634,24 @@ export default function XTerminal({
           preview: null,
           registerSubmission: command,
         }).catch(() => {});
+      }
+    };
+
+    const canReconnectDisconnectedSession = () =>
+      sessionTypeRef.current === "Local" || !!connectionIdRef.current;
+
+    const createReconnectedSession = () => {
+      const connectionId = connectionIdRef.current;
+
+      switch (sessionTypeRef.current) {
+        case "Local":
+          return invoke<string>("create_local_session", { connectionId: connectionId || null });
+        case "Telnet":
+          return invoke<string>("create_telnet_session", { connectionId });
+        case "Serial":
+          return invoke<string>("create_serial_session", { connectionId });
+        default:
+          return invoke<string>("create_ssh_session", { connectionId });
       }
     };
 
@@ -1060,7 +1085,7 @@ export default function XTerminal({
         if (!isTerminalAlive()) return;
         disconnectedRef.current = true;
         terminal.write(`\r\n\x1b[31m[${tRef.current("terminal.sessionDisconnected")}]\x1b[0m\r\n`);
-        if (connectionIdRef.current) {
+        if (canReconnectDisconnectedSession()) {
           terminal.write(`\x1b[33m[${tRef.current("terminal.pressEnterToReconnect")}]\x1b[0m\r\n`);
         }
         inputStateRef.current = createTerminalInputState();
@@ -1132,10 +1157,10 @@ export default function XTerminal({
       if (aiCapturingRef.current) return;
 
       if (disconnectedRef.current) {
-        if (data === "\r" && connectionIdRef.current && !reconnectingRef.current) {
+        if (data === "\r" && canReconnectDisconnectedSession() && !reconnectingRef.current) {
           reconnectingRef.current = true;
           terminal.write(`\r\n\x1b[36m[${tRef.current("terminal.reconnecting")}]\x1b[0m\r\n`);
-          invoke<string>("create_ssh_session", { connectionId: connectionIdRef.current })
+          createReconnectedSession()
             .then((newSessionId) => {
               disconnectedRef.current = false;
               reconnectingRef.current = false;

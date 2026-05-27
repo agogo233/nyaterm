@@ -9,6 +9,7 @@ import {
   MdDriveFileRenameOutline,
   MdHorizontalSplit,
   MdInfoOutline,
+  MdLinkOff,
   MdMerge,
   MdPlayArrow,
   MdRefresh,
@@ -62,6 +63,7 @@ interface TabContextMenuProps {
   tabs: Tab[];
   onDuplicateSession: (tab: Tab) => void | Promise<void>;
   onReconnectSession: (tab: Tab) => void | Promise<void>;
+  onDisconnectSession: (tab: Tab) => void | Promise<void>;
   onSplitSession: (tab: Tab, direction: PaneSplitDirection) => void | Promise<void>;
   onUnsplit?: () => void;
   onCloseSession: (tab: Tab) => void | Promise<void>;
@@ -79,6 +81,7 @@ export default function TabContextMenu({
   tabs,
   onDuplicateSession,
   onReconnectSession,
+  onDisconnectSession,
   onSplitSession,
   onUnsplit,
   onCloseSession,
@@ -99,6 +102,7 @@ export default function TabContextMenu({
   const canSpawnSession =
     !!activePane && (activePane.type === "Local" || !!activePane.connectionId);
   const canReconnect = !!activePane && !activePane.connecting && canSpawnSession;
+  const canDisconnect = !!activePane && !activePane.connecting && !activePane.connectError;
   const canSplit = canSpawnSession;
   const canUseAI = !!activePane && !activePane.connecting && !activePane.connectError;
   const canCloseInactive = tabs.length > 1;
@@ -228,6 +232,14 @@ export default function TabContextMenu({
           <ContextMenuItem disabled={!canReconnect} onClick={() => void onReconnectSession(tab)}>
             <MdRefresh className={iconClass} />
             {t("tabCtx.reconnect")}
+          </ContextMenuItem>
+
+          <ContextMenuItem
+            disabled={!canDisconnect}
+            onClick={() => void onDisconnectSession(tab)}
+          >
+            <MdLinkOff className={iconClass} />
+            {t("tabCtx.disconnect")}
           </ContextMenuItem>
 
           <ContextMenuSub>
