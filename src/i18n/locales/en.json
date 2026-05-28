@@ -429,6 +429,7 @@
     "pause": "Pause",
     "pauseAll": "Pause All",
     "paused": "Paused",
+    "queued": "Queued",
     "resume": "Resume",
     "resumeAll": "Resume All",
     "retry": "Retry",

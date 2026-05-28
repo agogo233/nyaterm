@@ -429,6 +429,7 @@
     "pause": "暂停",
     "pauseAll": "全部暂停",
     "paused": "已暂停",
+    "queued": "排队中",
     "resume": "继续",
     "resumeAll": "全部继续",
     "retry": "重试",
