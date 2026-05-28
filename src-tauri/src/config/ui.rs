@@ -233,7 +233,7 @@ fn default_right_width() -> f64 {
 }
 
 fn default_quick_cmd_height() -> f64 {
-    36.0
+    180.0
 }
 
 fn default_active_left_panel() -> Option<String> {
@@ -261,7 +261,7 @@ fn default_transfer_height() -> f64 {
 }
 
 fn default_serial_send_height() -> f64 {
-    120.0
+    180.0
 }
 
 fn default_sort_mode() -> String {

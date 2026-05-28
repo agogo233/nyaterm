@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BiImport } from "react-icons/bi";
 import { useTranslation } from "react-i18next";
 import {
   MdAdd,
@@ -16,6 +17,7 @@ import {
   MdSort,
   MdTerminal,
 } from "react-icons/md";
+import QuickCommandsImportDialog from "@/components/dialog/quick-commands/QuickCommandsImportDialog";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +45,12 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { openAIAssistant } from "@/lib/aiEvents";
 import { invoke } from "@/lib/invoke";
-import type { QuickCommand, QuickCommandCategory, QuickCommandsConfig } from "@/types/global";
+import type {
+  QuickCommand,
+  QuickCommandCategory,
+  QuickCommandImportResult,
+  QuickCommandsConfig,
+} from "@/types/global";
 import { openQuickCommand } from "../../lib/windowManager";
 import VariablePromptDialog, {
   parseCommandVariables,
@@ -79,6 +86,7 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
   const [sortMode, setSortMode] = useState<"updated" | "name" | "useCount">("updated");
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiPopoverOpen, setAiPopoverOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   // Variable Prompt State
   const [promptCmd, setPromptCmd] = useState<QuickCommand | null>(null);
@@ -90,19 +98,20 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
   const [suppressCommandTooltips, setSuppressCommandTooltips] = useState(false);
   const suppressTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const loadQuickCommands = useCallback(async () => {
+    const cfg = await invoke<QuickCommandsConfig>("get_quick_commands");
+    skipNextSaveRef.current = true;
+    setCommands(cfg.commands || []);
+    setSavedCategories(cfg.categories || []);
+    loaded.current = true;
+  }, []);
+
   // Load from backend on mount
   useEffect(() => {
-    invoke<QuickCommandsConfig>("get_quick_commands")
-      .then((cfg) => {
-        skipNextSaveRef.current = true;
-        setCommands(cfg.commands || []);
-        setSavedCategories(cfg.categories || []);
-        loaded.current = true;
-      })
-      .catch(() => {
-        loaded.current = true;
-      });
-  }, []);
+    loadQuickCommands().catch(() => {
+      loaded.current = true;
+    });
+  }, [loadQuickCommands]);
 
   // Debounced save to backend on change
   useEffect(() => {
@@ -258,6 +267,22 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
     setAiPopoverOpen(false);
     openAIAssistant({ action: "generate_command", userInput });
   }, [aiPrompt]);
+
+  const handleImported = useCallback(
+    (_result: QuickCommandImportResult) => {
+      void loadQuickCommands();
+    },
+    [loadQuickCommands],
+  );
+
+  useEffect(() => {
+    const unsub = listen("quick-commands-changed", () => {
+      void loadQuickCommands();
+    });
+    return () => {
+      unsub.then((fn) => fn());
+    };
+  }, [loadQuickCommands]);
 
   // Derived state for categories and filtering
   const allCategories = useMemo(() => {
@@ -431,6 +456,22 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">{t("quickCommands.addCommand")}</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-6 w-6 shrink-0 rounded-md p-0 transition-colors hover:bg-[var(--df-bg-hover)]"
+                    style={{ color: "var(--df-text-muted)" }}
+                    aria-label={t("quickCommands.import")}
+                    onClick={() => setImportDialogOpen(true)}
+                  >
+                    <BiImport className="text-[1.05rem]" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t("quickCommands.import")}</TooltipContent>
               </Tooltip>
 
               <Popover open={aiPopoverOpen} onOpenChange={setAiPopoverOpen}>
@@ -649,6 +690,11 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
             onSubmit={handlePromptSubmit}
           />
         )}
+        <QuickCommandsImportDialog
+          open={importDialogOpen}
+          onClose={() => setImportDialogOpen(false)}
+          onImported={handleImported}
+        />
       </div>
     </TooltipProvider>
   );

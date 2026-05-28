@@ -1045,7 +1045,7 @@ export default function SavedConnections({
               onDragOver={isDragEnabled ? handleDragOverBg : undefined}
               onDrop={isDragEnabled ? handleDropBg : undefined}
             >
-              {savedConnections.length === 0 ? (
+              {savedConnections.length === 0 && savedGroups.length === 0 ? (
                 <div
                   className="text-center py-4 text-xs"
                   style={{ color: "var(--df-text-dimmed)" }}

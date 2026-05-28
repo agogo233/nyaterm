@@ -249,6 +249,7 @@ function PaneNodeView({
           sessionId={node.sessionId}
           active={isActive}
           visible={visible}
+          sessionType={node.type}
           connectionId={node.connectionId}
           onReconnected={onReconnected}
           syncGroups={syncGroups}
@@ -263,6 +264,7 @@ function PaneXTerminal({
   sessionId,
   active,
   visible,
+  sessionType,
   connectionId,
   onReconnected,
   syncGroups,
@@ -271,6 +273,7 @@ function PaneXTerminal({
   sessionId: string;
   active: boolean;
   visible: boolean;
+  sessionType: import("@/types/global").SessionType;
   connectionId?: string;
   onReconnected?: (oldSessionId: string, newSessionId: string) => void;
   syncGroups: import("@/types/global").SyncGroup[];
@@ -361,6 +364,7 @@ function PaneXTerminal({
       sessionId={sessionId}
       active={active}
       visible={visible}
+      sessionType={sessionType}
       connectionId={connectionId}
       onReconnected={onReconnected}
       syncPeerSessionIds={syncPeerSessionIds}

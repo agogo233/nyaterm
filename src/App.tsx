@@ -28,7 +28,11 @@ import { preloadModalChildWindowPages } from "./lib/childWindowPreload";
 import { getErrorMessage, shouldPromptConnectionEditOnFailure } from "./lib/errors";
 import { invoke } from "./lib/invoke";
 import { logger } from "./lib/logger";
-import { clearSessionCommandHistory, sendSessionInput } from "./lib/sessionInput";
+import {
+  buildTerminalCommandInput,
+  clearSessionCommandHistory,
+  sendSessionInput,
+} from "./lib/sessionInput";
 import { buildSmartSplitLayout, type SmartSplitMode } from "./lib/smartSplit";
 import { purgeSessionFromGroups } from "./lib/syncInputGroups";
 import {
@@ -737,7 +741,7 @@ function App() {
       if (activePane && !activePane.connecting) {
         if (activePane.connectError) return;
         const { sessionId } = activePane;
-        void sendSessionInput(sessionId, execute ? `${command}\r` : command, {
+        void sendSessionInput(sessionId, buildTerminalCommandInput(command, execute), {
           preview: execute ? { kind: "reset" } : { kind: "data", data: command },
           registerSubmission: execute ? command : null,
         }).catch(() => {});
@@ -755,7 +759,7 @@ function App() {
         for (const pane of collectSessionPanes(tab.root)) {
           if (!hasLiveSession(pane) || pane.type !== "SSH") continue;
           const { sessionId } = pane;
-          void sendSessionInput(sessionId, `${command}\r`, {
+          void sendSessionInput(sessionId, buildTerminalCommandInput(command), {
             preview: { kind: "reset" },
             registerSubmission: command,
           }).catch(() => {});
@@ -1017,6 +1021,22 @@ function App() {
       t,
       updatePaneSession,
     ],
+  );
+
+  const handleDisconnectSession = useCallback(
+    async (tab: Tab) => {
+      const pane = getActivePane(tab);
+      if (!pane || pane.connecting || pane.connectError) return;
+
+      const closed = await closePaneBackendSession(pane);
+      if (!closed) {
+        toast.error(t("tabCtx.disconnectFailed"));
+        return;
+      }
+
+      toast.success(t("tabCtx.disconnectSuccess"));
+    },
+    [closePaneBackendSession, t],
   );
 
   const handleReconnectSessionById = useCallback(
@@ -1438,7 +1458,7 @@ function App() {
   const handleQuickCmdResize = useCallback(
     (delta: number) => {
       updateUi((prev) => ({
-        quick_cmd_height: Math.max(36, Math.min(300, (prev.quick_cmd_height || 36) - delta)),
+        quick_cmd_height: Math.max(36, Math.min(300, (prev.quick_cmd_height || 180) - delta)),
       }));
     },
     [updateUi],
@@ -1447,7 +1467,7 @@ function App() {
   const handleSerialSendResize = useCallback(
     (delta: number) => {
       updateUi((prev) => ({
-        serial_send_height: Math.max(60, Math.min(300, (prev.serial_send_height || 120) - delta)),
+        serial_send_height: Math.max(60, Math.min(300, (prev.serial_send_height || 180) - delta)),
       }));
     },
     [updateUi],
@@ -1608,6 +1628,7 @@ function App() {
           onTabClose: handleCloseWorkspaceTab,
           onDuplicateSession: handleDuplicateSession,
           onReconnectSession: handleReconnectSession,
+          onDisconnectSession: handleDisconnectSession,
           onSplitSession: handleSplitSession,
           onUnsplit: handleUnsplit,
           onCloseSession: handleCloseSession,
@@ -1626,8 +1647,8 @@ function App() {
         tabsCount={tabs.length}
         bottomPanel={{
           activePanel: activeBottomPanel,
-          quickCmdHeight: uiConfig.quick_cmd_height,
-          serialSendHeight: uiConfig.serial_send_height || 120,
+          quickCmdHeight: uiConfig.quick_cmd_height || 180,
+          serialSendHeight: uiConfig.serial_send_height || 180,
           activeSerialSessionId,
           activeShellSessionIds,
           onQuickCmdResize: handleQuickCmdResize,

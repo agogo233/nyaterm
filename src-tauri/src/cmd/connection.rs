@@ -1,5 +1,5 @@
 use crate::config::{self, Group, QuickCommandsConfig, SavedConnection, SavedPassword, SshKey};
-use crate::core::QuickCommandsStore;
+use crate::core::{QuickCommandsImportResult, QuickCommandsImportSource, QuickCommandsStore};
 use crate::error::{AppError, AppResult};
 use crate::utils::crypto;
 use std::sync::Arc;
@@ -435,6 +435,19 @@ pub fn increment_quick_command_use_count(
 ) -> AppResult<()> {
     state.increment_use_count(&app, &id)?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn import_quick_commands(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<QuickCommandsStore>>,
+    file_path: String,
+    source: QuickCommandsImportSource,
+) -> AppResult<QuickCommandsImportResult> {
+    let result = state.import_from_file(&app, &file_path, source)?;
+    let _ = app.emit("quick-commands-changed", ());
+    schedule_cloud_sync_notify(app.clone());
+    Ok(result)
 }
 
 // --- Password management ---

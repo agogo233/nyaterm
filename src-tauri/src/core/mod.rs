@@ -27,7 +27,9 @@ pub mod zmodem;
 pub use cloud_sync::CloudSyncManager;
 pub(crate) use output::SessionOutputCoalescer;
 pub use pty::{create_local_session, LocalSessionConfig};
-pub use quick_commands::QuickCommandsStore;
+pub use quick_commands::{
+    QuickCommandsImportResult, QuickCommandsImportSource, QuickCommandsStore,
+};
 pub use recording::RecordingManager;
 pub use serial::{create_serial_session, list_serial_ports, SerialConfig};
 pub(crate) use session::update_cwd_if_changed;

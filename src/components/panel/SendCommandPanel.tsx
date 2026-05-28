@@ -13,7 +13,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { invoke } from "@/lib/invoke";
-import { sendSessionInput } from "@/lib/sessionInput";
+import { buildTerminalCommandInput, sendSessionInput } from "@/lib/sessionInput";
 
 interface SerialSendPanelProps {
   serialSessionId: string | null;
@@ -88,7 +88,7 @@ export default function SerialSendPanel({
 
     const results = await Promise.allSettled(
       shellSessionIds.map(async (sessionId) => {
-        await sendSessionInput(sessionId, `${normalizedCommand}\r`, {
+        await sendSessionInput(sessionId, buildTerminalCommandInput(normalizedCommand), {
           preview: { kind: "reset" },
           registerSubmission: normalizedCommand,
         });

@@ -30,6 +30,15 @@ function inferPreview(data: string): SessionInputPreview {
   return { kind: "data", data };
 }
 
+export function normalizeTerminalCommandInput(command: string): string {
+  return command.replace(/\r\n|\r|\n/gu, "\r");
+}
+
+export function buildTerminalCommandInput(command: string, execute: boolean = true): string {
+  const input = normalizeTerminalCommandInput(command);
+  return execute ? `${input}\r` : input;
+}
+
 export function emitSessionInputPreview(sessionId: string, preview: SessionInputPreview): void {
   if (typeof window === "undefined") {
     return;

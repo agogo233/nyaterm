@@ -93,8 +93,9 @@ export interface SshConfig {
   auth: SshAuth;
 }
 
-/** SSH authentication: password or private key (PEM content). */
+/** SSH authentication: none, password, or private key (PEM content). */
 export type SshAuth =
+  | { type: "none" }
   | { type: "password"; password: string }
   | { type: "key"; key_data: string; passphrase?: string };
 
@@ -374,6 +375,16 @@ export interface QuickCommand {
 export interface QuickCommandsConfig {
   commands: QuickCommand[];
   categories: QuickCommandCategory[];
+}
+
+export type QuickCommandImportSource = "windterm_quickbar" | "nyaterm_json";
+
+export interface QuickCommandImportResult {
+  imported_commands: number;
+  imported_categories: number;
+  updated_commands: number;
+  total_commands: number;
+  total_categories: number;
 }
 
 /** Fuzzy search result with matched command and highlight indices. */

@@ -50,6 +50,7 @@ interface TabBarProps {
   onConnectConnection: (connection: SavedConnection) => void | Promise<void>;
   onDuplicateSession: (tab: Tab) => void | Promise<void>;
   onReconnectSession: (tab: Tab) => void | Promise<void>;
+  onDisconnectSession: (tab: Tab) => void | Promise<void>;
   onSplitSession: (tab: Tab, direction: PaneSplitDirection) => void | Promise<void>;
   onUnsplit?: () => void;
   onCloseSession: (tab: Tab) => void | Promise<void>;
@@ -179,6 +180,7 @@ function TabBar({
   onConnectConnection,
   onDuplicateSession,
   onReconnectSession,
+  onDisconnectSession,
   onSplitSession,
   onUnsplit,
   onCloseSession,
@@ -621,6 +623,7 @@ function TabBar({
           tabs={tabs}
           onDuplicateSession={onDuplicateSession}
           onReconnectSession={onReconnectSession}
+          onDisconnectSession={onDisconnectSession}
           onSplitSession={onSplitSession}
           onUnsplit={onUnsplit}
           onCloseSession={onCloseSession}

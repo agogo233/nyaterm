@@ -79,6 +79,75 @@ docker exec -it {{容器名}} bash
 - 发布脚本
 - 环境巡检
 
+## 导入快捷命令
+
+在快捷命令面板右上角点击 **导入快捷命令**，可以从外部文件批量导入。导入会按命令 ID 合并覆盖，不会清空现有快捷命令。
+
+### 从 WindTerm 导入
+
+WindTerm 的快捷命令文件通常位于：
+
+```text
+~/.wind/profiles/default.v10/terminal/quickbar.config
+```
+
+在 Windows 上可以在用户目录下找到对应路径：
+
+```text
+C:\Users\<用户名>\.wind\profiles\default.v10\terminal\quickbar.config
+```
+
+选择 **WindTerm Quickbar** 后，选中这个 `quickbar.config` 文件即可导入。NyaTerm 会读取 `quick.label`、`quick.text`、`quick.group` 和 `quick.uuid` 等字段，并把 WindTerm 的 `Send Text` 类型导入为 **追加到输入行**，避免点击后立即执行脚本。
+
+### 从 JSON 文件导入
+
+选择 **NyaTerm JSON** 后，可以导入下面这种 JSON 文件：
+
+```json
+{
+  "categories": [
+    {
+      "id": "general",
+      "name": "General"
+    },
+    {
+      "id": "k8s",
+      "name": "Kubernetes"
+    }
+  ],
+  "commands": [
+    {
+      "id": "cmd-list-files",
+      "label": "List files",
+      "command": "ls -la",
+      "category_id": "general",
+      "description": "List files with details",
+      "color_tag": "blue",
+      "icon_tag": "terminal",
+      "pinned": true,
+      "execution_mode": "execute",
+      "source": "manual",
+      "risk_level": "low"
+    },
+    {
+      "label": "Kubernetes pods",
+      "command": "kubectl get pods -A",
+      "category": "Kubernetes",
+      "execution_mode": "append",
+      "risk_level": "low"
+    }
+  ]
+}
+```
+
+说明：
+
+- `categories` 可以省略；使用 `category` 名称时，分类不存在会自动创建
+- `id` 可以省略；省略后会自动生成
+- `execution_mode` 支持 `execute` 或 `append`
+- `source` 支持 `manual` 或 `ai`
+- `risk_level` 支持 `low`、`medium`、`high`、`critical`
+
 ## 与工作区配合的使用方式
 
 快捷命令并不绑定某一类会话。只要当前终端可接收输入，你就可以把命令发送到：

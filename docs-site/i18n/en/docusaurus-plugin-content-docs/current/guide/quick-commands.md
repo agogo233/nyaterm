@@ -79,6 +79,75 @@ That makes it useful for organizing sets like:
 - Release scripts
 - Environment inspection
 
+## Import quick commands
+
+Click **Import Quick Commands** in the upper-right corner of the Quick Commands panel to import commands from an external file. Imports merge by command ID and update matching commands without clearing your existing list.
+
+### Import from WindTerm
+
+WindTerm quick commands are usually stored at:
+
+```text
+~/.wind/profiles/default.v10/terminal/quickbar.config
+```
+
+On Windows, look under your user directory:
+
+```text
+C:\Users\<username>\.wind\profiles\default.v10\terminal\quickbar.config
+```
+
+Choose **WindTerm Quickbar**, then select this `quickbar.config` file. NyaTerm reads fields such as `quick.label`, `quick.text`, `quick.group`, and `quick.uuid`. WindTerm commands with `quick.type` set to `Send Text` are imported as **Append to prompt** so imported scripts are not executed immediately when clicked.
+
+### Import from a JSON file
+
+Choose **NyaTerm JSON** to import a file like this:
+
+```json
+{
+  "categories": [
+    {
+      "id": "general",
+      "name": "General"
+    },
+    {
+      "id": "k8s",
+      "name": "Kubernetes"
+    }
+  ],
+  "commands": [
+    {
+      "id": "cmd-list-files",
+      "label": "List files",
+      "command": "ls -la",
+      "category_id": "general",
+      "description": "List files with details",
+      "color_tag": "blue",
+      "icon_tag": "terminal",
+      "pinned": true,
+      "execution_mode": "execute",
+      "source": "manual",
+      "risk_level": "low"
+    },
+    {
+      "label": "Kubernetes pods",
+      "command": "kubectl get pods -A",
+      "category": "Kubernetes",
+      "execution_mode": "append",
+      "risk_level": "low"
+    }
+  ]
+}
+```
+
+Notes:
+
+- `categories` is optional; when a command uses a `category` name, missing categories are created automatically
+- `id` is optional and is generated when omitted
+- `execution_mode` supports `execute` or `append`
+- `source` supports `manual` or `ai`
+- `risk_level` supports `low`, `medium`, `high`, or `critical`
+
 ## How it fits the workspace
 
 Quick Commands are not tied to one specific session type. As long as the current terminal can accept input, you can send commands to:
