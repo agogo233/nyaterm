@@ -8,11 +8,91 @@ use super::util::*;
 use crate::core::ssh::{SshConnectionHandles, SshRawHandle};
 use crate::error::{AppError, AppResult};
 use crate::observability::{log_event, StructuredLog, StructuredLogLevel};
-use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags};
+use russh_sftp::client::{Config as SftpClientConfig, SftpSession};
+use russh_sftp::protocol::{FileAttributes, FileType};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 
+const SFTP_MIN_REQUEST_KIB: usize = 64;
+const SFTP_MAX_REQUEST_KIB: usize = 256;
+const SFTP_PIPELINE_TARGET_KIB: usize = 1024;
+const SFTP_WRITE_PIPELINE_TARGET_KIB: usize = 2048;
+const SFTP_MIN_PIPELINE_DEPTH: usize = 4;
+const SFTP_MAX_PIPELINE_DEPTH: usize = 16;
+const SFTP_MIN_CONCURRENT_WRITES: usize = 8;
+const SFTP_MAX_CONCURRENT_WRITES: usize = 16;
+const SFTP_PACKET_OVERHEAD_RESERVE: usize = 1024;
+const TRANSFER_PROGRESS_INTERVAL: Duration = Duration::from_millis(50);
+
+fn sftp_pipeline_config(ts: &crate::config::TransferSettings) -> (usize, usize, usize) {
+    let request_kib =
+        (ts.transfer_buffer_size as usize).clamp(SFTP_MIN_REQUEST_KIB, SFTP_MAX_REQUEST_KIB);
+    let pipeline_depth = SFTP_PIPELINE_TARGET_KIB
+        .div_ceil(request_kib)
+        .clamp(SFTP_MIN_PIPELINE_DEPTH, SFTP_MAX_PIPELINE_DEPTH);
+    let max_concurrent_writes = SFTP_WRITE_PIPELINE_TARGET_KIB
+        .div_ceil(request_kib)
+        .clamp(SFTP_MIN_CONCURRENT_WRITES, SFTP_MAX_CONCURRENT_WRITES);
+    (request_kib, pipeline_depth, max_concurrent_writes)
+}
+
+fn sftp_client_config(request_kib: usize, max_concurrent_writes: usize) -> SftpClientConfig {
+    SftpClientConfig {
+        max_packet_len: (request_kib * 1024) as u32,
+        max_concurrent_writes,
+        ..SftpClientConfig::default()
+    }
+}
+
+fn sftp_payload_size(request_kib: usize) -> usize {
+    (request_kib * 1024)
+        .saturating_sub(SFTP_PACKET_OVERHEAD_RESERVE)
+        .max(32 * 1024)
+}
+
+fn transfer_task_concurrency(value: u32) -> usize {
+    (value as usize).clamp(1, 10)
+}
+
+fn log_transfer_performance(
+    direction: &str,
+    kind: &str,
+    bytes: u64,
+    elapsed: Duration,
+    request_kib: usize,
+    pipeline_depth: usize,
+    max_concurrent_writes: usize,
+    concurrent_tasks: usize,
+) {
+    let elapsed_secs = elapsed.as_secs_f64().max(0.001);
+    let mbps = bytes as f64 / 1024.0 / 1024.0 / elapsed_secs;
+    log_event(StructuredLog {
+        level: StructuredLogLevel::Info,
+        domain: "transfer.performance".to_string(),
+        event: "sftp.transfer.completed".to_string(),
+        message: "SFTP transfer performance summary".to_string(),
+        ids: None,
+        data: Some(serde_json::json!({
+            "backend": "sftp",
+            "direction": direction,
+            "kind": kind,
+            "bytes": bytes,
+            "elapsed_ms": elapsed.as_millis(),
+            "average_mbps": mbps,
+            "request_kib": request_kib,
+            "payload_bytes": sftp_payload_size(request_kib),
+            "pipeline_depth": pipeline_depth,
+            "max_concurrent_writes": max_concurrent_writes,
+            "concurrent_tasks": concurrent_tasks,
+        })),
+        error: None,
+        client_timestamp: None,
+    });
+}
+
+#[derive(Clone)]
 pub(crate) struct SftpBackend {
     ssh_handle: Arc<SshConnectionHandles>,
 }
@@ -24,12 +104,16 @@ impl SftpBackend {
 
     /// Attempt to open a throwaway SFTP session to verify subsystem availability.
     pub(crate) async fn probe(ssh_handle: &Arc<SshConnectionHandles>) -> AppResult<()> {
-        let sftp = Self::open_sftp_raw(ssh_handle.target_handle()).await?;
+        let sftp =
+            Self::open_sftp_raw(ssh_handle.target_handle(), SftpClientConfig::default()).await?;
         let _ = sftp.close().await;
         Ok(())
     }
 
-    async fn open_sftp_raw(handle_mtx: SshRawHandle) -> AppResult<SftpSession> {
+    async fn open_sftp_raw(
+        handle_mtx: SshRawHandle,
+        config: SftpClientConfig,
+    ) -> AppResult<SftpSession> {
         let channel = {
             let handle = handle_mtx.lock().await;
             handle
@@ -42,12 +126,19 @@ impl SftpBackend {
             .await
             .map_err(|e| AppError::Channel(format!("Failed to start SFTP subsystem: {}", e)))?;
 
-        let sftp = SftpSession::new(channel.into_stream()).await?;
+        let sftp = SftpSession::new_with_config(channel.into_stream(), config).await?;
         Ok(sftp)
     }
 
     async fn open_sftp(&self) -> AppResult<SftpSession> {
-        Self::open_sftp_raw(self.ssh_handle.target_handle()).await
+        Self::open_sftp_raw(self.ssh_handle.target_handle(), SftpClientConfig::default()).await
+    }
+
+    async fn open_sftp_with_client_config(
+        &self,
+        config: SftpClientConfig,
+    ) -> AppResult<SftpSession> {
+        Self::open_sftp_raw(self.ssh_handle.target_handle(), config).await
     }
 }
 
@@ -198,6 +289,26 @@ async fn cleanup_cancelled_upload(backend: &SftpBackend, remote_path: &str) -> A
     Ok(())
 }
 
+async fn read_sftp_chunk(
+    mut remote_file: russh_sftp::client::fs::File,
+    offset: u64,
+    len: usize,
+) -> AppResult<(u64, Vec<u8>, russh_sftp::client::fs::File)> {
+    use std::io::SeekFrom;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+    remote_file
+        .seek(SeekFrom::Start(offset))
+        .await
+        .map_err(|e| AppError::Channel(format!("Seek failed: {}", e)))?;
+    let mut buf = vec![0u8; len];
+    remote_file
+        .read_exact(&mut buf)
+        .await
+        .map_err(|e| AppError::Channel(format!("SFTP read failed: {}", e)))?;
+    Ok((offset, buf, remote_file))
+}
+
 async fn download_remote_file_inner_with_controller(
     backend: &SftpBackend,
     app: &tauri::AppHandle,
@@ -209,7 +320,6 @@ async fn download_remote_file_inner_with_controller(
     parent_controller: Option<Arc<TransferController>>,
 ) -> AppResult<()> {
     use std::io::SeekFrom;
-    use std::time::{Duration, Instant};
     use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
     use tokio::task::JoinSet;
 
@@ -219,8 +329,9 @@ async fn download_remote_file_inner_with_controller(
         &controller.build_event("started", 0, None),
     );
 
-    let chunk_size = (ts.transfer_buffer_size as u64).max(1) * 1024;
-    let concurrency = (ts.download_threads as usize).max(1);
+    let (request_kib, pipeline_depth, max_concurrent_writes) = sftp_pipeline_config(ts);
+    let chunk_size = sftp_payload_size(request_kib) as u64;
+    let transfer_started = Instant::now();
 
     let result: AppResult<u64> = async {
         if let Some(parent) = std::path::Path::new(&actual_path).parent() {
@@ -231,7 +342,9 @@ async fn download_remote_file_inner_with_controller(
             }
         }
 
-        let sftp = backend.open_sftp().await?;
+        let sftp = backend
+            .open_sftp_with_client_config(sftp_client_config(request_kib, max_concurrent_writes))
+            .await?;
 
         let remote_attrs = sftp.metadata(remote_path).await.ok();
         let total_size = remote_attrs.as_ref().and_then(|m| m.size).unwrap_or(0);
@@ -245,13 +358,12 @@ async fn download_remote_file_inner_with_controller(
             let _ = local_file.set_len(total_size).await;
         }
 
-        const PROGRESS_INTERVAL: Duration = Duration::from_millis(50);
         let mut last_progress = Instant::now();
         let mut bytes_transferred: u64 = 0;
 
         if total_size > 0 {
             let num_chunks = ((total_size + chunk_size - 1) / chunk_size) as usize;
-            let concurrency = concurrency.min(num_chunks);
+            let concurrency = pipeline_depth.min(num_chunks);
 
             let mut handle_pool: Vec<russh_sftp::client::fs::File> =
                 Vec::with_capacity(concurrency);
@@ -273,24 +385,21 @@ async fn download_remote_file_inner_with_controller(
                 let len = chunk_size.min(total_size - next_offset) as usize;
                 let offset = next_offset;
                 next_offset += len as u64;
-
-                join_set.spawn(async move {
-                    let mut f = fh;
-                    f.seek(SeekFrom::Start(offset))
-                        .await
-                        .map_err(|e| AppError::Channel(format!("Seek failed: {}", e)))?;
-                    let mut buf = vec![0u8; len];
-                    f.read_exact(&mut buf)
-                        .await
-                        .map_err(|e| AppError::Channel(format!("SFTP read failed: {}", e)))?;
-                    Ok((offset, buf, f))
-                });
+                join_set.spawn(read_sftp_chunk(fh, offset, len));
             }
 
             while let Some(res) = join_set.join_next().await {
                 wait_for_transfer_chain(&controller, parent_controller.as_ref()).await?;
                 let (chunk_offset, data, fh) =
                     res.map_err(|e| AppError::Channel(format!("Task panicked: {}", e)))??;
+
+                if next_offset < total_size {
+                    wait_for_transfer_chain(&controller, parent_controller.as_ref()).await?;
+                    let len = chunk_size.min(total_size - next_offset) as usize;
+                    let offset = next_offset;
+                    next_offset += len as u64;
+                    join_set.spawn(read_sftp_chunk(fh, offset, len));
+                }
 
                 local_file
                     .seek(SeekFrom::Start(chunk_offset))
@@ -304,32 +413,13 @@ async fn download_remote_file_inner_with_controller(
                 bytes_transferred += data.len() as u64;
                 controller.update_progress(bytes_transferred, total_size);
 
-                if last_progress.elapsed() >= PROGRESS_INTERVAL {
+                if last_progress.elapsed() >= TRANSFER_PROGRESS_INTERVAL {
                     last_progress = Instant::now();
                     emit_parent_progress(app, parent_controller.as_ref());
                     let _ = app.emit(
                         "transfer-event",
                         &controller.build_event("progress", total_size, None),
                     );
-                }
-
-                if next_offset < total_size {
-                    wait_for_transfer_chain(&controller, parent_controller.as_ref()).await?;
-                    let len = chunk_size.min(total_size - next_offset) as usize;
-                    let offset = next_offset;
-                    next_offset += len as u64;
-
-                    join_set.spawn(async move {
-                        let mut f = fh;
-                        f.seek(SeekFrom::Start(offset))
-                            .await
-                            .map_err(|e| AppError::Channel(format!("Seek failed: {}", e)))?;
-                        let mut buf = vec![0u8; len];
-                        f.read_exact(&mut buf)
-                            .await
-                            .map_err(|e| AppError::Channel(format!("SFTP read failed: {}", e)))?;
-                        Ok((offset, buf, f))
-                    });
                 }
             }
         } else {
@@ -356,7 +446,7 @@ async fn download_remote_file_inner_with_controller(
                 bytes_transferred += n as u64;
                 controller.update_progress(bytes_transferred, 0);
 
-                if last_progress.elapsed() >= PROGRESS_INTERVAL {
+                if last_progress.elapsed() >= TRANSFER_PROGRESS_INTERVAL {
                     last_progress = Instant::now();
                     emit_parent_progress(app, parent_controller.as_ref());
                     let _ = app.emit(
@@ -394,6 +484,16 @@ async fn download_remote_file_inner_with_controller(
 
     match result {
         Ok(size) => {
+            log_transfer_performance(
+                "download",
+                "file",
+                size,
+                transfer_started.elapsed(),
+                request_kib,
+                pipeline_depth,
+                max_concurrent_writes,
+                1,
+            );
             controller.update_progress(size, size);
             let _ = app.emit(
                 "transfer-event",
@@ -427,10 +527,7 @@ async fn upload_local_file_inner_with_controller(
     controller: Arc<TransferController>,
     parent_controller: Option<Arc<TransferController>>,
 ) -> AppResult<()> {
-    use std::io::SeekFrom;
-    use std::time::{Duration, Instant};
-    use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-    use tokio::task::JoinSet;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     register_transfer(controller.clone());
     let _ = app.emit(
@@ -438,88 +535,52 @@ async fn upload_local_file_inner_with_controller(
         &controller.build_event("started", 0, None),
     );
 
-    let chunk_size = ((ts.transfer_buffer_size as usize).max(1)) * 1024;
-    let concurrency = (ts.upload_threads as usize).max(1);
+    let (request_kib, pipeline_depth, max_concurrent_writes) = sftp_pipeline_config(ts);
+    let chunk_size = sftp_payload_size(request_kib);
+    let transfer_started = Instant::now();
 
     let result: AppResult<u64> = async {
         let local_meta = tokio::fs::metadata(local_path).await;
         let total_size = local_meta.as_ref().map(|m| m.len()).unwrap_or(0);
         controller.update_progress(0, total_size);
 
-        let sftp = backend.open_sftp().await?;
+        let sftp = backend
+            .open_sftp_with_client_config(sftp_client_config(request_kib, max_concurrent_writes))
+            .await?;
         let mut bytes_transferred: u64 = 0;
 
-        const PROGRESS_INTERVAL: Duration = Duration::from_millis(50);
         let mut last_progress = Instant::now();
-
-        let mut bootstrap_file = sftp.create(remote_path).await?;
-        bootstrap_file
-            .shutdown()
+        let mut local_file = tokio::fs::File::open(local_path)
             .await
-            .map_err(|e| AppError::Channel(format!("SFTP flush failed: {}", e)))?;
+            .map_err(|e| AppError::Channel(format!("Failed to open local file: {}", e)))?;
+        let mut remote_file = sftp
+            .create(remote_path)
+            .await
+            .map_err(|e| AppError::Channel(format!("Failed to create remote file: {}", e)))?;
 
         if total_size > 0 {
-            let num_chunks = total_size.div_ceil(chunk_size as u64) as usize;
-            let concurrency = concurrency.min(num_chunks);
-
-            let mut handle_pool: Vec<(tokio::fs::File, russh_sftp::client::fs::File)> =
-                Vec::with_capacity(concurrency);
-            for _ in 0..concurrency {
-                let local_file = tokio::fs::File::open(local_path)
+            let mut buf = vec![0u8; chunk_size];
+            loop {
+                wait_for_transfer_chain(&controller, parent_controller.as_ref()).await?;
+                let read = local_file
+                    .read(&mut buf)
                     .await
-                    .map_err(|e| AppError::Channel(format!("Failed to open local file: {}", e)))?;
-                let remote_file = sftp
-                    .open_with_flags(remote_path, OpenFlags::WRITE)
-                    .await
-                    .map_err(|e| AppError::Channel(format!("Failed to open remote file: {}", e)))?;
-                handle_pool.push((local_file, remote_file));
-            }
-
-            type Task = AppResult<(usize, tokio::fs::File, russh_sftp::client::fs::File)>;
-            let mut join_set: JoinSet<Task> = JoinSet::new();
-            let mut next_offset: u64 = 0;
-
-            while let Some((local_fh, remote_fh)) = handle_pool.pop() {
-                if next_offset >= total_size {
+                    .map_err(|e| AppError::Channel(format!("Failed to read local file: {}", e)))?;
+                if read == 0 {
                     break;
                 }
-                wait_for_transfer_chain(&controller, parent_controller.as_ref()).await?;
-                let len = chunk_size.min((total_size - next_offset) as usize);
-                let offset = next_offset;
-                next_offset += len as u64;
 
-                join_set.spawn(async move {
-                    let mut local = local_fh;
-                    let mut remote = remote_fh;
-                    local
-                        .seek(SeekFrom::Start(offset))
-                        .await
-                        .map_err(|e| AppError::Channel(format!("Local seek failed: {}", e)))?;
-                    let mut buf = vec![0u8; len];
-                    local.read_exact(&mut buf).await.map_err(|e| {
-                        AppError::Channel(format!("Failed to read local file: {}", e))
-                    })?;
-                    remote
-                        .seek(SeekFrom::Start(offset))
-                        .await
-                        .map_err(|e| AppError::Channel(format!("Remote seek failed: {}", e)))?;
-                    remote
-                        .write_all(&buf)
-                        .await
-                        .map_err(|e| AppError::Channel(format!("SFTP write failed: {}", e)))?;
-                    Ok((buf.len(), local, remote))
-                });
-            }
+                // russh-sftp >= 2.3 pipelines write ACKs internally according to
+                // client::Config::max_concurrent_writes; shutdown below drains them.
+                remote_file
+                    .write_all(&buf[..read])
+                    .await
+                    .map_err(|e| AppError::Channel(format!("SFTP write failed: {}", e)))?;
 
-            while let Some(res) = join_set.join_next().await {
-                wait_for_transfer_chain(&controller, parent_controller.as_ref()).await?;
-                let (written, local_fh, remote_fh) =
-                    res.map_err(|e| AppError::Channel(format!("Task panicked: {}", e)))??;
-
-                bytes_transferred += written as u64;
+                bytes_transferred += read as u64;
                 controller.update_progress(bytes_transferred, total_size);
 
-                if last_progress.elapsed() >= PROGRESS_INTERVAL {
+                if last_progress.elapsed() >= TRANSFER_PROGRESS_INTERVAL {
                     last_progress = Instant::now();
                     emit_parent_progress(app, parent_controller.as_ref());
                     let _ = app.emit(
@@ -527,40 +588,13 @@ async fn upload_local_file_inner_with_controller(
                         &controller.build_event("progress", total_size, None),
                     );
                 }
-
-                if next_offset < total_size {
-                    wait_for_transfer_chain(&controller, parent_controller.as_ref()).await?;
-                    let len = chunk_size.min((total_size - next_offset) as usize);
-                    let offset = next_offset;
-                    next_offset += len as u64;
-
-                    join_set.spawn(async move {
-                        let mut local = local_fh;
-                        let mut remote = remote_fh;
-                        local
-                            .seek(SeekFrom::Start(offset))
-                            .await
-                            .map_err(|e| AppError::Channel(format!("Local seek failed: {}", e)))?;
-                        let mut buf = vec![0u8; len];
-                        local.read_exact(&mut buf).await.map_err(|e| {
-                            AppError::Channel(format!("Failed to read local file: {}", e))
-                        })?;
-                        remote
-                            .seek(SeekFrom::Start(offset))
-                            .await
-                            .map_err(|e| AppError::Channel(format!("Remote seek failed: {}", e)))?;
-                        remote
-                            .write_all(&buf)
-                            .await
-                            .map_err(|e| AppError::Channel(format!("SFTP write failed: {}", e)))?;
-                        Ok((buf.len(), local, remote))
-                    });
-                } else {
-                    let mut remote = remote_fh;
-                    let _ = remote.shutdown().await;
-                }
             }
         }
+
+        remote_file
+            .shutdown()
+            .await
+            .map_err(|e| AppError::Channel(format!("SFTP flush failed: {}", e)))?;
 
         if ts.preserve_timestamps {
             if let Ok(ref meta) = local_meta {
@@ -590,6 +624,16 @@ async fn upload_local_file_inner_with_controller(
 
     match result {
         Ok(size) => {
+            log_transfer_performance(
+                "upload",
+                "file",
+                size,
+                transfer_started.elapsed(),
+                request_kib,
+                pipeline_depth,
+                max_concurrent_writes,
+                1,
+            );
             controller.update_progress(size, size);
             let _ = app.emit(
                 "transfer-event",
@@ -1029,6 +1073,13 @@ impl RemoteFs for SftpBackend {
         local_path: &str,
         transfer_id: Option<String>,
     ) -> AppResult<()> {
+        let transfer_settings = crate::config::load_app_settings(app)
+            .map(|s| s.transfer)
+            .unwrap_or_default();
+        let (request_kib, pipeline_depth, max_concurrent_writes) =
+            sftp_pipeline_config(&transfer_settings);
+        let concurrent_tasks = transfer_task_concurrency(transfer_settings.download_threads);
+        let transfer_started = Instant::now();
         let total_files = self.count_remote_files(remote_path).await?;
         let directory_controller = create_directory_transfer_controller(
             transfer_id,
@@ -1046,20 +1097,38 @@ impl RemoteFs for SftpBackend {
             &directory_controller.build_event("started", 0, None),
         );
 
-        let mut completed_count = 0;
-        let result = self
-            .download_remote_directory_inner(
-                app,
-                session_id,
+        let result = async {
+            let mut files = Vec::new();
+            self.collect_remote_directory_files(
                 remote_path,
                 local_path,
-                directory_controller.clone(),
-                &mut completed_count,
+                &directory_controller,
+                &mut files,
             )
-            .await;
+            .await?;
+            self.download_remote_directory_files(
+                app,
+                session_id,
+                files,
+                directory_controller.clone(),
+                &transfer_settings,
+            )
+            .await
+        }
+        .await;
 
         match result {
-            Ok(()) => {
+            Ok(completed_count) => {
+                log_transfer_performance(
+                    "download",
+                    "directory",
+                    0,
+                    transfer_started.elapsed(),
+                    request_kib,
+                    pipeline_depth,
+                    max_concurrent_writes,
+                    concurrent_tasks,
+                );
                 directory_controller.update_item_progress(completed_count, total_files);
                 let _ = app.emit(
                     "transfer-event",
@@ -1095,6 +1164,13 @@ impl RemoteFs for SftpBackend {
         remote_path: &str,
         transfer_id: Option<String>,
     ) -> AppResult<()> {
+        let transfer_settings = crate::config::load_app_settings(app)
+            .map(|s| s.transfer)
+            .unwrap_or_default();
+        let (request_kib, pipeline_depth, max_concurrent_writes) =
+            sftp_pipeline_config(&transfer_settings);
+        let concurrent_tasks = transfer_task_concurrency(transfer_settings.upload_threads);
+        let transfer_started = Instant::now();
         let local_stats = collect_local_directory_stats(local_path).await?;
         let directory_controller = create_directory_transfer_controller(
             transfer_id,
@@ -1112,20 +1188,38 @@ impl RemoteFs for SftpBackend {
             &directory_controller.build_event("started", 0, None),
         );
 
-        let mut completed_count = 0;
-        let result = self
-            .upload_local_directory_inner(
-                app,
-                session_id,
+        let result = async {
+            let mut files = Vec::new();
+            self.collect_local_directory_files(
                 local_path,
                 remote_path,
-                directory_controller.clone(),
-                &mut completed_count,
+                &directory_controller,
+                &mut files,
             )
-            .await;
+            .await?;
+            self.upload_local_directory_files(
+                app,
+                session_id,
+                files,
+                directory_controller.clone(),
+                &transfer_settings,
+            )
+            .await
+        }
+        .await;
 
         match result {
-            Ok(()) => {
+            Ok(completed_count) => {
+                log_transfer_performance(
+                    "upload",
+                    "directory",
+                    local_stats.total_size,
+                    transfer_started.elapsed(),
+                    request_kib,
+                    pipeline_depth,
+                    max_concurrent_writes,
+                    concurrent_tasks,
+                );
                 directory_controller
                     .update_progress(local_stats.total_size, local_stats.total_size);
                 directory_controller.update_item_progress(completed_count, local_stats.file_count);
@@ -1156,6 +1250,20 @@ impl RemoteFs for SftpBackend {
     }
 }
 
+#[derive(Clone)]
+struct RemoteDirectoryFile {
+    name: String,
+    remote_path: String,
+    local_path: String,
+}
+
+#[derive(Clone)]
+struct LocalDirectoryFile {
+    name: String,
+    local_path: String,
+    remote_path: String,
+}
+
 impl SftpBackend {
     async fn count_remote_files(&self, remote_path: &str) -> AppResult<u64> {
         let mut count = 0;
@@ -1174,16 +1282,14 @@ impl SftpBackend {
         Ok(count)
     }
 
-    async fn download_remote_directory_inner(
+    async fn collect_remote_directory_files(
         &self,
-        app: &tauri::AppHandle,
-        session_id: &str,
         remote_path: &str,
         local_path: &str,
-        directory_controller: Arc<TransferController>,
-        completed_count: &mut u64,
+        directory_controller: &Arc<TransferController>,
+        files: &mut Vec<RemoteDirectoryFile>,
     ) -> AppResult<()> {
-        wait_for_transfer_ready(&directory_controller).await?;
+        wait_for_transfer_ready(directory_controller).await?;
 
         tokio::fs::create_dir_all(local_path)
             .await
@@ -1192,70 +1298,39 @@ impl SftpBackend {
         let entries = self.list_dir(remote_path).await?;
 
         for entry in entries {
-            wait_for_transfer_ready(&directory_controller).await?;
+            wait_for_transfer_ready(directory_controller).await?;
 
             let child_remote = format!("{}/{}", remote_path.trim_end_matches('/'), entry.name);
             let child_local = format!("{}/{}", local_path.trim_end_matches('/'), entry.name);
 
             if entry.is_dir {
-                Box::pin(self.download_remote_directory_inner(
-                    app,
-                    session_id,
+                Box::pin(self.collect_remote_directory_files(
                     &child_remote,
                     &child_local,
-                    directory_controller.clone(),
-                    completed_count,
+                    directory_controller,
+                    files,
                 ))
                 .await?;
             } else if !entry.is_symlink {
-                let child_controller = create_child_file_transfer_controller(
-                    None,
-                    session_id,
-                    entry.name.clone(),
-                    &child_remote,
-                    &child_local,
-                    "download",
-                    Some(directory_controller.id()),
-                );
-                let ts = crate::config::load_app_settings(app)
-                    .map(|s| s.transfer)
-                    .unwrap_or_default();
-                download_remote_file_inner_with_controller(
-                    self,
-                    app,
-                    session_id,
-                    &child_remote,
-                    &child_local,
-                    &ts,
-                    child_controller,
-                    Some(directory_controller.clone()),
-                )
-                .await?;
-                *completed_count += 1;
-                let total = directory_controller
-                    .item_count_total()
-                    .unwrap_or(*completed_count);
-                directory_controller.update_item_progress(*completed_count, total);
-                let _ = app.emit(
-                    "transfer-event",
-                    &directory_controller.build_event("progress", 0, None),
-                );
+                files.push(RemoteDirectoryFile {
+                    name: entry.name,
+                    remote_path: child_remote,
+                    local_path: child_local,
+                });
             }
         }
 
         Ok(())
     }
 
-    async fn upload_local_directory_inner(
+    async fn collect_local_directory_files(
         &self,
-        app: &tauri::AppHandle,
-        session_id: &str,
         local_path: &str,
         remote_path: &str,
-        directory_controller: Arc<TransferController>,
-        completed_count: &mut u64,
+        directory_controller: &Arc<TransferController>,
+        files: &mut Vec<LocalDirectoryFile>,
     ) -> AppResult<()> {
-        wait_for_transfer_ready(&directory_controller).await?;
+        wait_for_transfer_ready(directory_controller).await?;
 
         let sftp = self.open_sftp().await?;
         let _ = sftp.create_dir(remote_path).await;
@@ -1270,7 +1345,7 @@ impl SftpBackend {
             .await
             .map_err(|e| AppError::Channel(format!("Failed to read dir entry: {}", e)))?
         {
-            wait_for_transfer_ready(&directory_controller).await?;
+            wait_for_transfer_ready(directory_controller).await?;
 
             let file_type = entry
                 .file_type()
@@ -1285,51 +1360,258 @@ impl SftpBackend {
             let child_remote = format!("{}/{}", remote_path.trim_end_matches('/'), entry_name);
 
             if file_type.is_dir() {
-                Box::pin(self.upload_local_directory_inner(
-                    app,
-                    session_id,
+                Box::pin(self.collect_local_directory_files(
                     &child_local,
                     &child_remote,
-                    directory_controller.clone(),
-                    completed_count,
+                    directory_controller,
+                    files,
                 ))
                 .await?;
             } else if file_type.is_file() {
-                let child_controller = create_child_file_transfer_controller(
-                    None,
-                    session_id,
-                    entry_name,
-                    &child_remote,
-                    &child_local,
-                    "upload",
-                    Some(directory_controller.id()),
-                );
-                let ts = crate::config::load_app_settings(app)
-                    .map(|s| s.transfer)
-                    .unwrap_or_default();
-                upload_local_file_inner_with_controller(
-                    self,
-                    app,
-                    session_id,
-                    &child_local,
-                    &child_remote,
-                    &ts,
-                    child_controller,
-                    Some(directory_controller.clone()),
-                )
-                .await?;
-                *completed_count += 1;
-                let total = directory_controller
-                    .item_count_total()
-                    .unwrap_or(*completed_count);
-                directory_controller.update_item_progress(*completed_count, total);
-                let _ = app.emit(
-                    "transfer-event",
-                    &directory_controller.build_event("progress", 0, None),
-                );
+                files.push(LocalDirectoryFile {
+                    name: entry_name,
+                    local_path: child_local,
+                    remote_path: child_remote,
+                });
             }
         }
 
         Ok(())
+    }
+
+    async fn download_remote_directory_files(
+        &self,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        files: Vec<RemoteDirectoryFile>,
+        directory_controller: Arc<TransferController>,
+        transfer_settings: &crate::config::TransferSettings,
+    ) -> AppResult<u64> {
+        if files.is_empty() {
+            return Ok(0);
+        }
+
+        let concurrency = transfer_task_concurrency(transfer_settings.download_threads)
+            .min(files.len())
+            .max(1);
+        let completed_count = Arc::new(AtomicU64::new(0));
+        let total = directory_controller
+            .item_count_total()
+            .unwrap_or(files.len() as u64);
+        let mut join_set: tokio::task::JoinSet<AppResult<()>> = tokio::task::JoinSet::new();
+        let mut next_index = 0usize;
+        let mut first_err: Option<AppError> = None;
+
+        while next_index < files.len() && join_set.len() < concurrency {
+            self.spawn_download_directory_file(
+                &mut join_set,
+                app,
+                session_id,
+                files[next_index].clone(),
+                directory_controller.clone(),
+                transfer_settings.clone(),
+            );
+            next_index += 1;
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok(())) => {
+                    let completed = completed_count.fetch_add(1, Ordering::SeqCst) + 1;
+                    directory_controller.update_item_progress(completed, total);
+                    let _ = app.emit(
+                        "transfer-event",
+                        &directory_controller.build_event("progress", 0, None),
+                    );
+                    if first_err.is_none() {
+                        while next_index < files.len() && join_set.len() < concurrency {
+                            self.spawn_download_directory_file(
+                                &mut join_set,
+                                app,
+                                session_id,
+                                files[next_index].clone(),
+                                directory_controller.clone(),
+                                transfer_settings.clone(),
+                            );
+                            next_index += 1;
+                        }
+                    }
+                }
+                Ok(Err(error)) => {
+                    if first_err.is_none() {
+                        first_err = Some(error);
+                    }
+                }
+                Err(error) => {
+                    if first_err.is_none() {
+                        first_err = Some(AppError::Channel(format!(
+                            "Directory download task panicked: {}",
+                            error
+                        )));
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_err {
+            Err(error)
+        } else {
+            Ok(completed_count.load(Ordering::SeqCst))
+        }
+    }
+
+    fn spawn_download_directory_file(
+        &self,
+        join_set: &mut tokio::task::JoinSet<AppResult<()>>,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        file: RemoteDirectoryFile,
+        directory_controller: Arc<TransferController>,
+        transfer_settings: crate::config::TransferSettings,
+    ) {
+        let backend = self.clone();
+        let app = app.clone();
+        let session_id = session_id.to_string();
+        join_set.spawn(async move {
+            wait_for_transfer_ready(&directory_controller).await?;
+            let child_controller = create_child_file_transfer_controller(
+                None,
+                &session_id,
+                file.name,
+                &file.remote_path,
+                &file.local_path,
+                "download",
+                Some(directory_controller.id()),
+            );
+            download_remote_file_inner_with_controller(
+                &backend,
+                &app,
+                &session_id,
+                &file.remote_path,
+                &file.local_path,
+                &transfer_settings,
+                child_controller,
+                Some(directory_controller),
+            )
+            .await
+        });
+    }
+
+    async fn upload_local_directory_files(
+        &self,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        files: Vec<LocalDirectoryFile>,
+        directory_controller: Arc<TransferController>,
+        transfer_settings: &crate::config::TransferSettings,
+    ) -> AppResult<u64> {
+        if files.is_empty() {
+            return Ok(0);
+        }
+
+        let concurrency = transfer_task_concurrency(transfer_settings.upload_threads)
+            .min(files.len())
+            .max(1);
+        let completed_count = Arc::new(AtomicU64::new(0));
+        let total = directory_controller
+            .item_count_total()
+            .unwrap_or(files.len() as u64);
+        let mut join_set: tokio::task::JoinSet<AppResult<()>> = tokio::task::JoinSet::new();
+        let mut next_index = 0usize;
+        let mut first_err: Option<AppError> = None;
+
+        while next_index < files.len() && join_set.len() < concurrency {
+            self.spawn_upload_directory_file(
+                &mut join_set,
+                app,
+                session_id,
+                files[next_index].clone(),
+                directory_controller.clone(),
+                transfer_settings.clone(),
+            );
+            next_index += 1;
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok(())) => {
+                    let completed = completed_count.fetch_add(1, Ordering::SeqCst) + 1;
+                    directory_controller.update_item_progress(completed, total);
+                    let _ = app.emit(
+                        "transfer-event",
+                        &directory_controller.build_event("progress", 0, None),
+                    );
+                    if first_err.is_none() {
+                        while next_index < files.len() && join_set.len() < concurrency {
+                            self.spawn_upload_directory_file(
+                                &mut join_set,
+                                app,
+                                session_id,
+                                files[next_index].clone(),
+                                directory_controller.clone(),
+                                transfer_settings.clone(),
+                            );
+                            next_index += 1;
+                        }
+                    }
+                }
+                Ok(Err(error)) => {
+                    if first_err.is_none() {
+                        first_err = Some(error);
+                    }
+                }
+                Err(error) => {
+                    if first_err.is_none() {
+                        first_err = Some(AppError::Channel(format!(
+                            "Directory upload task panicked: {}",
+                            error
+                        )));
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_err {
+            Err(error)
+        } else {
+            Ok(completed_count.load(Ordering::SeqCst))
+        }
+    }
+
+    fn spawn_upload_directory_file(
+        &self,
+        join_set: &mut tokio::task::JoinSet<AppResult<()>>,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        file: LocalDirectoryFile,
+        directory_controller: Arc<TransferController>,
+        transfer_settings: crate::config::TransferSettings,
+    ) {
+        let backend = self.clone();
+        let app = app.clone();
+        let session_id = session_id.to_string();
+        join_set.spawn(async move {
+            wait_for_transfer_ready(&directory_controller).await?;
+            let child_controller = create_child_file_transfer_controller(
+                None,
+                &session_id,
+                file.name,
+                &file.remote_path,
+                &file.local_path,
+                "upload",
+                Some(directory_controller.id()),
+            );
+            upload_local_file_inner_with_controller(
+                &backend,
+                &app,
+                &session_id,
+                &file.local_path,
+                &file.remote_path,
+                &transfer_settings,
+                child_controller,
+                Some(directory_controller),
+            )
+            .await
+        });
     }
 }
