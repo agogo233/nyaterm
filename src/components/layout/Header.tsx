@@ -237,7 +237,7 @@ export default function Header({
   const menus: Record<string, MenuItem[]> = {
     file: [
       {
-        label: t("menu.newSshConnection"),
+        label: t("menu.newSession"),
         action: onNewSession,
         icon: "add",
         shortcut: dk("tab.newSession"),
