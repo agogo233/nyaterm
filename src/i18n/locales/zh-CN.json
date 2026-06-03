@@ -1488,7 +1488,7 @@
   },
   "zmodem": {
     "cancelled": "ZMODEM 传输已取消",
-    "complete": "ZMODEM 传输完成 ({{count}} 个文件)",
+    "complete": "ZMODEM 传输完成",
     "downloading": "接收中: {{fileName}} ({{percent}}%)",
     "failed": "ZMODEM 传输失败: {{reason}}",
     "selectFiles": "选择要通过 ZMODEM 上传的文件",

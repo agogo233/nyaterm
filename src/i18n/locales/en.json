@@ -1488,7 +1488,7 @@
   },
   "zmodem": {
     "cancelled": "ZMODEM transfer cancelled",
-    "complete": "ZMODEM transfer complete ({{count}} file(s))",
+    "complete": "ZMODEM transfer complete",
     "downloading": "Receiving: {{fileName}} ({{percent}}%)",
     "failed": "ZMODEM transfer failed: {{reason}}",
     "selectFiles": "Select files to upload via ZMODEM",
