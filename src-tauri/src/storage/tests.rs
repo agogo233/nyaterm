@@ -50,6 +50,7 @@ fn sample_connection(id: &str, group_id: Option<&str>, sort_order: i32) -> Saved
             has_password: false,
         }),
         network: None,
+        post_login: None,
         created_at_ms: None,
         updated_at_ms: None,
         last_used_at_ms: None,

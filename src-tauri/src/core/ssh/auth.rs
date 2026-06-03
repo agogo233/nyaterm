@@ -1,4 +1,4 @@
-use super::client::{SshAuth, SshConfig, SshHandler};
+use super::client::{SshAuth, SshConfig, SshHandler, SshPostLoginConfig};
 use crate::error::{AppError, AppResult};
 use crate::observability::{self, StructuredLog, StructuredLogLevel};
 use russh::client::{self, KeyboardInteractiveAuthResponse};
@@ -114,6 +114,7 @@ fn resolve_saved_ssh_config(
     } else {
         None
     };
+    let post_login = resolve_post_login(conn);
 
     Ok(SshConfig {
         connection_id,
@@ -124,6 +125,19 @@ fn resolve_saved_ssh_config(
         auth,
         proxy,
         proxy_jump,
+        post_login,
+    })
+}
+
+fn resolve_post_login(conn: &crate::config::SavedConnection) -> Option<SshPostLoginConfig> {
+    let post_login = conn.post_login.as_ref()?;
+    if !post_login.enabled || post_login.command.trim().is_empty() {
+        return None;
+    }
+
+    Some(SshPostLoginConfig {
+        command: post_login.command.clone(),
+        delay_ms: post_login.delay_ms,
     })
 }
 

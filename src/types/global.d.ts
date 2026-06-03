@@ -164,6 +164,13 @@ export interface ConnectionNetwork {
   proxy_jump_id?: string;
 }
 
+/** SSH post-login command automation. */
+export interface ConnectionPostLogin {
+  enabled: boolean;
+  command: string;
+  delay_ms: number;
+}
+
 /** Unified saved connection with type-discriminated config. */
 export interface SavedConnection {
   id: string;
@@ -176,6 +183,7 @@ export interface SavedConnection {
   icon?: string;
   auth?: ConnectionAuth;
   network?: ConnectionNetwork;
+  post_login?: ConnectionPostLogin;
   /** SSH-specific fields (present when type === "ssh"). */
   host?: string;
   port?: number;

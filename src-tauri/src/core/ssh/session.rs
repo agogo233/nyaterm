@@ -188,6 +188,7 @@ pub async fn create_ssh_session(
     let io_manager = manager.clone();
     let io_handle = ssh_connection.clone();
     let io_connection_id = connection_id.clone();
+    let post_login = config.post_login.clone();
     tokio::spawn(async move {
         ssh_io_loop(
             app,
@@ -200,6 +201,7 @@ pub async fn create_ssh_session(
             io_connection_id,
             injection_script,
             ready_marker,
+            post_login,
         )
         .await;
     });

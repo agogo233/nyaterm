@@ -28,6 +28,12 @@ import { isValidSerialBaudRate, MAX_SERIAL_BAUD_RATE, MIN_SERIAL_BAUD_RATE } fro
 import type { Group, OtpEntry, ProxyConfig, SavedConnection } from "@/types/global";
 
 const isValidPort = (value: number) => Number.isInteger(value) && value >= 1 && value <= 65535;
+const DEFAULT_POST_LOGIN_DELAY_MS = 1000;
+const MIN_POST_LOGIN_DELAY_MS = 0;
+const MAX_POST_LOGIN_DELAY_MS = 60_000;
+
+const isValidPostLoginDelay = (value: number) =>
+  Number.isInteger(value) && value >= MIN_POST_LOGIN_DELAY_MS && value <= MAX_POST_LOGIN_DELAY_MS;
 
 export default function NewSessionPage() {
   const { t } = useTranslation();
@@ -74,6 +80,11 @@ export default function NewSessionPage() {
   const [otpId, setOtpId] = useState("");
   const [autoFillOtp, setAutoFillOtp] = useState(false);
   const [otpEntries, setOtpEntries] = useState<OtpEntry[]>([]);
+
+  // SSH post-login command
+  const [postLoginEnabled, setPostLoginEnabled] = useState(false);
+  const [postLoginCommand, setPostLoginCommand] = useState("");
+  const [postLoginDelayMs, setPostLoginDelayMs] = useState(DEFAULT_POST_LOGIN_DELAY_MS);
 
   // Serial Settings States
   const [serialPortName, setSerialPortName] = useState("");
@@ -140,6 +151,9 @@ export default function NewSessionPage() {
           setJumpHostId(found.network?.proxy_jump_id || "");
           setOtpId(found.auth?.otp_id || "");
           setAutoFillOtp(found.auth?.auto_fill_otp || false);
+          setPostLoginEnabled(found.post_login?.enabled ?? false);
+          setPostLoginCommand(found.post_login?.command ?? "");
+          setPostLoginDelayMs(found.post_login?.delay_ms ?? DEFAULT_POST_LOGIN_DELAY_MS);
         } else if (found.type === "telnet") {
           setHost(found.host || "");
           setTelnetPort(found.port || 23);
@@ -200,6 +214,9 @@ export default function NewSessionPage() {
     setJumpHostId("");
     setOtpId("");
     setAutoFillOtp(false);
+    setPostLoginEnabled(false);
+    setPostLoginCommand("");
+    setPostLoginDelayMs(DEFAULT_POST_LOGIN_DELAY_MS);
     setSerialPortName("");
     setSerialPorts([]);
     setSerialPortsLoading(false);
@@ -297,6 +314,16 @@ export default function NewSessionPage() {
       if (authType === "password" && !passwordId && !password && !hasPassword) {
         return t("dialog.passwordRequired");
       }
+      if (postLoginEnabled && !postLoginCommand.trim()) {
+        return t("dialog.postLoginCommandRequired");
+      }
+      if (!isValidPostLoginDelay(postLoginDelayMs)) {
+        return t("dialog.postLoginDelayInvalid", {
+          min: MIN_POST_LOGIN_DELAY_MS,
+          max: MAX_POST_LOGIN_DELAY_MS,
+          defaultValue: "Delay must be between {{min}} and {{max}} ms",
+        });
+      }
     }
 
     if (currentTab === "telnet") {
@@ -330,6 +357,9 @@ export default function NewSessionPage() {
     host,
     password,
     passwordId,
+    postLoginCommand,
+    postLoginDelayMs,
+    postLoginEnabled,
     serialPortName,
     sshPort,
     telnetPort,
@@ -424,6 +454,25 @@ export default function NewSessionPage() {
               return nextAuth;
             })()
           : undefined;
+      const postLogin =
+        currentTab === "ssh"
+          ? (() => {
+              const normalizedCommand = postLoginCommand.trim();
+              if (
+                !postLoginEnabled &&
+                !normalizedCommand &&
+                postLoginDelayMs === DEFAULT_POST_LOGIN_DELAY_MS
+              ) {
+                return undefined;
+              }
+
+              return {
+                enabled: postLoginEnabled,
+                command: postLoginCommand,
+                delay_ms: postLoginDelayMs,
+              };
+            })()
+          : undefined;
 
       const connection: SavedConnection = {
         id: initialData?.id || "",
@@ -439,6 +488,7 @@ export default function NewSessionPage() {
               username: normalizedUsername,
               auth,
               network,
+              post_login: postLogin,
             }
           : {}),
         ...(currentTab === "telnet"
@@ -753,6 +803,14 @@ export default function NewSessionPage() {
               autoFillOtp={autoFillOtp}
               setAutoFillOtp={setAutoFillOtp}
               otpEntries={otpEntries}
+              postLoginEnabled={postLoginEnabled}
+              setPostLoginEnabled={setPostLoginEnabled}
+              postLoginCommand={postLoginCommand}
+              setPostLoginCommand={setPostLoginCommand}
+              postLoginDelayMs={postLoginDelayMs}
+              setPostLoginDelayMs={setPostLoginDelayMs}
+              minPostLoginDelayMs={MIN_POST_LOGIN_DELAY_MS}
+              maxPostLoginDelayMs={MAX_POST_LOGIN_DELAY_MS}
             />
           </TabsContent>
 

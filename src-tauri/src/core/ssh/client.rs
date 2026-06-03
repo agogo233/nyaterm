@@ -23,6 +23,14 @@ pub struct SshConfig {
     pub proxy: Option<crate::config::ProxySettings>,
     #[serde(default)]
     pub proxy_jump: Option<Box<SshConfig>>,
+    #[serde(default)]
+    pub post_login: Option<SshPostLoginConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SshPostLoginConfig {
+    pub command: String,
+    pub delay_ms: u64,
 }
 
 /// Authentication method: none, password, or key (with optional passphrase).

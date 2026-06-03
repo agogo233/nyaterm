@@ -138,6 +138,22 @@ pub struct ConnectionNetwork {
     pub proxy_jump_id: Option<String>,
 }
 
+// ── Post-login automation ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConnectionPostLogin {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default = "default_post_login_delay_ms")]
+    pub delay_ms: u64,
+}
+
+fn default_post_login_delay_ms() -> u64 {
+    1000
+}
+
 // ── Saved connection ────────────────────────────────────────────────────────
 
 /// Unified saved connection: common fields + type-discriminated config.
@@ -163,6 +179,8 @@ pub struct SavedConnection {
     pub auth: Option<ConnectionAuth>,
     #[serde(default)]
     pub network: Option<ConnectionNetwork>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_login: Option<ConnectionPostLogin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -313,4 +331,47 @@ pub fn load_connection_by_id(app: &AppHandle, id: &str) -> AppResult<SavedConnec
 /// Saves the main app config.
 pub fn save_config(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
     save_sessions(app, config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ConnectionType, SavedConnection};
+
+    #[test]
+    fn saved_connection_defaults_missing_post_login_to_none() {
+        let connection: SavedConnection = serde_json::from_value(serde_json::json!({
+            "id": "conn-1",
+            "name": "Test",
+            "type": "ssh",
+            "host": "example.com",
+            "port": 22,
+            "username": "root"
+        }))
+        .expect("connection");
+
+        assert!(matches!(connection.config, ConnectionType::Ssh { .. }));
+        assert!(connection.post_login.is_none());
+    }
+
+    #[test]
+    fn post_login_defaults_delay_when_omitted() {
+        let connection: SavedConnection = serde_json::from_value(serde_json::json!({
+            "id": "conn-1",
+            "name": "Test",
+            "type": "ssh",
+            "host": "example.com",
+            "port": 22,
+            "username": "root",
+            "post_login": {
+                "enabled": true,
+                "command": "uptime"
+            }
+        }))
+        .expect("connection");
+
+        let post_login = connection.post_login.expect("post_login");
+        assert!(post_login.enabled);
+        assert_eq!(post_login.command, "uptime");
+        assert_eq!(post_login.delay_ms, 1000);
+    }
 }

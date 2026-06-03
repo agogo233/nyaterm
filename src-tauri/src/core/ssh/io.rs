@@ -1,4 +1,4 @@
-use super::client::{SshHandle, SshHandler};
+use super::client::{SshHandle, SshHandler, SshPostLoginConfig};
 use crate::core::capture::OutputCaptureProcessor;
 use crate::core::ssh::osc::{self, OscStripper, ShellKind};
 use crate::core::zmodem::{ZmodemAction, ZmodemDetector, ZmodemEvent, ZmodemTransfer};
@@ -8,10 +8,10 @@ use crate::core::{
 };
 use crate::error::{AppError, AppResult};
 use russh::{client, ChannelMsg};
-use std::sync::Arc;
+use std::{pin::Pin, sync::Arc};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration, Sleep};
 
 /// Tries to detect the remote shell via an exec channel with a timeout.
 ///
@@ -129,6 +129,37 @@ enum IoPhase {
     Normal,
 }
 
+struct PendingPostLogin {
+    input: Vec<u8>,
+    delay_ms: u64,
+}
+
+pub(super) fn build_post_login_input(command: &str) -> Option<Vec<u8>> {
+    if command.trim().is_empty() {
+        return None;
+    }
+
+    let normalized = command.replace("\r\n", "\r").replace('\n', "\r");
+    let mut input = normalized.into_bytes();
+    if !input.ends_with(b"\r") {
+        input.push(b'\r');
+    }
+    Some(input)
+}
+
+fn arm_post_login_timer(
+    pending_post_login: &Option<PendingPostLogin>,
+    post_login_deadline: &mut Option<Pin<Box<Sleep>>>,
+) {
+    if post_login_deadline.is_none() {
+        if let Some(pending) = pending_post_login.as_ref() {
+            *post_login_deadline = Some(Box::pin(tokio::time::sleep(Duration::from_millis(
+                pending.delay_ms,
+            ))));
+        }
+    }
+}
+
 pub(super) async fn ssh_io_loop(
     app: AppHandle,
     session_id: String,
@@ -140,6 +171,7 @@ pub(super) async fn ssh_io_loop(
     connection_id: Option<String>,
     injection_script: Option<String>,
     ready_marker: String,
+    post_login: Option<SshPostLoginConfig>,
 ) {
     const INJECT_TIMEOUT_SECS: u64 = 30;
 
@@ -161,6 +193,16 @@ pub(super) async fn ssh_io_loop(
         IoPhase::Normal
     };
     let mut pending_script = injection_script;
+    let mut pending_post_login = post_login.and_then(|config| {
+        build_post_login_input(&config.command).map(|input| PendingPostLogin {
+            input,
+            delay_ms: config.delay_ms,
+        })
+    });
+    let mut post_login_deadline: Option<Pin<Box<Sleep>>> = None;
+    if phase == IoPhase::Normal {
+        arm_post_login_timer(&pending_post_login, &mut post_login_deadline);
+    }
     let mut remote_exit_status: Option<u32> = None;
     let mut remote_exit_signal: Option<String> = None;
 
@@ -304,6 +346,10 @@ pub(super) async fn ssh_io_loop(
                                 }
                                 if result.ready {
                                     phase = IoPhase::Normal;
+                                    arm_post_login_timer(
+                                        &pending_post_login,
+                                        &mut post_login_deadline,
+                                    );
                                 }
                             }
                             IoPhase::Normal => {
@@ -372,6 +418,7 @@ pub(super) async fn ssh_io_loop(
             }
             _ = &mut inject_deadline, if phase == IoPhase::Suppressing => {
                 phase = IoPhase::Normal;
+                arm_post_login_timer(&pending_post_login, &mut post_login_deadline);
                 let flushed = stripper.flush();
                 tracing::debug!(
                     session_id = %session_id,
@@ -383,6 +430,30 @@ pub(super) async fn ssh_io_loop(
                         recorder.write_output(&session_id, &flushed);
                     }
                     output.push_owned(flushed);
+                }
+            }
+            _ = async {
+                if let Some(deadline) = post_login_deadline.as_mut() {
+                    deadline.as_mut().await;
+                }
+            }, if post_login_deadline.is_some() => {
+                post_login_deadline = None;
+                if zmodem_transfer.is_some() {
+                    post_login_deadline = Some(Box::pin(tokio::time::sleep(
+                        Duration::from_millis(250),
+                    )));
+                    continue;
+                }
+                if let Some(pending) = pending_post_login.take() {
+                    if let Some(ref recorder) = recording_mgr {
+                        recorder.write_input(&session_id, &pending.input);
+                    }
+                    let _ = channel.data(&pending.input[..]).await;
+                    tracing::info!(
+                        session_id = %session_id,
+                        delay_ms = pending.delay_ms,
+                        "Sent SSH post-login command"
+                    );
                 }
             }
         }
@@ -464,4 +535,28 @@ async fn emit_output(
     }
 
     output.push(&result.visible);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_post_login_input;
+
+    #[test]
+    fn post_login_input_normalizes_line_endings_and_adds_enter() {
+        let input = build_post_login_input("cd /opt/app\nclear").expect("input");
+
+        assert_eq!(input, b"cd /opt/app\rclear\r");
+    }
+
+    #[test]
+    fn post_login_input_preserves_existing_trailing_enter() {
+        let input = build_post_login_input("uptime\r").expect("input");
+
+        assert_eq!(input, b"uptime\r");
+    }
+
+    #[test]
+    fn post_login_input_ignores_blank_commands() {
+        assert!(build_post_login_input(" \n\t ").is_none());
+    }
 }
