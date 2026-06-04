@@ -94,12 +94,15 @@ pub enum ZmodemDetectResult {
 pub struct ZmodemDetector {
     /// Bytes withheld until they are known not to be a split ZMODEM header.
     pending: Vec<u8>,
+    /// Whether `pending[0]` is at the beginning of the stream or directly after a newline.
+    pending_starts_at_line_start: bool,
 }
 
 impl ZmodemDetector {
     pub fn new() -> Self {
         Self {
             pending: Vec::new(),
+            pending_starts_at_line_start: true,
         }
     }
 
@@ -126,10 +129,11 @@ impl ZmodemDetector {
             };
         }
 
-        let keep_from = retained_prefix_start(&self.pending);
+        let keep_from = retained_prefix_start(&self.pending, self.pending_starts_at_line_start);
         let passthrough = self.pending[..keep_from].to_vec();
         if keep_from > 0 {
             self.pending.drain(..keep_from);
+            self.pending_starts_at_line_start = ends_at_line_start(&passthrough);
         }
 
         ZmodemDetectResult::NoMatch { passthrough }
@@ -137,6 +141,7 @@ impl ZmodemDetector {
 
     pub fn reset(&mut self) {
         self.pending.clear();
+        self.pending_starts_at_line_start = true;
     }
 }
 
@@ -176,15 +181,44 @@ fn detect_zmodem_start(data: &[u8]) -> Option<(ZmodemDirection, usize)> {
     None
 }
 
-fn retained_prefix_start(data: &[u8]) -> usize {
+fn retained_prefix_start(data: &[u8], data_starts_at_line_start: bool) -> usize {
     let max_suffix = data.len().min(ZMODEM_HEADER_LEN + 1);
     for len in (1..=max_suffix).rev() {
         let start = data.len() - len;
-        if is_possible_zmodem_prefix(&data[start..]) {
+        let suffix = &data[start..];
+        if !is_possible_zmodem_prefix(suffix) {
+            continue;
+        }
+        if suffix_contains_zdle(suffix)
+            || is_line_start(data, start, data_starts_at_line_start)
+            || has_rz_receive_prompt_before(data, start)
+        {
             return start;
         }
     }
     data.len()
+}
+
+fn is_line_start(data: &[u8], start: usize, data_starts_at_line_start: bool) -> bool {
+    if start == 0 {
+        return data_starts_at_line_start;
+    }
+    matches!(data.get(start - 1), Some(b'\n' | b'\r'))
+}
+
+fn ends_at_line_start(data: &[u8]) -> bool {
+    matches!(data.last(), Some(b'\n' | b'\r'))
+}
+
+fn suffix_contains_zdle(data: &[u8]) -> bool {
+    data.contains(&ZDLE)
+}
+
+fn has_rz_receive_prompt_before(data: &[u8], start: usize) -> bool {
+    const RZ_RECEIVE_PROMPT: &[u8] = b"z waiting to receive.";
+    data[..start]
+        .windows(RZ_RECEIVE_PROMPT.len())
+        .any(|window| window == RZ_RECEIVE_PROMPT)
 }
 
 fn is_possible_zmodem_prefix(data: &[u8]) -> bool {
@@ -887,8 +921,8 @@ fn cancel_sequence() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProgressThrottle, ZmodemDetectResult, ZmodemDetector, ZmodemDirection,
-        ZMODEM_PROGRESS_BYTES, ZMODEM_PROGRESS_INTERVAL,
+        ProgressThrottle, ZMODEM_PROGRESS_BYTES, ZMODEM_PROGRESS_INTERVAL, ZmodemDetectResult,
+        ZmodemDetector, ZmodemDirection,
     };
     use std::time::{Duration, Instant};
 
@@ -921,8 +955,10 @@ mod tests {
     #[test]
     fn detects_zbin_upload_header_across_chunks() {
         let mut detector = ZmodemDetector::new();
-        match detector.feed(b"prefix**\x18") {
-            ZmodemDetectResult::NoMatch { passthrough } => assert_eq!(passthrough, b"prefix"),
+        match detector.feed(b"prefix\r\n**\x18") {
+            ZmodemDetectResult::NoMatch { passthrough } => {
+                assert_eq!(passthrough, b"prefix\r\n")
+            }
             ZmodemDetectResult::Detected { .. } => panic!("unexpected early detection"),
         }
 
@@ -942,6 +978,41 @@ mod tests {
     }
 
     #[test]
+    fn detects_rz_zhex_upload_header_after_prompt_text() {
+        let mut detector = ZmodemDetector::new();
+        let result = detector.feed(b"\x18z waiting to receive.**\x18B01");
+
+        match result {
+            ZmodemDetectResult::Detected {
+                direction,
+                passthrough,
+                initial_bytes,
+            } => {
+                assert_eq!(direction, ZmodemDirection::Upload);
+                assert_eq!(passthrough, b"\x18z waiting to receive.");
+                assert_eq!(initial_bytes, b"**\x18B01");
+            }
+            ZmodemDetectResult::NoMatch { .. } => panic!("expected ZMODEM detection"),
+        }
+    }
+
+    #[test]
+    fn detects_rz_zhex_upload_header_split_after_prompt_text() {
+        let mut detector = ZmodemDetector::new();
+        match detector.feed(b"\x18z waiting to receive.**") {
+            ZmodemDetectResult::NoMatch { passthrough } => {
+                assert_eq!(passthrough, b"\x18z waiting to receive.")
+            }
+            ZmodemDetectResult::Detected { .. } => panic!("unexpected early detection"),
+        }
+
+        assert_eq!(
+            detected_direction(detector.feed(b"\x18B01")),
+            ZmodemDirection::Upload
+        );
+    }
+
+    #[test]
     fn detects_zhex_frame_type_split_after_first_hex_digit() {
         let mut detector = ZmodemDetector::new();
         match detector.feed(b"**\x18B0") {
@@ -951,6 +1022,40 @@ mod tests {
 
         assert_eq!(
             detected_direction(detector.feed(b"1rest")),
+            ZmodemDirection::Upload
+        );
+    }
+
+    #[test]
+    fn passthroughs_interactive_asterisks_immediately() {
+        let mut detector = ZmodemDetector::new();
+        let chunks: [&[u8]; 4] = [b"docker", b"*", b"*", b"*"];
+        let mut visible = Vec::new();
+
+        for chunk in chunks {
+            match detector.feed(chunk) {
+                ZmodemDetectResult::NoMatch { passthrough } => {
+                    visible.extend_from_slice(&passthrough);
+                }
+                ZmodemDetectResult::Detected { .. } => panic!("unexpected ZMODEM detection"),
+            }
+        }
+
+        assert_eq!(visible, b"docker***");
+    }
+
+    #[test]
+    fn waits_for_zmodem_header_after_zdle_even_inside_text() {
+        let mut detector = ZmodemDetector::new();
+        match detector.feed(b"prefix**\x18") {
+            ZmodemDetectResult::NoMatch { passthrough } => {
+                assert_eq!(passthrough, b"prefix")
+            }
+            ZmodemDetectResult::Detected { .. } => panic!("unexpected ZMODEM detection"),
+        }
+
+        assert_eq!(
+            detected_direction(detector.feed(b"A\x01payload")),
             ZmodemDirection::Upload
         );
     }
