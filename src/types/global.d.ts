@@ -287,7 +287,7 @@ export interface ActivityBarLayout {
 }
 
 /** Layout preferences: panel widths, active panels, theme. */
-export type QuickCommandViewMode = "list" | "tile";
+export type QuickCommandViewMode = "list" | "compact" | "tile";
 
 export interface UiConfig {
   open_tabs: RestorableTab[];

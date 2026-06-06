@@ -11,6 +11,7 @@ import {
   MdClose,
   MdDelete,
   MdEdit,
+  MdFormatListBulleted,
   MdGridView,
   MdKeyboardReturn,
   MdPushPin,
@@ -79,7 +80,7 @@ const COLOR_DOT: Record<string, string> = {
 };
 
 function normalizeQuickCommandViewMode(mode: unknown): QuickCommandViewMode {
-  return mode === "tile" ? "tile" : "list";
+  return mode === "tile" || mode === "compact" ? mode : "list";
 }
 
 function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
@@ -613,6 +614,36 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
     ),
     [handleCommandClick, renderCommandActions, renderCommandIcon, renderContextMenuContent],
   );
+  const renderCommandCompactItem = useCallback(
+    (cmd: QuickCommand) => (
+      <ContextMenu key={cmd.id}>
+        <ContextMenuTrigger asChild>
+          <div
+            className="group flex h-8 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-xs transition-colors hover:bg-muted/45 hover:text-foreground"
+            style={{ color: "var(--df-text)" }}
+          >
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded px-0.5 text-left"
+              onClick={() => handleCommandClick(cmd)}
+            >
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                {renderCommandIcon(cmd, "text-[0.8rem]")}
+              </span>
+              {cmd.pinned && <MdPushPin className="shrink-0 text-[0.65rem] opacity-60" />}
+              <span className="min-w-[4rem] max-w-[38%] truncate font-medium">{cmd.label}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-muted-foreground/85">
+                {cmd.command}
+              </span>
+            </button>
+            {renderCommandActions(cmd, { showBadge: false })}
+          </div>
+        </ContextMenuTrigger>
+        {renderContextMenuContent(cmd)}
+      </ContextMenu>
+    ),
+    [handleCommandClick, renderCommandActions, renderCommandIcon, renderContextMenuContent],
+  );
   const renderCommandTile = useCallback(
     (cmd: QuickCommand) => (
       <ContextMenu key={cmd.id}>
@@ -652,9 +683,6 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
       renderExecutionBadge,
     ],
   );
-  const viewModeButtonClassName =
-    "h-6 w-6 shrink-0 rounded p-0 transition-colors hover:bg-[var(--df-bg-hover)]";
-
   return (
     <TooltipProvider delayDuration={500}>
       <div
@@ -732,56 +760,49 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <fieldset
-                className="m-0 flex min-w-0 shrink-0 items-center gap-0.5 rounded-md border-0 bg-[var(--df-bg-hover)] p-0.5"
-                aria-label={t("quickCommands.viewMode")}
-              >
-                <legend className="sr-only">{t("quickCommands.viewMode")}</legend>
+              <DropdownMenu>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className={viewModeButtonClassName}
-                      style={{
-                        backgroundColor:
-                          viewMode === "list"
-                            ? "color-mix(in_srgb,var(--df-primary)_16%,transparent)"
-                            : "transparent",
-                        color: viewMode === "list" ? "var(--df-primary)" : "var(--df-text-muted)",
-                      }}
-                      aria-label={t("quickCommands.listMode")}
-                      aria-pressed={viewMode === "list"}
-                      onClick={() => setViewMode("list")}
-                    >
-                      <MdViewList className="text-[1.05rem]" />
-                    </Button>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="h-6 w-6 shrink-0 rounded-md p-0 transition-colors hover:bg-[var(--df-bg-hover)]"
+                        style={{ color: "var(--df-primary)" }}
+                        aria-label={t("quickCommands.viewMode")}
+                      >
+                        {viewMode === "tile" ? (
+                          <MdGridView className="text-[1rem]" />
+                        ) : viewMode === "compact" ? (
+                          <MdViewList className="text-[1.05rem]" />
+                        ) : (
+                          <MdFormatListBulleted className="text-[1rem]" />
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
                   </TooltipTrigger>
-                  <TooltipContent side="top">{t("quickCommands.listMode")}</TooltipContent>
+                  <TooltipContent side="top">{t("quickCommands.viewMode")}</TooltipContent>
                 </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className={viewModeButtonClassName}
-                      style={{
-                        backgroundColor:
-                          viewMode === "tile"
-                            ? "color-mix(in_srgb,var(--df-primary)_16%,transparent)"
-                            : "transparent",
-                        color: viewMode === "tile" ? "var(--df-primary)" : "var(--df-text-muted)",
-                      }}
-                      aria-label={t("quickCommands.tileMode")}
-                      aria-pressed={viewMode === "tile"}
-                      onClick={() => setViewMode("tile")}
-                    >
-                      <MdGridView className="text-[1rem]" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{t("quickCommands.tileMode")}</TooltipContent>
-                </Tooltip>
-              </fieldset>
+                <DropdownMenuContent align="end" className="min-w-[150px]">
+                  <DropdownMenuRadioGroup
+                    value={viewMode}
+                    onValueChange={(value) => setViewMode(normalizeQuickCommandViewMode(value))}
+                  >
+                    <DropdownMenuRadioItem value="list" className="text-xs">
+                      <MdFormatListBulleted className="text-[0.95rem]" />
+                      {t("quickCommands.listMode")}
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="compact" className="text-xs">
+                      <MdViewList className="text-[1rem]" />
+                      {t("quickCommands.compactListMode")}
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="tile" className="text-xs">
+                      <MdGridView className="text-[0.95rem]" />
+                      {t("quickCommands.tileMode")}
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border/50" />
 
@@ -959,7 +980,11 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
                 </div>
               ) : (
                 filteredCommands.map((cmd) =>
-                  viewMode === "tile" ? renderCommandTile(cmd) : renderCommandListItem(cmd),
+                  viewMode === "tile"
+                    ? renderCommandTile(cmd)
+                    : viewMode === "compact"
+                      ? renderCommandCompactItem(cmd)
+                      : renderCommandListItem(cmd),
                 )
               )}
             </div>
