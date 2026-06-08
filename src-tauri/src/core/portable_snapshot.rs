@@ -8,15 +8,20 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
+use zip::write::SimpleFileOptions;
 
 use super::{QuickCommandsStore, SessionManager};
 
 const PORTABLE_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 const SNAPSHOT_META_KEY: &str = "meta";
 const SNAPSHOT_JSON_PORTABLE_SETTINGS: &str = "portable-settings";
+const SNAPSHOT_ZIP_MANIFEST_NAME: &str = "manifest.json";
+const SNAPSHOT_ZIP_PAYLOAD_NAME: &str = "snapshot.redb";
+const MAX_COMPRESSED_SNAPSHOT_PAYLOAD_BYTES: u64 = 50 * 1024 * 1024;
 
 const SNAPSHOT_META_TABLE: TableDefinition<&str, &str> = TableDefinition::new("snapshot_meta");
 const SNAPSHOT_ENTITIES_TABLE: TableDefinition<&str, &str> = TableDefinition::new("entity_docs");
@@ -230,6 +235,15 @@ pub fn build_portable_snapshot(
 }
 
 pub fn decode_portable_snapshot(bytes: &[u8]) -> AppResult<PortableSnapshot> {
+    let payload = if is_zip_snapshot_payload(bytes) {
+        decode_compressed_snapshot_payload(bytes)?
+    } else {
+        bytes.to_vec()
+    };
+    decode_portable_snapshot_redb(&payload)
+}
+
+fn decode_portable_snapshot_redb(bytes: &[u8]) -> AppResult<PortableSnapshot> {
     let temp = TempRedbFile::new("portable-snapshot-decode");
     fs::write(temp.path(), bytes)?;
 
@@ -282,6 +296,13 @@ pub fn decode_portable_snapshot(bytes: &[u8]) -> AppResult<PortableSnapshot> {
 pub fn encode_portable_snapshot(snapshot: &PortableSnapshot) -> AppResult<Vec<u8>> {
     validate_portable_snapshot(snapshot)?;
 
+    let redb_payload = encode_portable_snapshot_redb(snapshot)?;
+    let compressed_payload = encode_compressed_snapshot_payload(&redb_payload)?;
+    log_snapshot_compression(snapshot, redb_payload.len(), compressed_payload.len());
+    Ok(compressed_payload)
+}
+
+fn encode_portable_snapshot_redb(snapshot: &PortableSnapshot) -> AppResult<Vec<u8>> {
     let temp = TempRedbFile::new("portable-snapshot-encode");
     {
         let db = Database::create(temp.path()).map_err(storage_error)?;
@@ -316,6 +337,80 @@ pub fn encode_portable_snapshot(snapshot: &PortableSnapshot) -> AppResult<Vec<u8
     }
 
     fs::read(temp.path()).map_err(Into::into)
+}
+
+fn encode_compressed_snapshot_payload(redb_payload: &[u8]) -> AppResult<Vec<u8>> {
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file(SNAPSHOT_ZIP_MANIFEST_NAME, options)
+        .map_err(zip_error)?;
+    zip.write_all(
+        br#"{"format":"nyaterm-portable-snapshot-zip","version":1,"payload":"snapshot.redb"}"#,
+    )?;
+    zip.start_file(SNAPSHOT_ZIP_PAYLOAD_NAME, options)
+        .map_err(zip_error)?;
+    zip.write_all(redb_payload)?;
+
+    let cursor = zip.finish().map_err(zip_error)?;
+    Ok(cursor.into_inner())
+}
+
+fn decode_compressed_snapshot_payload(bytes: &[u8]) -> AppResult<Vec<u8>> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(zip_error)?;
+    let mut entry = archive
+        .by_name(SNAPSHOT_ZIP_PAYLOAD_NAME)
+        .map_err(zip_error)?;
+    if entry.size() > MAX_COMPRESSED_SNAPSHOT_PAYLOAD_BYTES {
+        return Err(zip_error(format!(
+            "decompressed snapshot payload exceeds maximum allowed size of {} bytes",
+            MAX_COMPRESSED_SNAPSHOT_PAYLOAD_BYTES
+        )));
+    }
+    let mut payload = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = entry.read(&mut buf).map_err(zip_error)?;
+        if n == 0 {
+            break;
+        }
+        payload.extend_from_slice(&buf[..n]);
+        if u64::try_from(payload.len()).unwrap_or(u64::MAX) > MAX_COMPRESSED_SNAPSHOT_PAYLOAD_BYTES
+        {
+            return Err(zip_error(format!(
+                "decompressed snapshot payload exceeds maximum allowed size of {} bytes",
+                MAX_COMPRESSED_SNAPSHOT_PAYLOAD_BYTES
+            )));
+        }
+    }
+    Ok(payload)
+}
+
+fn is_zip_snapshot_payload(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"PK\x03\x04")
+}
+
+fn log_snapshot_compression(
+    snapshot: &PortableSnapshot,
+    original_bytes: usize,
+    compressed_bytes: usize,
+) {
+    let saved_bytes = original_bytes as i128 - compressed_bytes as i128;
+    let reduction_percent = if original_bytes == 0 {
+        0.0
+    } else {
+        (saved_bytes as f64 / original_bytes as f64) * 100.0
+    };
+    tracing::info!(
+        snapshot_kind = ?snapshot.snapshot_kind,
+        original_bytes,
+        compressed_bytes,
+        saved_bytes,
+        reduction_percent,
+        "Portable snapshot compressed before encryption"
+    );
 }
 
 pub async fn apply_portable_snapshot(
@@ -563,6 +658,10 @@ fn storage_error(error: impl std::fmt::Display) -> AppError {
     AppError::Storage(format!("Storage error: {error}"))
 }
 
+fn zip_error(error: impl std::fmt::Display) -> AppError {
+    AppError::Config(format!("portable snapshot zip error: {error}"))
+}
+
 struct TempRedbFile {
     path: PathBuf,
 }
@@ -589,10 +688,12 @@ impl Drop for TempRedbFile {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_payload_hash, encode_portable_snapshot, PortableAppSettings, PortableSnapshot,
-        PortableSnapshotKind, PortableUiSettings, PORTABLE_SNAPSHOT_SCHEMA_VERSION,
+        PORTABLE_SNAPSHOT_SCHEMA_VERSION, PortableAppSettings, PortableSnapshot,
+        PortableSnapshotKind, PortableUiSettings, SNAPSHOT_ZIP_PAYLOAD_NAME,
+        calculate_payload_hash, encode_portable_snapshot, encode_portable_snapshot_redb,
     };
     use crate::config::{self, ActivityBarLayout, AppSettings};
+    use std::io::Write;
 
     #[test]
     fn portable_settings_strip_master_password_and_preserve_device_ui_state_on_apply() {
@@ -676,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn portable_snapshot_redb_roundtrip() {
+    fn portable_snapshot_zip_roundtrip() {
         let snapshot = sample_snapshot();
 
         let encoded = encode_portable_snapshot(&snapshot).expect("encode snapshot");
@@ -686,5 +787,71 @@ mod tests {
         assert_eq!(decoded.payload_hash, snapshot.payload_hash);
         assert_eq!(decoded.master_key_token, snapshot.master_key_token);
         assert_eq!(decoded.known_hosts, snapshot.known_hosts);
+    }
+
+    #[test]
+    fn portable_snapshot_legacy_redb_roundtrip() {
+        let snapshot = sample_snapshot();
+
+        let encoded = encode_portable_snapshot_redb(&snapshot).expect("encode legacy snapshot");
+        let decoded = super::decode_portable_snapshot(&encoded).expect("decode legacy snapshot");
+
+        assert_eq!(decoded.revision_id, snapshot.revision_id);
+        assert_eq!(decoded.payload_hash, snapshot.payload_hash);
+        assert_eq!(decoded.master_key_token, snapshot.master_key_token);
+        assert_eq!(decoded.known_hosts, snapshot.known_hosts);
+    }
+
+    #[test]
+    fn portable_snapshot_zip_rejects_oversized_payload() {
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file(SNAPSHOT_ZIP_PAYLOAD_NAME, options)
+            .expect("start payload");
+
+        let chunk = vec![0u8; 1024 * 1024];
+        for _ in 0..=50 {
+            zip.write_all(&chunk).expect("write payload");
+        }
+        let bytes = zip.finish().expect("finish zip").into_inner();
+
+        let error =
+            super::decode_compressed_snapshot_payload(&bytes).expect_err("oversized payload");
+        assert!(
+            error
+                .to_string()
+                .contains("decompressed snapshot payload exceeds maximum allowed size"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn portable_snapshot_zip_reduces_history_heavy_payload_size() {
+        let mut snapshot = sample_snapshot();
+        snapshot.snapshot_kind = PortableSnapshotKind::Backup;
+        snapshot.history = (0..5_000)
+            .map(|index| crate::core::history::HistoryEntry {
+                command: format!("kubectl get pods --namespace production-{index:04} --watch"),
+                last_used_at_ms: 1_700_000_000_000 + index,
+                use_count: 1,
+            })
+            .collect();
+        snapshot.payload_hash = calculate_payload_hash(&snapshot).expect("hash snapshot");
+
+        let legacy = encode_portable_snapshot_redb(&snapshot).expect("encode legacy snapshot");
+        let compressed = encode_portable_snapshot(&snapshot).expect("encode compressed snapshot");
+        let reduction = 100.0 - ((compressed.len() as f64 / legacy.len() as f64) * 100.0);
+
+        println!(
+            "portable snapshot size: legacy_redb={} compressed_zip={} reduction={reduction:.1}%",
+            legacy.len(),
+            compressed.len(),
+        );
+        assert!(
+            compressed.len() < legacy.len(),
+            "compressed snapshot should be smaller than legacy redb"
+        );
     }
 }
