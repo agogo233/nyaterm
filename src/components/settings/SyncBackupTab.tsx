@@ -1,3 +1,4 @@
+import { ask } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -53,6 +54,12 @@ function getValidationMessage(
       return t("settings.s3BucketRequired");
     case "s3CredentialsIncomplete":
       return t("settings.s3CredentialsIncomplete");
+    case "giteeSnippetEndpointRequired":
+      return t("settings.giteeSnippetEndpointRequired");
+    case "giteeSnippetIdRequired":
+      return t("settings.giteeSnippetIdRequired");
+    case "giteeSnippetTokenRequired":
+      return t("settings.giteeSnippetTokenRequired");
   }
 }
 
@@ -256,13 +263,16 @@ export function SyncBackupTab({ onNavigateSecurity }: SyncBackupTabProps) {
 
   const handleRestoreBackup = useCallback(
     async (entry: RemoteBackupEntry) => {
-      if (
-        !window.confirm(
-          t("settings.restoreRemoteBackupConfirm", {
-            revision: shortValue(entry.revision, 6),
-          }),
-        )
-      ) {
+      const confirmed = await ask(
+        t("settings.restoreRemoteBackupConfirm", {
+          revision: shortValue(entry.revision, 6),
+        }),
+        {
+          title: t("settings.remoteBackups"),
+          kind: "warning",
+        },
+      );
+      if (confirmed !== true) {
         return;
       }
 
@@ -385,6 +395,7 @@ export function SyncBackupTab({ onNavigateSecurity }: SyncBackupTabProps) {
           >
             <SelectItem value="webdav">WebDAV</SelectItem>
             <SelectItem value="s3">S3 Compatible</SelectItem>
+            <SelectItem value="gitee_snippet">Gitee Snippet</SelectItem>
           </SettingSelect>
 
           <SettingInput
@@ -452,7 +463,7 @@ export function SyncBackupTab({ onNavigateSecurity }: SyncBackupTabProps) {
               }
             />
           </SettingFieldGrid>
-        ) : (
+        ) : settings.provider === "s3" ? (
           <SettingFieldGrid>
             <SettingInput
               label={t("settings.s3Endpoint")}
@@ -553,6 +564,54 @@ export function SyncBackupTab({ onNavigateSecurity }: SyncBackupTabProps) {
                 }
               />
             </SettingRow>
+          </SettingFieldGrid>
+        ) : (
+          <SettingFieldGrid>
+            <SettingInput
+              label={t("settings.giteeSnippetApiEndpoint")}
+              desc={t("settings.giteeSnippetApiEndpointDesc")}
+              value={settings.gitee_snippet.api_endpoint}
+              placeholder="https://gitee.com/api/v5"
+              disabled={formDisabled}
+              onChange={(event) =>
+                updateCloudSync({
+                  gitee_snippet: {
+                    ...settings.gitee_snippet,
+                    api_endpoint: event.target.value,
+                  },
+                })
+              }
+            />
+            <SettingInput
+              label={t("settings.giteeSnippetId")}
+              desc={t("settings.giteeSnippetIdDesc")}
+              value={settings.gitee_snippet.gist_id}
+              disabled={formDisabled}
+              onChange={(event) =>
+                updateCloudSync({
+                  gitee_snippet: { ...settings.gitee_snippet, gist_id: event.target.value },
+                })
+              }
+            />
+            <SettingInput
+              label={t("settings.giteeSnippetAccessToken")}
+              desc={t("settings.giteeSnippetAccessTokenDesc")}
+              type="password"
+              value={secretInputValue(settings.gitee_snippet.access_token)}
+              placeholder={secretPlaceholder(
+                settings.gitee_snippet.access_token,
+                t("settings.giteeSnippetAccessToken"),
+              )}
+              disabled={formDisabled}
+              onChange={(event) =>
+                updateCloudSync({
+                  gitee_snippet: {
+                    ...settings.gitee_snippet,
+                    access_token: event.target.value,
+                  },
+                })
+              }
+            />
           </SettingFieldGrid>
         )}
       </SettingSection>

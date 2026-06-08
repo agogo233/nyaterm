@@ -20,8 +20,9 @@ pub use cloud_sync::{
     decrypt_cloud_sync_settings, encrypt_cloud_sync_settings, load_cloud_sync_settings,
     load_cloud_sync_state, mask_cloud_sync_settings, merge_masked_cloud_sync_settings,
     save_cloud_sync_state, CloudConflictPreview, CloudSyncHistoryEntry, CloudSyncSettings,
-    CloudSyncState, CloudSyncStatus, RemoteBackupEntry, RemoteBackupIndex, S3SyncSettings,
-    WebdavSyncSettings, CLOUD_SYNC_HISTORY_VERSION, MASKED_SECRET_VALUE,
+    CloudSyncState, CloudSyncStatus, GiteeSnippetSyncSettings, RemoteBackupEntry,
+    RemoteBackupIndex, S3SyncSettings, WebdavSyncSettings, CLOUD_SYNC_HISTORY_VERSION,
+    MASKED_SECRET_VALUE,
 };
 #[allow(unused_imports)]
 pub use connection::{

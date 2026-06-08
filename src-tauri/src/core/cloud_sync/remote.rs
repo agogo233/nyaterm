@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use opendal::Operator;
 use redb::{Database, ReadableDatabase, TableDefinition};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -9,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{self, RemoteBackupIndex};
 use crate::error::{AppError, AppResult};
 
-use super::operator::map_storage_error;
+use super::operator::CloudRemote;
 
 pub(super) const SYNC_LATEST_FILE: &str = "sync/latest.redb";
 pub(super) const SYNC_SNAPSHOTS_DIR: &str = "sync/snapshots/";
@@ -56,16 +55,15 @@ pub(super) fn elapsed_ms(duration: Duration) -> u64 {
 }
 
 pub(super) async fn load_sync_pointer(
-    op: &Operator,
+    remote: &CloudRemote,
     base_root: &str,
 ) -> AppResult<Option<RemoteSyncPointer>> {
     let path = remote_path(base_root, SYNC_LATEST_FILE);
-    if !op.exists(&path).await.map_err(map_storage_error)? {
+    let Some(raw) = remote.read_if_exists(&path).await? else {
         return Ok(None);
-    }
-    let raw = op.read(&path).await.map_err(map_storage_error)?;
+    };
     decode_redb_json_doc(
-        raw.to_vec().as_slice(),
+        raw.as_slice(),
         REMOTE_SYNC_POINTER_TABLE,
         REMOTE_SYNC_POINTER_KEY,
     )
@@ -73,46 +71,45 @@ pub(super) async fn load_sync_pointer(
 }
 
 pub(super) async fn write_sync_pointer(
-    op: &Operator,
+    remote: &CloudRemote,
     base_root: &str,
     pointer: &RemoteSyncPointer,
 ) -> AppResult<()> {
     let encoded =
         encode_redb_json_doc(REMOTE_SYNC_POINTER_TABLE, REMOTE_SYNC_POINTER_KEY, pointer)?;
-    op.write(&remote_path(base_root, SYNC_LATEST_FILE), encoded)
-        .await
-        .map_err(map_storage_error)?;
+    remote
+        .write(&remote_path(base_root, SYNC_LATEST_FILE), encoded)
+        .await?;
     Ok(())
 }
 
 pub(super) async fn load_backup_index(
-    op: &Operator,
+    remote: &CloudRemote,
     base_root: &str,
 ) -> AppResult<RemoteBackupIndex> {
     let path = remote_path(base_root, BACKUPS_INDEX_FILE);
-    if !op.exists(&path).await.map_err(map_storage_error)? {
+    let Some(raw) = remote.read_if_exists(&path).await? else {
         return Ok(RemoteBackupIndex {
             version: config::CLOUD_SYNC_HISTORY_VERSION,
             entries: Vec::new(),
         });
-    }
-    let raw = op.read(&path).await.map_err(map_storage_error)?;
+    };
     decode_redb_json_doc(
-        raw.to_vec().as_slice(),
+        raw.as_slice(),
         REMOTE_BACKUP_INDEX_TABLE,
         REMOTE_BACKUP_INDEX_KEY,
     )
 }
 
 pub(super) async fn write_backup_index(
-    op: &Operator,
+    remote: &CloudRemote,
     base_root: &str,
     index: &RemoteBackupIndex,
 ) -> AppResult<()> {
     let encoded = encode_redb_json_doc(REMOTE_BACKUP_INDEX_TABLE, REMOTE_BACKUP_INDEX_KEY, index)?;
-    op.write(&remote_path(base_root, BACKUPS_INDEX_FILE), encoded)
-        .await
-        .map_err(map_storage_error)?;
+    remote
+        .write(&remote_path(base_root, BACKUPS_INDEX_FILE), encoded)
+        .await?;
     Ok(())
 }
 

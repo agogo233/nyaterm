@@ -71,6 +71,12 @@ function getCloudSyncValidationMessage(
       return t("settings.s3BucketRequired");
     case "s3CredentialsIncomplete":
       return t("settings.s3CredentialsIncomplete");
+    case "giteeSnippetEndpointRequired":
+      return t("settings.giteeSnippetEndpointRequired");
+    case "giteeSnippetIdRequired":
+      return t("settings.giteeSnippetIdRequired");
+    case "giteeSnippetTokenRequired":
+      return t("settings.giteeSnippetTokenRequired");
   }
 }
 

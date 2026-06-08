@@ -834,6 +834,12 @@ export interface S3SyncSettings {
   virtual_host_style: boolean;
 }
 
+export interface GiteeSnippetSyncSettings {
+  api_endpoint: string;
+  gist_id: string;
+  access_token?: string | null;
+}
+
 export interface CloudSyncSettings {
   enabled: boolean;
   provider: string;
@@ -847,6 +853,7 @@ export interface CloudSyncSettings {
   backup_retention_count: number;
   webdav: WebdavSyncSettings;
   s3: S3SyncSettings;
+  gitee_snippet: GiteeSnippetSyncSettings;
 }
 
 export interface CloudConflictPreview {

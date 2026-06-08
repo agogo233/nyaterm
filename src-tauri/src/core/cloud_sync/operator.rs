@@ -3,6 +3,8 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::Engine;
+use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
 use http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use http::{HeaderValue, Request, Response};
 use md5::{Digest as Md5Digest, Md5};
@@ -19,91 +21,85 @@ use crate::utils::url::normalize_storage_endpoint;
 
 use super::remote::remote_path;
 
-pub(super) fn build_operator(settings: &CloudSyncSettings) -> AppResult<Operator> {
+const GITEE_REMOTE_FILE_PREFIX: &str = "nyaterm-";
+const GITEE_REMOTE_FILE_SUFFIX: &str = ".blob";
+const GITEE_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub(super) enum CloudRemote {
+    OpenDal(Operator),
+    GiteeSnippet(GiteeSnippetRemote),
+}
+
+impl CloudRemote {
+    pub(super) async fn create_dir(&self, path: &str) -> AppResult<()> {
+        match self {
+            Self::OpenDal(operator) => operator.create_dir(path).await.map_err(map_storage_error),
+            Self::GiteeSnippet(_) => Ok(()),
+        }
+    }
+
+    pub(super) async fn exists(&self, path: &str) -> AppResult<bool> {
+        match self {
+            Self::OpenDal(operator) => operator.exists(path).await.map_err(map_storage_error),
+            Self::GiteeSnippet(remote) => remote.exists(path).await,
+        }
+    }
+
+    pub(super) async fn read(&self, path: &str) -> AppResult<Vec<u8>> {
+        match self {
+            Self::OpenDal(operator) => Ok(operator
+                .read(path)
+                .await
+                .map_err(map_storage_error)?
+                .to_vec()),
+            Self::GiteeSnippet(remote) => remote.read(path).await,
+        }
+    }
+
+    pub(super) async fn read_if_exists(&self, path: &str) -> AppResult<Option<Vec<u8>>> {
+        match self {
+            Self::OpenDal(operator) => {
+                if !operator.exists(path).await.map_err(map_storage_error)? {
+                    return Ok(None);
+                }
+                Ok(Some(
+                    operator
+                        .read(path)
+                        .await
+                        .map_err(map_storage_error)?
+                        .to_vec(),
+                ))
+            }
+            Self::GiteeSnippet(remote) => remote.read_if_exists(path).await,
+        }
+    }
+
+    pub(super) async fn write(&self, path: &str, content: Vec<u8>) -> AppResult<()> {
+        match self {
+            Self::OpenDal(operator) => {
+                operator
+                    .write(path, content)
+                    .await
+                    .map_err(map_storage_error)?;
+                Ok(())
+            }
+            Self::GiteeSnippet(remote) => remote.write(path, &content).await,
+        }
+    }
+
+    pub(super) async fn delete(&self, path: &str) -> AppResult<()> {
+        match self {
+            Self::OpenDal(operator) => operator.delete(path).await.map_err(map_storage_error),
+            Self::GiteeSnippet(remote) => remote.delete(path).await,
+        }
+    }
+}
+
+pub(super) fn build_remote(settings: &CloudSyncSettings) -> AppResult<CloudRemote> {
     match settings.provider.as_str() {
-        "webdav" => {
-            let endpoint = normalize_storage_endpoint(&settings.webdav.endpoint);
-            let mut builder = Webdav::default().endpoint(&endpoint);
-            if !settings.webdav.root.trim().is_empty() {
-                builder = builder.root(&settings.webdav.root);
-            }
-            if !settings.webdav.username.trim().is_empty() {
-                builder = builder.username(&settings.webdav.username);
-            }
-            if let Some(password) = settings
-                .webdav
-                .password
-                .as_deref()
-                .filter(|value| !value.is_empty())
-            {
-                builder = builder.password(password);
-            }
-            let digest_client = WebdavDigestHttpClient::new(
-                settings.webdav.username.clone(),
-                settings.webdav.password.clone().unwrap_or_default(),
-            );
-            Ok(Operator::new(builder)
-                .map_err(map_storage_error)?
-                .layer(
-                    TimeoutLayer::new()
-                        .with_timeout(Duration::from_secs(30))
-                        .with_io_timeout(Duration::from_secs(30)),
-                )
-                .layer(HttpClientLayer::new(HttpClient::with(digest_client)))
-                .layer(RetryLayer::new().with_max_times(3))
-                .layer(TracingLayer)
-                .finish())
-        }
-        "s3" => {
-            let mut builder = S3::default().bucket(&settings.s3.bucket);
-            let endpoint = normalize_storage_endpoint(&settings.s3.endpoint);
-            if !endpoint.is_empty() {
-                builder = builder.endpoint(&endpoint);
-            }
-            if !settings.s3.region.trim().is_empty() {
-                builder = builder.region(&settings.s3.region);
-            }
-            if !settings.s3.root.trim().is_empty() {
-                builder = builder.root(&settings.s3.root);
-            }
-            if let Some(access_key_id) = settings
-                .s3
-                .access_key_id
-                .as_deref()
-                .filter(|value| !value.is_empty())
-            {
-                builder = builder.access_key_id(access_key_id);
-            }
-            if let Some(secret_access_key) = settings
-                .s3
-                .secret_access_key
-                .as_deref()
-                .filter(|value| !value.is_empty())
-            {
-                builder = builder.secret_access_key(secret_access_key);
-            }
-            if let Some(session_token) = settings
-                .s3
-                .session_token
-                .as_deref()
-                .filter(|value| !value.is_empty())
-            {
-                builder = builder.session_token(session_token);
-            }
-            if settings.s3.virtual_host_style {
-                builder = builder.enable_virtual_host_style();
-            }
-            Ok(Operator::new(builder)
-                .map_err(map_storage_error)?
-                .layer(
-                    TimeoutLayer::new()
-                        .with_timeout(Duration::from_secs(30))
-                        .with_io_timeout(Duration::from_secs(30)),
-                )
-                .layer(RetryLayer::new().with_max_times(3))
-                .layer(TracingLayer)
-                .finish())
-        }
+        "webdav" => build_webdav_operator(settings).map(CloudRemote::OpenDal),
+        "s3" => build_s3_operator(settings).map(CloudRemote::OpenDal),
+        "gitee_snippet" => GiteeSnippetRemote::new(settings).map(CloudRemote::GiteeSnippet),
         other => Err(AppError::Config(format!(
             "Unsupported cloud provider '{}'",
             other
@@ -111,16 +107,101 @@ pub(super) fn build_operator(settings: &CloudSyncSettings) -> AppResult<Operator
     }
 }
 
-pub(super) async fn ensure_remote_layout(op: &Operator, base_root: &str) -> AppResult<()> {
-    op.create_dir(&remote_path(base_root, super::remote::SYNC_SNAPSHOTS_DIR))
-        .await
-        .map_err(map_storage_error)?;
-    op.create_dir(&remote_path(
-        base_root,
-        super::remote::BACKUPS_SNAPSHOTS_DIR,
-    ))
-    .await
-    .map_err(map_storage_error)?;
+fn build_webdav_operator(settings: &CloudSyncSettings) -> AppResult<Operator> {
+    let endpoint = normalize_storage_endpoint(&settings.webdav.endpoint);
+    let mut builder = Webdav::default().endpoint(&endpoint);
+    if !settings.webdav.root.trim().is_empty() {
+        builder = builder.root(&settings.webdav.root);
+    }
+    if !settings.webdav.username.trim().is_empty() {
+        builder = builder.username(&settings.webdav.username);
+    }
+    if let Some(password) = settings
+        .webdav
+        .password
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        builder = builder.password(password);
+    }
+    let digest_client = WebdavDigestHttpClient::new(
+        settings.webdav.username.clone(),
+        settings.webdav.password.clone().unwrap_or_default(),
+    );
+    Ok(Operator::new(builder)
+        .map_err(map_storage_error)?
+        .layer(
+            TimeoutLayer::new()
+                .with_timeout(Duration::from_secs(30))
+                .with_io_timeout(Duration::from_secs(30)),
+        )
+        .layer(HttpClientLayer::new(HttpClient::with(digest_client)))
+        .layer(RetryLayer::new().with_max_times(3))
+        .layer(TracingLayer)
+        .finish())
+}
+
+fn build_s3_operator(settings: &CloudSyncSettings) -> AppResult<Operator> {
+    let mut builder = S3::default().bucket(&settings.s3.bucket);
+    let endpoint = normalize_storage_endpoint(&settings.s3.endpoint);
+    if !endpoint.is_empty() {
+        builder = builder.endpoint(&endpoint);
+    }
+    if !settings.s3.region.trim().is_empty() {
+        builder = builder.region(&settings.s3.region);
+    }
+    if !settings.s3.root.trim().is_empty() {
+        builder = builder.root(&settings.s3.root);
+    }
+    if let Some(access_key_id) = settings
+        .s3
+        .access_key_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        builder = builder.access_key_id(access_key_id);
+    }
+    if let Some(secret_access_key) = settings
+        .s3
+        .secret_access_key
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        builder = builder.secret_access_key(secret_access_key);
+    }
+    if let Some(session_token) = settings
+        .s3
+        .session_token
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        builder = builder.session_token(session_token);
+    }
+    if settings.s3.virtual_host_style {
+        builder = builder.enable_virtual_host_style();
+    }
+    Ok(Operator::new(builder)
+        .map_err(map_storage_error)?
+        .layer(
+            TimeoutLayer::new()
+                .with_timeout(Duration::from_secs(30))
+                .with_io_timeout(Duration::from_secs(30)),
+        )
+        .layer(RetryLayer::new().with_max_times(3))
+        .layer(TracingLayer)
+        .finish())
+}
+
+pub(super) async fn ensure_remote_layout(remote: &CloudRemote, base_root: &str) -> AppResult<()> {
+    remote
+        .create_dir(&remote_path(base_root, super::remote::SYNC_SNAPSHOTS_DIR))
+        .await?;
+    remote
+        .create_dir(&remote_path(
+            base_root,
+            super::remote::BACKUPS_SNAPSHOTS_DIR,
+        ))
+        .await?;
     Ok(())
 }
 
@@ -176,6 +257,215 @@ fn map_webdav_auth_error(raw: &str) -> Option<String> {
     }
 
     None
+}
+
+pub(super) struct GiteeSnippetRemote {
+    client: reqwest::Client,
+    api_endpoint: String,
+    gist_id: String,
+    access_token: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GiteeSnippet {
+    #[serde(default)]
+    files: HashMap<String, GiteeSnippetFile>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GiteeSnippetFile {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    raw_url: Option<String>,
+}
+
+impl GiteeSnippetRemote {
+    fn new(settings: &CloudSyncSettings) -> AppResult<Self> {
+        let api_endpoint = normalize_storage_endpoint(&settings.gitee_snippet.api_endpoint);
+        let gist_id = settings.gitee_snippet.gist_id.trim().to_string();
+        let access_token = settings
+            .gitee_snippet
+            .access_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| AppError::Config("Gitee access token is required".to_string()))?
+            .to_string();
+
+        if api_endpoint.is_empty() {
+            return Err(AppError::Config(
+                "Gitee API endpoint is required".to_string(),
+            ));
+        }
+        if gist_id.is_empty() {
+            return Err(AppError::Config("Gitee snippet ID is required".to_string()));
+        }
+
+        let client = reqwest::Client::builder()
+            .timeout(GITEE_REMOTE_TIMEOUT)
+            .build()
+            .map_err(map_gitee_client_error)?;
+
+        Ok(Self {
+            client,
+            api_endpoint,
+            gist_id,
+            access_token,
+        })
+    }
+
+    async fn exists(&self, path: &str) -> AppResult<bool> {
+        let snippet = self.fetch_snippet().await?;
+        Ok(snippet.files.contains_key(&gitee_remote_filename(path)))
+    }
+
+    async fn read(&self, path: &str) -> AppResult<Vec<u8>> {
+        self.read_if_exists(path)
+            .await?
+            .ok_or_else(|| AppError::Config(format!("Gitee snippet file '{}' not found", path)))
+    }
+
+    async fn read_if_exists(&self, path: &str) -> AppResult<Option<Vec<u8>>> {
+        let filename = gitee_remote_filename(path);
+        if let Ok(content) = self.fetch_raw_filename(&filename).await {
+            return decode_gitee_file_content(&content).map(Some);
+        }
+
+        let snippet = self.fetch_snippet().await?;
+        let Some(file) = snippet.files.get(&filename) else {
+            return Ok(None);
+        };
+        let content = match file
+            .content
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            Some(content) => content.to_string(),
+            None => self.fetch_raw_file(&filename, file).await?,
+        };
+        decode_gitee_file_content(&content).map(Some)
+    }
+
+    async fn write(&self, path: &str, content: &[u8]) -> AppResult<()> {
+        let encoded = BASE64_STANDARD.encode(content);
+        self.patch_file(&gitee_remote_filename(path), encoded).await
+    }
+
+    async fn delete(&self, path: &str) -> AppResult<()> {
+        let _ = path;
+        Ok(())
+    }
+
+    async fn fetch_snippet(&self) -> AppResult<GiteeSnippet> {
+        let url = format!("{}/gists/{}", self.api_endpoint, self.gist_id);
+        let response = self
+            .client
+            .get(url)
+            .query(&[("access_token", self.access_token.as_str())])
+            .send()
+            .await
+            .map_err(map_gitee_client_error)?;
+        decode_gitee_response(response).await
+    }
+
+    async fn fetch_raw_file(&self, filename: &str, file: &GiteeSnippetFile) -> AppResult<String> {
+        let raw_url = file.raw_url.as_deref().filter(|value| !value.is_empty());
+        let url = raw_url.map(str::to_string).unwrap_or_else(|| {
+            format!(
+                "{}/gists/{}/raw/{}",
+                self.api_endpoint, self.gist_id, filename
+            )
+        });
+        let response = self
+            .client
+            .get(url)
+            .query(&[("access_token", self.access_token.as_str())])
+            .send()
+            .await
+            .map_err(map_gitee_client_error)?;
+        decode_gitee_text_response(response).await
+    }
+
+    async fn fetch_raw_filename(&self, filename: &str) -> AppResult<String> {
+        let url = format!(
+            "{}/gists/{}/raw/{}",
+            self.api_endpoint, self.gist_id, filename
+        );
+        let response = self
+            .client
+            .get(url)
+            .query(&[("access_token", self.access_token.as_str())])
+            .send()
+            .await
+            .map_err(map_gitee_client_error)?;
+        decode_gitee_text_response(response).await
+    }
+
+    async fn patch_file(&self, filename: &str, content: String) -> AppResult<()> {
+        let file_value = serde_json::json!({ "content": content });
+        let mut files = serde_json::Map::new();
+        files.insert(filename.to_string(), file_value);
+        let body = serde_json::json!({
+            "access_token": self.access_token.as_str(),
+            "files": files,
+        });
+        let url = format!("{}/gists/{}", self.api_endpoint, self.gist_id);
+        let response = self
+            .client
+            .patch(url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(map_gitee_client_error)?;
+        let _: serde_json::Value = decode_gitee_response(response).await?;
+        Ok(())
+    }
+}
+
+fn gitee_remote_filename(path: &str) -> String {
+    format!(
+        "{}{}{}",
+        GITEE_REMOTE_FILE_PREFIX,
+        URL_SAFE_NO_PAD.encode(path.as_bytes()),
+        GITEE_REMOTE_FILE_SUFFIX
+    )
+}
+
+fn decode_gitee_file_content(content: &str) -> AppResult<Vec<u8>> {
+    BASE64_STANDARD
+        .decode(content.trim())
+        .map_err(|error| AppError::Config(format!("Invalid Gitee snippet content: {error}")))
+}
+
+async fn decode_gitee_response<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+) -> AppResult<T> {
+    let text = decode_gitee_text_response(response).await?;
+    serde_json::from_str(&text).map_err(Into::into)
+}
+
+async fn decode_gitee_text_response(response: reqwest::Response) -> AppResult<String> {
+    let status = response.status();
+    let text = response.text().await.map_err(map_gitee_client_error)?;
+    if !status.is_success() {
+        return Err(AppError::Config(format!(
+            "Gitee snippet request failed ({status}): {}",
+            text.trim()
+        )));
+    }
+    Ok(text)
+}
+
+fn map_gitee_client_error(error: reqwest::Error) -> AppError {
+    if error.is_timeout() {
+        AppError::Io(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("Gitee snippet operation timed out: {error}"),
+        ))
+    } else {
+        AppError::Config(format!("Gitee snippet request failed: {error}"))
+    }
 }
 
 #[derive(Clone)]
@@ -500,6 +790,15 @@ mod tests {
         );
 
         assert!(message.is_none());
+    }
+
+    #[test]
+    fn gitee_remote_filename_is_path_safe() {
+        let filename = gitee_remote_filename("nyaterm/sync/latest.redb");
+
+        assert!(filename.starts_with(GITEE_REMOTE_FILE_PREFIX));
+        assert!(filename.ends_with(GITEE_REMOTE_FILE_SUFFIX));
+        assert!(!filename.contains('/'));
     }
 
     #[test]

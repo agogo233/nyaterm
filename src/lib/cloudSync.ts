@@ -9,7 +9,10 @@ export type CloudSyncValidationCode =
   | "webdavEndpointRequired"
   | "s3EndpointRequired"
   | "s3BucketRequired"
-  | "s3CredentialsIncomplete";
+  | "s3CredentialsIncomplete"
+  | "giteeSnippetEndpointRequired"
+  | "giteeSnippetIdRequired"
+  | "giteeSnippetTokenRequired";
 
 export const MASKED_CLOUD_SECRET_VALUE = "__SET__";
 
@@ -39,6 +42,11 @@ export const DEFAULT_CLOUD_SYNC_SETTINGS: CloudSyncSettings = {
     secret_access_key: null,
     session_token: null,
     virtual_host_style: false,
+  },
+  gitee_snippet: {
+    api_endpoint: "https://gitee.com/api/v5",
+    gist_id: "",
+    access_token: null,
   },
 };
 
@@ -98,6 +106,20 @@ export function getCloudSyncValidationErrors(
     }
   }
 
+  if (settings.provider === "gitee_snippet") {
+    if (settings.gitee_snippet.api_endpoint.trim().length === 0) {
+      errors.push("giteeSnippetEndpointRequired");
+    }
+
+    if (settings.gitee_snippet.gist_id.trim().length === 0) {
+      errors.push("giteeSnippetIdRequired");
+    }
+
+    if (!settings.gitee_snippet.access_token?.trim()) {
+      errors.push("giteeSnippetTokenRequired");
+    }
+  }
+
   return errors;
 }
 
@@ -107,6 +129,8 @@ export function formatCloudProvider(provider?: string | null) {
       return "WebDAV";
     case "s3":
       return "S3";
+    case "gitee_snippet":
+      return "Gitee Snippet";
     default:
       return provider || "-";
   }

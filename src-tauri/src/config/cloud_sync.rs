@@ -67,6 +67,26 @@ impl Default for S3SyncSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GiteeSnippetSyncSettings {
+    #[serde(default = "default_gitee_api_endpoint")]
+    pub api_endpoint: String,
+    #[serde(default)]
+    pub gist_id: String,
+    #[serde(default)]
+    pub access_token: Option<String>,
+}
+
+impl Default for GiteeSnippetSyncSettings {
+    fn default() -> Self {
+        Self {
+            api_endpoint: default_gitee_api_endpoint(),
+            gist_id: String::new(),
+            access_token: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudSyncSettings {
     #[serde(default)]
     pub enabled: bool,
@@ -92,6 +112,8 @@ pub struct CloudSyncSettings {
     pub webdav: WebdavSyncSettings,
     #[serde(default)]
     pub s3: S3SyncSettings,
+    #[serde(default)]
+    pub gitee_snippet: GiteeSnippetSyncSettings,
 }
 
 impl Default for CloudSyncSettings {
@@ -109,6 +131,7 @@ impl Default for CloudSyncSettings {
             backup_retention_count: default_backup_retention_count(),
             webdav: WebdavSyncSettings::default(),
             s3: S3SyncSettings::default(),
+            gitee_snippet: GiteeSnippetSyncSettings::default(),
         }
     }
 }
@@ -225,6 +248,10 @@ fn default_remote_root() -> String {
     "nyaterm".to_string()
 }
 
+fn default_gitee_api_endpoint() -> String {
+    "https://gitee.com/api/v5".to_string()
+}
+
 fn default_device_name() -> String {
     std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
@@ -277,6 +304,7 @@ pub fn decrypt_cloud_sync_settings(
     settings.s3.access_key_id = decrypt_secret(settings.s3.access_key_id)?;
     settings.s3.secret_access_key = decrypt_secret(settings.s3.secret_access_key)?;
     settings.s3.session_token = decrypt_secret(settings.s3.session_token)?;
+    settings.gitee_snippet.access_token = decrypt_secret(settings.gitee_snippet.access_token)?;
     Ok(settings)
 }
 
@@ -287,6 +315,7 @@ pub fn encrypt_cloud_sync_settings(
     settings.s3.access_key_id = encrypt_secret(settings.s3.access_key_id)?;
     settings.s3.secret_access_key = encrypt_secret(settings.s3.secret_access_key)?;
     settings.s3.session_token = encrypt_secret(settings.s3.session_token)?;
+    settings.gitee_snippet.access_token = encrypt_secret(settings.gitee_snippet.access_token)?;
     Ok(settings)
 }
 
@@ -295,6 +324,7 @@ pub fn mask_cloud_sync_settings(mut settings: CloudSyncSettings) -> CloudSyncSet
     settings.s3.access_key_id = mask_secret(settings.s3.access_key_id);
     settings.s3.secret_access_key = mask_secret(settings.s3.secret_access_key);
     settings.s3.session_token = mask_secret(settings.s3.session_token);
+    settings.gitee_snippet.access_token = mask_secret(settings.gitee_snippet.access_token);
     settings
 }
 
@@ -317,6 +347,10 @@ pub fn merge_masked_cloud_sync_settings(
     next.s3.session_token = merge_secret(
         current.s3.session_token.as_ref(),
         next.s3.session_token.as_ref(),
+    );
+    next.gitee_snippet.access_token = merge_secret(
+        current.gitee_snippet.access_token.as_ref(),
+        next.gitee_snippet.access_token.as_ref(),
     );
     next
 }

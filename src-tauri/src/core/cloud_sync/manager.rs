@@ -15,7 +15,7 @@ use crate::error::{AppError, AppResult};
 
 use super::crypto::{decrypt_snapshot_bytes, encrypt_snapshot_bytes, require_master_password};
 use super::history_log::{log_history_entry, read_cloud_sync_history_from_logs};
-use super::operator::{build_operator, ensure_remote_layout, map_storage_error};
+use super::operator::{build_remote, ensure_remote_layout};
 use super::remote::{
     current_time_ms, elapsed_ms, load_backup_index, load_sync_pointer, remote_path,
     write_backup_index, write_sync_pointer, RemoteSyncPointer, BACKUPS_SNAPSHOTS_DIR,
@@ -156,12 +156,11 @@ impl CloudSyncManager {
             CLOUD_SYNC_QUICK_OPERATION_TIMEOUT,
             async {
                 let _ = require_master_password()?;
-                let operator = build_operator(&settings)?;
-                ensure_remote_layout(&operator, &settings.remote_root).await?;
-                let _ = operator
+                let remote = build_remote(&settings)?;
+                ensure_remote_layout(&remote, &settings.remote_root).await?;
+                let _ = remote
                     .exists(&remote_path(&settings.remote_root, SYNC_SNAPSHOTS_DIR))
-                    .await
-                    .map_err(map_storage_error)?;
+                    .await?;
                 Ok::<(), AppError>(())
             },
         )
@@ -280,8 +279,8 @@ impl CloudSyncManager {
             CLOUD_SYNC_QUICK_OPERATION_TIMEOUT,
             async {
                 let settings = self.settings.lock().await.clone();
-                let operator = build_operator(&settings)?;
-                let index = load_backup_index(&operator, &settings.remote_root).await?;
+                let remote = build_remote(&settings)?;
+                let index = load_backup_index(&remote, &settings.remote_root).await?;
                 Ok(index.entries)
             },
         )
@@ -321,16 +320,13 @@ impl CloudSyncManager {
         )
         .await;
         let started = Instant::now();
-        let operator = build_operator(&settings)?;
+        let remote = build_remote(&settings)?;
         let remote_file = remote_path(
             &settings.remote_root,
             &format!("{BACKUPS_SNAPSHOTS_DIR}{revision}.redb.enc"),
         );
-        let raw = operator
-            .read(&remote_file)
-            .await
-            .map_err(map_storage_error)?;
-        let decrypted = decrypt_snapshot_bytes(raw.to_vec().as_slice())?;
+        let raw = remote.read(&remote_file).await?;
+        let decrypted = decrypt_snapshot_bytes(raw.as_slice())?;
         let envelope = decode_portable_snapshot(&decrypted)?;
         apply_portable_snapshot(&self.app()?, &envelope).await?;
 
@@ -379,15 +375,15 @@ impl CloudSyncManager {
             return Ok(());
         }
         let _ = require_master_password()?;
-        let operator = build_operator(&settings)?;
-        ensure_remote_layout(&operator, &settings.remote_root).await?;
+        let remote = build_remote(&settings)?;
+        ensure_remote_layout(&remote, &settings.remote_root).await?;
 
         let local_envelope = {
             let state = self.state.lock().await.clone();
             build_portable_snapshot(&self.app()?, PortableSnapshotKind::Sync, &state.device_id)?
         };
         let local_hash = local_envelope.payload_hash.clone();
-        let latest = load_sync_pointer(&operator, &settings.remote_root).await?;
+        let latest = load_sync_pointer(&remote, &settings.remote_root).await?;
 
         {
             let mut state = self.state.lock().await;
@@ -597,8 +593,8 @@ impl CloudSyncManager {
 
         let started = Instant::now();
         let state_snapshot = self.state.lock().await.clone();
-        let operator = build_operator(&settings)?;
-        ensure_remote_layout(&operator, &settings.remote_root).await?;
+        let remote = build_remote(&settings)?;
+        ensure_remote_layout(&remote, &settings.remote_root).await?;
 
         let envelope = build_portable_snapshot(
             &self.app()?,
@@ -606,7 +602,7 @@ impl CloudSyncManager {
             &state_snapshot.device_id,
         )?;
         let local_hash = envelope.payload_hash.clone();
-        let latest = load_sync_pointer(&operator, &settings.remote_root).await?;
+        let latest = load_sync_pointer(&remote, &settings.remote_root).await?;
 
         if let Some(remote) = &latest {
             if remote.payload_hash == local_hash {
@@ -677,10 +673,7 @@ impl CloudSyncManager {
             &settings.remote_root,
             &format!("{SYNC_SNAPSHOTS_DIR}{}.redb.enc", envelope.revision_id),
         );
-        operator
-            .write(&snapshot_path, encrypted)
-            .await
-            .map_err(map_storage_error)?;
+        remote.write(&snapshot_path, encrypted).await?;
 
         let pointer = RemoteSyncPointer {
             revision_id: envelope.revision_id.clone(),
@@ -689,7 +682,7 @@ impl CloudSyncManager {
             device_id: envelope.device_id.clone(),
             app_version: envelope.app_version.clone(),
         };
-        write_sync_pointer(&operator, &settings.remote_root, &pointer).await?;
+        write_sync_pointer(&remote, &settings.remote_root, &pointer).await?;
 
         {
             let mut state = self.state.lock().await;
@@ -741,8 +734,8 @@ impl CloudSyncManager {
         .await;
 
         let started = Instant::now();
-        let operator = build_operator(&settings)?;
-        let latest = load_sync_pointer(&operator, &settings.remote_root)
+        let remote = build_remote(&settings)?;
+        let latest = load_sync_pointer(&remote, &settings.remote_root)
             .await?
             .ok_or_else(|| AppError::Config("No remote sync snapshot found".to_string()))?;
 
@@ -815,11 +808,8 @@ impl CloudSyncManager {
             &settings.remote_root,
             &format!("{SYNC_SNAPSHOTS_DIR}{}.redb.enc", latest.revision_id),
         );
-        let raw = operator
-            .read(&snapshot_path)
-            .await
-            .map_err(map_storage_error)?;
-        let decrypted = decrypt_snapshot_bytes(raw.to_vec().as_slice())?;
+        let raw = remote.read(&snapshot_path).await?;
+        let decrypted = decrypt_snapshot_bytes(raw.as_slice())?;
         let envelope = decode_portable_snapshot(&decrypted)?;
         apply_portable_snapshot(&self.app()?, &envelope).await?;
 
@@ -874,8 +864,8 @@ impl CloudSyncManager {
 
         let started = Instant::now();
         let state_snapshot = self.state.lock().await.clone();
-        let operator = build_operator(&settings)?;
-        ensure_remote_layout(&operator, &settings.remote_root).await?;
+        let remote = build_remote(&settings)?;
+        ensure_remote_layout(&remote, &settings.remote_root).await?;
 
         let envelope = build_portable_snapshot(
             &self.app()?,
@@ -888,12 +878,9 @@ impl CloudSyncManager {
             &settings.remote_root,
             &format!("{BACKUPS_SNAPSHOTS_DIR}{}.redb.enc", envelope.revision_id),
         );
-        operator
-            .write(&snapshot_path, encrypted)
-            .await
-            .map_err(map_storage_error)?;
+        remote.write(&snapshot_path, encrypted).await?;
 
-        let mut index = load_backup_index(&operator, &settings.remote_root).await?;
+        let mut index = load_backup_index(&remote, &settings.remote_root).await?;
         index.entries.insert(
             0,
             RemoteBackupEntry {
@@ -914,14 +901,14 @@ impl CloudSyncManager {
             .collect();
         index.entries.truncate(settings.backup_retention_count);
 
-        write_backup_index(&operator, &settings.remote_root, &index).await?;
+        write_backup_index(&remote, &settings.remote_root, &index).await?;
 
         for old in overflow {
             let old_path = remote_path(
                 &settings.remote_root,
                 &format!("{BACKUPS_SNAPSHOTS_DIR}{}.redb.enc", old.revision),
             );
-            let _ = operator.delete(&old_path).await;
+            let _ = remote.delete(&old_path).await;
         }
 
         {
