@@ -1273,6 +1273,8 @@
     "showLineNumbersDesc": "在终端侧边栏显示每行的行号。",
     "showRemoteStats": "显示远程资源信息",
     "showRemoteStatsDesc": "在资源监控面板显示当前 SSH 主机的资源使用情况。",
+    "showTimestampMilliseconds": "显示为毫秒格式",
+    "showTimestampMillisecondsDesc": "时间戳显示为 HH:mm:ss.SSS 格式。",
     "showTimestamps": "显示时间戳",
     "showTimestampsDesc": "在终端侧边栏显示每行输出的时间。",
     "startupBehavior": "启动行为",
