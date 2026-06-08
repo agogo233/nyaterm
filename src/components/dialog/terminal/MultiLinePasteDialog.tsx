@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,14 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-
-interface MultiLinePasteDialogProps {
-  open: boolean;
-  text: string | null;
-  onClose: () => void;
-  onDirectPaste: () => void;
-  onSendLineByLine: () => void;
-}
+import { Textarea } from "@/components/ui/textarea";
+import type { MultiLinePasteDialogProps } from "@/components/terminal/xterminalTypes";
 
 function normalizePasteNewlines(text: string): string {
   return text.replace(/\r\n|\r/gu, "\n");
@@ -38,7 +32,25 @@ export default function MultiLinePasteDialog({
   onSendLineByLine,
 }: MultiLinePasteDialogProps) {
   const { t } = useTranslation();
-  const directPasteButtonRef = useRef<HTMLButtonElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [draftText, setDraftText] = useState(text ?? "");
+  const canSend = draftText.length > 0;
+  const stats = useMemo(
+    () =>
+      draftText
+        ? t("terminal.multiLinePasteStats", "{{lines}} lines, {{chars}} characters", {
+            lines: countPasteLines(draftText),
+            chars: countPasteCharacters(draftText),
+          })
+        : "",
+    [draftText, t],
+  );
+
+  useEffect(() => {
+    if (open) {
+      setDraftText(text ?? "");
+    }
+  }, [open, text]);
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
@@ -46,7 +58,12 @@ export default function MultiLinePasteDialog({
         className="sm:max-w-xl"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          directPasteButtonRef.current?.focus();
+          requestAnimationFrame(() => {
+            const textarea = textareaRef.current;
+            if (!textarea) return;
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+          });
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -54,26 +71,27 @@ export default function MultiLinePasteDialog({
       >
         <DialogHeader>
           <DialogTitle>{t("terminal.multiLinePasteTitle")}</DialogTitle>
-          <DialogDescription>
-            {text
-              ? t("terminal.multiLinePasteStats", "{{lines}} lines, {{chars}} characters", {
-                  lines: countPasteLines(text),
-                  chars: countPasteCharacters(text),
-                })
-              : ""}
-          </DialogDescription>
+          <DialogDescription>{stats}</DialogDescription>
         </DialogHeader>
-        <pre className="max-h-56 min-h-32 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 font-mono text-xs leading-5">
-          {text}
-        </pre>
+        <Textarea
+          ref={textareaRef}
+          className="max-h-72 min-h-32 resize-y overflow-auto font-mono text-xs leading-5 md:text-xs"
+          value={draftText}
+          onChange={(event) => setDraftText(event.target.value)}
+          aria-label={t("terminal.multiLinePasteTitle")}
+        />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button ref={directPasteButtonRef} onClick={onDirectPaste}>
+          <Button disabled={!canSend} onClick={() => onDirectPaste(draftText)}>
             {t("terminal.multiLinePasteDirect")}
           </Button>
-          <Button variant="secondary" onClick={onSendLineByLine}>
+          <Button
+            variant="secondary"
+            disabled={!canSend}
+            onClick={() => onSendLineByLine(draftText)}
+          >
             {t("terminal.multiLinePasteSendLineByLine")}
           </Button>
         </DialogFooter>

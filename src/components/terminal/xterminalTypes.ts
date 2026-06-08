@@ -21,5 +21,13 @@ export interface XTerminalProps {
   syncOverlay?: SyncOverlayState;
 }
 
+export interface MultiLinePasteDialogProps {
+  open: boolean;
+  text: string | null;
+  onClose: () => void;
+  onDirectPaste: (text: string) => void;
+  onSendLineByLine: (text: string) => void;
+}
+
 export type PerformanceMode = "normal" | "overloaded";
 export type PerformanceOverlayState = "overloaded" | "recovered" | null;

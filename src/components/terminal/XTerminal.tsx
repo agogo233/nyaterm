@@ -1568,19 +1568,18 @@ export default function XTerminal({
     pasteTextRef.current(text);
   }, []);
 
-  const handleDirectMultiLinePaste = useCallback(() => {
-    if (!multiLinePasteText) return;
-    const text = multiLinePasteText;
+  const handleDirectMultiLinePaste = useCallback((text: string) => {
+    if (!text) return;
     setMultiLinePasteText(null);
     requestAnimationFrame(() => {
       pasteTextRef.current(text, { skipDialog: true });
     });
-  }, [multiLinePasteText]);
+  }, []);
 
-  const handleSendMultiLinePasteByLine = useCallback(() => {
-    if (!multiLinePasteText) return;
+  const handleSendMultiLinePasteByLine = useCallback((text: string) => {
+    if (!text) return;
     openSendCommandPanel({
-      text: multiLinePasteText,
+      text,
       sourceSessionId: sessionId,
       sourceSessionType: sessionType,
       dataType: "text",
@@ -1590,7 +1589,7 @@ export default function XTerminal({
       target: "current",
     });
     setMultiLinePasteText(null);
-  }, [multiLinePasteText, sessionId, sessionType]);
+  }, [sessionId, sessionType]);
 
   useEffect(() => {
     doFindRef.current = doFind;
