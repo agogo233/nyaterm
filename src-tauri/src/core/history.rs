@@ -137,6 +137,21 @@ impl CommandHistoryStore {
         true
     }
 
+    pub fn delete_command(&mut self, command: &str) -> bool {
+        let Some(command) = sanitize_history_command(command) else {
+            return false;
+        };
+
+        let original_len = self.entries.len();
+        self.entries.retain(|entry| entry.command != command);
+        if self.entries.len() == original_len {
+            return false;
+        }
+
+        self.dirty = true;
+        true
+    }
+
     pub fn list(&self) -> Vec<String> {
         self.entries
             .iter()
@@ -579,5 +594,38 @@ mod tests {
         let all = store.list();
         assert_eq!(all.len(), MAX_HISTORY);
         assert!(!all.iter().any(|command| command == "ls"));
+    }
+
+    #[test]
+    fn deletes_history_command_by_sanitized_text() {
+        let mut store = CommandHistoryStore::new();
+        assert!(store.add("docker ps".to_string()));
+        assert!(store.add("ls".to_string()));
+        assert!(store.add("PS C:\\Users\\CoderKang> dir".to_string()));
+
+        assert!(store.delete_command("root@ubuntu:~# docker ps"));
+        assert_eq!(store.list(), vec!["dir".to_string(), "ls".to_string()]);
+        assert!(
+            !store
+                .search("docker ps", 5, None, None)
+                .iter()
+                .any(|item| item.command == "docker ps")
+        );
+
+        assert!(store.delete_command("PS C:\\Users\\CoderKang> dir"));
+        assert_eq!(store.list(), vec!["ls".to_string()]);
+    }
+
+    #[test]
+    fn deleting_missing_or_empty_history_command_is_noop() {
+        let mut store = CommandHistoryStore::new();
+        assert!(store.add("ls".to_string()));
+        assert!(store.prepare_save().is_some());
+
+        assert!(!store.delete_command(""));
+        assert!(!store.delete_command("   "));
+        assert!(!store.delete_command("missing"));
+        assert_eq!(store.list(), vec!["ls".to_string()]);
+        assert!(!store.is_dirty());
     }
 }

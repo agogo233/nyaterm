@@ -352,6 +352,37 @@ impl SessionManager {
         self.request_history_event();
     }
 
+    /// Removes a command from persistent history and notifies suggestion listeners.
+    pub async fn delete_history_command(&self, command: String) {
+        let Some(command) = sanitize_history_command(&command) else {
+            return;
+        };
+
+        {
+            let mut submissions = self.command_submissions.lock().await;
+            for state in submissions.values_mut() {
+                state
+                    .pending_candidates
+                    .retain(|pending| pending != &command);
+                if state.last_shell_event.as_deref() == Some(command.as_str()) {
+                    state.last_shell_event = None;
+                }
+            }
+        }
+
+        let changed = {
+            let mut store = self.history_store.lock().await;
+            store.delete_command(&command)
+        };
+
+        if !changed {
+            return;
+        }
+
+        self.request_history_save();
+        self.request_history_event();
+    }
+
     fn request_history_event(&self) {
         self.ensure_history_event_worker();
         self.history_event_notify.notify_one();
@@ -721,6 +752,26 @@ mod tests {
         assert_eq!(
             manager.get_all_history().await,
             vec!["docker ps".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn deletes_persistent_history_command() {
+        let manager = SessionManager::new();
+        manager.add_command("test", "docker ps".to_string()).await;
+        manager.add_command("test", "ls".to_string()).await;
+
+        manager
+            .delete_history_command("root@ubuntu:~# docker ps".to_string())
+            .await;
+
+        assert_eq!(manager.get_all_history().await, vec!["ls".to_string()]);
+        assert!(
+            !manager
+                .fuzzy_search("docker ps", 8, None, None)
+                .await
+                .iter()
+                .any(|result| result.command == "docker ps")
         );
     }
 

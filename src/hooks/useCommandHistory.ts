@@ -50,6 +50,8 @@ export function useCommandHistory(
   const minCommandLengthRef = useRef(normalizeCommandSuggestionMinChars(minCommandLength));
   const maxCommandLengthRef = useRef(normalizeCommandSuggestionMaxChars(maxCommandLength));
   const searchRequestIdRef = useRef(0);
+  const deletedHistoryCommandsRef = useRef(new Set<string>());
+  const deletedHistoryCommandTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -115,6 +117,10 @@ export function useCommandHistory(
       if (searchTimerRef.current) {
         clearTimeout(searchTimerRef.current);
       }
+      for (const timer of deletedHistoryCommandTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      deletedHistoryCommandTimersRef.current.clear();
     };
   }, []);
 
@@ -165,6 +171,10 @@ export function useCommandHistory(
 
         // Merge, sort by score descending, and cap total
         const merged = [...historyResults, ...commandResults]
+          .filter(
+            (result) =>
+              result.source !== "history" || !deletedHistoryCommandsRef.current.has(result.command),
+          )
           .sort((a, b) => b.score - a.score)
           .slice(0, 12);
 
@@ -236,6 +246,41 @@ export function useCommandHistory(
     [applySuggestion, dismissSuggestions, terminalRef],
   );
 
+  const handleDeleteSuggestion = useCallback(
+    (command: string) => {
+      deletedHistoryCommandsRef.current.add(command);
+      const existingTimer = deletedHistoryCommandTimersRef.current.get(command);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+      const cleanupTimer = setTimeout(() => {
+        deletedHistoryCommandsRef.current.delete(command);
+        deletedHistoryCommandTimersRef.current.delete(command);
+      }, 5000);
+      deletedHistoryCommandTimersRef.current.set(command, cleanupTimer);
+
+      const nextSuggestions = suggestionsRef.current.filter(
+        (suggestion) => suggestion.source !== "history" || suggestion.command !== command,
+      );
+      suggestionsRef.current = nextSuggestions;
+
+      const nextSelectedIndex =
+        selectedIndexRef.current >= nextSuggestions.length
+          ? nextSuggestions.length - 1
+          : selectedIndexRef.current;
+      selectedIndexRef.current = Math.max(-1, nextSelectedIndex);
+
+      showSuggestionsRef.current = nextSuggestions.length > 0;
+      setSuggestions(nextSuggestions);
+      setSelectedIndex(selectedIndexRef.current);
+      setShowSuggestions(nextSuggestions.length > 0);
+
+      void invoke("delete_command_history", { command }).catch(() => {});
+      terminalRef.current?.focus();
+    },
+    [terminalRef],
+  );
+
   return {
     suggestions,
     selectedIndex,
@@ -249,5 +294,6 @@ export function useCommandHistory(
     triggerSearch,
     dismissSuggestions,
     handleSelectSuggestion,
+    handleDeleteSuggestion,
   };
 }

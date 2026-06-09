@@ -280,6 +280,7 @@ export default function XTerminal({
     triggerSearch,
     dismissSuggestions,
     handleSelectSuggestion,
+    handleDeleteSuggestion,
   } = useCommandHistory(
     terminalRef,
     inputStateRef,
@@ -1663,6 +1664,7 @@ export default function XTerminal({
           cursorPosition={cursorPosition}
           onSelect={handleSelectSuggestion}
           onDismiss={dismissSuggestions}
+          onDeleteHistory={handleDeleteSuggestion}
         />
 
         <CredentialSuggestions

@@ -1,7 +1,9 @@
 import { memo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { MdFlashOn, MdHistory, MdTipsAndUpdates } from "react-icons/md";
+import { MdDelete, MdFlashOn, MdHistory, MdTipsAndUpdates } from "react-icons/md";
+import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   getSuggestionPopupStyle,
   type SuggestionCursorPosition,
@@ -15,6 +17,7 @@ interface CommandSuggestionsProps {
   cursorPosition: SuggestionCursorPosition;
   onSelect: (command: string) => void;
   onDismiss: () => void;
+  onDeleteHistory?: (command: string) => void;
 }
 
 /** Per-source icon used as a prefix to distinguish item origins. */
@@ -26,28 +29,36 @@ const SOURCE_ICON: Record<string, React.ElementType> = {
 /** Render a single suggestion with matched characters highlighted. */
 function HighlightedCommand({ text, indices }: { text: string; indices: number[] }) {
   const indexSet = new Set(indices);
-  const parts: { text: string; highlighted: boolean }[] = [];
+  const parts: { text: string; highlighted: boolean; start: number }[] = [];
 
   let i = 0;
   while (i < text.length) {
+    const start = i;
     const isHighlighted = indexSet.has(i);
     let j = i + 1;
     while (j < text.length && indexSet.has(j) === isHighlighted) {
       j++;
     }
-    parts.push({ text: text.slice(i, j), highlighted: isHighlighted });
+    parts.push({ text: text.slice(i, j), highlighted: isHighlighted, start });
     i = j;
   }
 
   return (
     <span className="font-mono text-[0.75rem]">
-      {parts.map((part, idx) =>
+      {parts.map((part) =>
         part.highlighted ? (
-          <span key={idx} className="font-semibold" style={{ color: "var(--df-accent)" }}>
+          <span
+            key={`${part.start}-${part.highlighted}-${part.text}`}
+            className="font-semibold"
+            style={{ color: "var(--df-accent)" }}
+          >
             {part.text}
           </span>
         ) : (
-          <span key={idx} style={{ color: "var(--df-text)" }}>
+          <span
+            key={`${part.start}-${part.highlighted}-${part.text}`}
+            style={{ color: "var(--df-text)" }}
+          >
             {part.text}
           </span>
         ),
@@ -64,6 +75,7 @@ function CommandSuggestions({
   cursorPosition,
   onSelect,
   onDismiss: _onDismiss,
+  onDeleteHistory,
 }: CommandSuggestionsProps) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
@@ -74,7 +86,7 @@ function CommandSuggestions({
     if (selectedRef.current) {
       selectedRef.current.scrollIntoView({ block: "nearest" });
     }
-  }, [selectedIndex]);
+  });
 
   if (!visible || suggestions.length === 0) {
     return null;
@@ -113,6 +125,7 @@ function CommandSuggestions({
       {/* Items — prefix icon distinguishes source */}
       {suggestions.map((result, index) => {
         const Icon = SOURCE_ICON[result.source] ?? MdHistory;
+        const deleteHistory = result.source === "history" ? onDeleteHistory : undefined;
         return (
           <div
             key={`${result.source}-${result.display}-${index}`}
@@ -135,7 +148,35 @@ function CommandSuggestions({
                 color: index === selectedIndex ? "var(--df-accent)" : "var(--df-text-dimmed)",
               }}
             />
-            <HighlightedCommand text={result.display} indices={result.indices} />
+            <span className="min-w-0 flex-1 truncate">
+              <HighlightedCommand text={result.display} indices={result.indices} />
+            </span>
+            {deleteHistory && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="h-6 w-6 rounded p-0 opacity-70 hover:opacity-100"
+                    aria-label={t("suggestions.deleteHistory")}
+                    style={{ color: "var(--df-text-dimmed)" }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      deleteHistory(result.command);
+                    }}
+                  >
+                    <MdDelete className="text-[0.75rem]" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{t("suggestions.deleteHistory")}</TooltipContent>
+              </Tooltip>
+            )}
           </div>
         );
       })}

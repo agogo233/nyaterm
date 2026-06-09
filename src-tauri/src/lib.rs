@@ -121,6 +121,7 @@ pub fn run() {
             cmd::session::add_command_history,
             cmd::session::register_command_submission,
             cmd::session::get_command_history,
+            cmd::session::delete_command_history,
             cmd::session::fuzzy_search_history,
             cmd::session::fuzzy_search_commands,
             cmd::session::start_recording,

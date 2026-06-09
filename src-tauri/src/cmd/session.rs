@@ -388,6 +388,15 @@ pub async fn get_command_history(
 }
 
 #[tauri::command]
+pub async fn delete_command_history(
+    state: tauri::State<'_, Arc<SessionManager>>,
+    command: String,
+) -> AppResult<()> {
+    state.delete_history_command(command).await;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn fuzzy_search_history(
     state: tauri::State<'_, Arc<SessionManager>>,
     pattern: String,
