@@ -56,6 +56,15 @@ fn transfer_task_concurrency(value: u32) -> usize {
     (value as usize).clamp(1, 10)
 }
 
+fn background_transfer_task_concurrency(value: u32) -> usize {
+    let configured = transfer_task_concurrency(value);
+    if configured > 1 {
+        configured - 1
+    } else {
+        1
+    }
+}
+
 fn log_transfer_performance(
     direction: &str,
     kind: &str,
@@ -1078,7 +1087,8 @@ impl RemoteFs for SftpBackend {
             .unwrap_or_default();
         let (request_kib, pipeline_depth, max_concurrent_writes) =
             sftp_pipeline_config(&transfer_settings);
-        let concurrent_tasks = transfer_task_concurrency(transfer_settings.download_threads);
+        let concurrent_tasks =
+            background_transfer_task_concurrency(transfer_settings.download_threads);
         let transfer_started = Instant::now();
         let total_files = self.count_remote_files(remote_path).await?;
         let directory_controller = create_directory_transfer_controller(
@@ -1169,7 +1179,8 @@ impl RemoteFs for SftpBackend {
             .unwrap_or_default();
         let (request_kib, pipeline_depth, max_concurrent_writes) =
             sftp_pipeline_config(&transfer_settings);
-        let concurrent_tasks = transfer_task_concurrency(transfer_settings.upload_threads);
+        let concurrent_tasks =
+            background_transfer_task_concurrency(transfer_settings.upload_threads);
         let transfer_started = Instant::now();
         let local_stats = collect_local_directory_stats(local_path).await?;
         let directory_controller = create_directory_transfer_controller(
@@ -1391,7 +1402,7 @@ impl SftpBackend {
             return Ok(0);
         }
 
-        let concurrency = transfer_task_concurrency(transfer_settings.download_threads)
+        let concurrency = background_transfer_task_concurrency(transfer_settings.download_threads)
             .min(files.len())
             .max(1);
         let completed_count = Arc::new(AtomicU64::new(0));
@@ -1509,7 +1520,7 @@ impl SftpBackend {
             return Ok(0);
         }
 
-        let concurrency = transfer_task_concurrency(transfer_settings.upload_threads)
+        let concurrency = background_transfer_task_concurrency(transfer_settings.upload_threads)
             .min(files.len())
             .max(1);
         let completed_count = Arc::new(AtomicU64::new(0));

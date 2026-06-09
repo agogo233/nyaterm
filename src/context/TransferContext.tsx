@@ -115,6 +115,11 @@ function clampTransferConcurrency(value: number) {
   return Math.min(10, Math.max(1, normalized));
 }
 
+function getBackgroundTransferConcurrency(value: number) {
+  const configured = clampTransferConcurrency(value);
+  return configured > 1 ? configured - 1 : 1;
+}
+
 export function TransferProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const { appSettings } = useApp();
@@ -264,8 +269,8 @@ export function TransferProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void queueRevision;
     const maxRunningByDirection: Record<TransferDirection, number> = {
-      download: clampTransferConcurrency(appSettings.transfer.download_threads),
-      upload: clampTransferConcurrency(appSettings.transfer.upload_threads),
+      download: getBackgroundTransferConcurrency(appSettings.transfer.download_threads),
+      upload: getBackgroundTransferConcurrency(appSettings.transfer.upload_threads),
     };
     const runningByDirection: Record<TransferDirection, number> = {
       download: 0,
