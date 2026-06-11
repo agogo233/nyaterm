@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdLock, MdLockOpen } from "react-icons/md";
 import {
@@ -30,12 +30,19 @@ interface SecretUnlockFooterProps {
   unlocked: boolean;
   onLock: () => void;
   onUnlocked: () => void;
+  unlockRequestNonce?: number;
 }
 
-export function SecretUnlockFooter({ unlocked, onLock, onUnlocked }: SecretUnlockFooterProps) {
+export function SecretUnlockFooter({
+  unlocked,
+  onLock,
+  onUnlocked,
+  unlockRequestNonce = 0,
+}: SecretUnlockFooterProps) {
   const { t } = useTranslation();
   const { appSettings } = useApp();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const handledUnlockRequestNonceRef = useRef(unlockRequestNonce);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [masterAlertOpen, setMasterAlertOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -45,13 +52,13 @@ export function SecretUnlockFooter({ unlocked, onLock, onUnlocked }: SecretUnloc
   const hasMasterPassword = Boolean(appSettings.security.master_password);
   const Icon = unlocked ? MdLock : MdLockOpen;
 
-  const resetUnlockDialog = () => {
+  const resetUnlockDialog = useCallback(() => {
     setPassword("");
     setError(false);
     setVerifying(false);
-  };
+  }, []);
 
-  const handleRequestUnlock = () => {
+  const handleRequestUnlock = useCallback(() => {
     if (!hasMasterPassword) {
       setMasterAlertOpen(true);
       return;
@@ -59,7 +66,20 @@ export function SecretUnlockFooter({ unlocked, onLock, onUnlocked }: SecretUnloc
     resetUnlockDialog();
     setUnlockOpen(true);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  };
+  }, [hasMasterPassword, resetUnlockDialog]);
+
+  useEffect(() => {
+    if (
+      !unlockRequestNonce ||
+      unlocked ||
+      handledUnlockRequestNonceRef.current === unlockRequestNonce
+    ) {
+      return;
+    }
+
+    handledUnlockRequestNonceRef.current = unlockRequestNonce;
+    handleRequestUnlock();
+  }, [handleRequestUnlock, unlocked, unlockRequestNonce]);
 
   const handleUnlock = async () => {
     if (!password || verifying) return;
