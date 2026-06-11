@@ -33,6 +33,8 @@ pub struct TransferSettings {
     pub recording_include_io_labels: bool,
     #[serde(default = "default_true")]
     pub recording_include_timestamps: bool,
+    #[serde(default = "default_false")]
+    pub recording_auto_start: bool,
     #[serde(default = "default_recording_memory_limit_bytes")]
     pub recording_memory_limit_bytes: u64,
     #[serde(default = "default_true")]
@@ -75,8 +77,27 @@ impl Default for TransferSettings {
             recording_path: String::new(),
             recording_include_io_labels: true,
             recording_include_timestamps: true,
+            recording_auto_start: false,
             recording_memory_limit_bytes: default_recording_memory_limit_bytes(),
             zmodem_enabled: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TransferSettings;
+
+    #[test]
+    fn defaults_auto_recording_to_disabled_for_legacy_settings() {
+        let settings: TransferSettings = serde_json::from_value(serde_json::json!({
+            "recording_path": "",
+            "recording_include_io_labels": true,
+            "recording_include_timestamps": true,
+            "recording_memory_limit_bytes": 5242880
+        }))
+        .unwrap();
+
+        assert!(!settings.recording_auto_start);
     }
 }

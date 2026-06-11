@@ -138,6 +138,16 @@ export function TransferTab() {
         />
 
         <SettingRow
+          label={t("settings.recordingAutoStart")}
+          desc={t("settings.recordingAutoStartDesc")}
+        >
+          <SettingSwitch
+            checked={transfer.recording_auto_start}
+            onChange={(v) => update({ recording_auto_start: v })}
+          />
+        </SettingRow>
+
+        <SettingRow
           label={t("settings.recordingIncludeIoLabels")}
           desc={t("settings.recordingIncludeIoLabelsDesc")}
         >

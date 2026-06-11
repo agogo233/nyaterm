@@ -555,6 +555,7 @@ export interface TransferSettings {
   recording_path: string;
   recording_include_io_labels: boolean;
   recording_include_timestamps: boolean;
+  recording_auto_start: boolean;
   recording_memory_limit_bytes: number;
 }
 

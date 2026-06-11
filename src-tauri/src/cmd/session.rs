@@ -6,14 +6,16 @@ use crate::core::{
 use crate::error::{AppError, AppResult};
 use crate::observability::{self, StructuredLog, StructuredLogLevel};
 use crate::utils::fuzzy::{FuzzyResult, fuzzy_search_items};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[tauri::command]
 pub async fn create_ssh_session(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Arc<SessionManager>>,
+    recording_state: tauri::State<'_, Arc<RecordingManager>>,
     connection_id: String,
     create_request_id: Option<String>,
 ) -> AppResult<String> {
@@ -25,7 +27,7 @@ pub async fn create_ssh_session(
     };
 
     let session_id = ssh::create_ssh_session(
-        app,
+        app.clone(),
         state.inner().clone(),
         ssh_config,
         Some(connection_id.clone()),
@@ -37,6 +39,13 @@ pub async fn create_ssh_session(
     if let Err(error) = crate::storage::mark_connection_used(&connection_id) {
         tracing::warn!(connection_id, %error, "Failed to mark connection as recently used");
     }
+    maybe_start_auto_recording(
+        &app,
+        state.inner().as_ref(),
+        recording_state.inner().clone(),
+        &session_id,
+    )
+    .await;
     Ok(session_id)
 }
 
@@ -44,9 +53,20 @@ pub async fn create_ssh_session(
 pub async fn create_multiplexed_ssh_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<SessionManager>>,
+    recording_state: tauri::State<'_, Arc<RecordingManager>>,
     source_session_id: String,
 ) -> AppResult<String> {
-    ssh::create_multiplexed_ssh_session(app, state.inner().clone(), &source_session_id).await
+    let session_id =
+        ssh::create_multiplexed_ssh_session(app.clone(), state.inner().clone(), &source_session_id)
+            .await?;
+    maybe_start_auto_recording(
+        &app,
+        state.inner().as_ref(),
+        recording_state.inner().clone(),
+        &session_id,
+    )
+    .await;
+    Ok(session_id)
 }
 
 #[tauri::command]
@@ -54,6 +74,7 @@ pub async fn create_local_session(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Arc<SessionManager>>,
+    recording_state: tauri::State<'_, Arc<RecordingManager>>,
     connection_id: Option<String>,
     create_request_id: Option<String>,
 ) -> AppResult<String> {
@@ -82,7 +103,7 @@ pub async fn create_local_session(
         None
     };
     let session_id = core::create_local_session(
-        app,
+        app.clone(),
         state.inner().clone(),
         config,
         Some(window.label().to_string()),
@@ -94,6 +115,13 @@ pub async fn create_local_session(
             tracing::warn!(connection_id, %error, "Failed to mark connection as recently used");
         }
     }
+    maybe_start_auto_recording(
+        &app,
+        state.inner().as_ref(),
+        recording_state.inner().clone(),
+        &session_id,
+    )
+    .await;
     Ok(session_id)
 }
 
@@ -102,6 +130,7 @@ pub async fn create_telnet_session(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Arc<SessionManager>>,
+    recording_state: tauri::State<'_, Arc<RecordingManager>>,
     connection_id: Option<String>,
     host: Option<String>,
     port: Option<u16>,
@@ -137,24 +166,30 @@ pub async fn create_telnet_session(
         )
     };
     let marked_connection_id = connection_id.clone();
-    let session_id =
-        core::create_telnet_session(
-            app,
-            state.inner().clone(),
-            h,
-            p,
-            connection_id,
-            n,
-            bs_mode,
-            Some(window.label().to_string()),
-        )
-        .await?;
+    let session_id = core::create_telnet_session(
+        app.clone(),
+        state.inner().clone(),
+        h,
+        p,
+        connection_id,
+        n,
+        bs_mode,
+        Some(window.label().to_string()),
+    )
+    .await?;
     drop(guard);
     if let Some(connection_id) = marked_connection_id {
         if let Err(error) = crate::storage::mark_connection_used(&connection_id) {
             tracing::warn!(connection_id, %error, "Failed to mark connection as recently used");
         }
     }
+    maybe_start_auto_recording(
+        &app,
+        state.inner().as_ref(),
+        recording_state.inner().clone(),
+        &session_id,
+    )
+    .await;
     Ok(session_id)
 }
 
@@ -163,6 +198,7 @@ pub async fn create_serial_session(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Arc<SessionManager>>,
+    recording_state: tauri::State<'_, Arc<RecordingManager>>,
     connection_id: Option<String>,
     port_name: Option<String>,
     baud_rate: Option<u32>,
@@ -216,22 +252,157 @@ pub async fn create_serial_session(
         }
     };
     let marked_connection_id = connection_id.clone();
-    let session_id =
-        core::create_serial_session(
-            app,
-            state.inner().clone(),
-            cfg,
-            connection_id,
-            Some(window.label().to_string()),
-        )
-        .await?;
+    let session_id = core::create_serial_session(
+        app.clone(),
+        state.inner().clone(),
+        cfg,
+        connection_id,
+        Some(window.label().to_string()),
+    )
+    .await?;
     drop(guard);
     if let Some(connection_id) = marked_connection_id {
         if let Err(error) = crate::storage::mark_connection_used(&connection_id) {
             tracing::warn!(connection_id, %error, "Failed to mark connection as recently used");
         }
     }
+    maybe_start_auto_recording(
+        &app,
+        state.inner().as_ref(),
+        recording_state.inner().clone(),
+        &session_id,
+    )
+    .await;
     Ok(session_id)
+}
+
+async fn maybe_start_auto_recording(
+    app: &tauri::AppHandle,
+    session_manager: &SessionManager,
+    recording_manager: Arc<RecordingManager>,
+    session_id: &str,
+) {
+    let settings = match config::load_app_settings(app) {
+        Ok(settings) => settings,
+        Err(error) => {
+            tracing::warn!(session_id, %error, "Failed to load settings for auto recording");
+            return;
+        }
+    };
+    let transfer = settings.transfer;
+    if !transfer.recording_auto_start {
+        return;
+    }
+
+    let session_info = match session_manager.session_info(session_id).await {
+        Ok(info) => info,
+        Err(error) => {
+            tracing::warn!(session_id, %error, "Failed to load session info for auto recording");
+            return;
+        }
+    };
+
+    let file_path =
+        match build_auto_recording_file_path(app, &transfer.recording_path, &session_info.name) {
+            Ok(path) => path,
+            Err(error) => {
+                tracing::warn!(session_id, %error, "Failed to build auto recording path");
+                return;
+            }
+        };
+    let file_path = file_path.to_string_lossy().to_string();
+    let include_io_labels = transfer.recording_include_io_labels;
+    let include_timestamps = transfer.recording_include_timestamps;
+    let task_session_id = session_id.to_string();
+    let log_session_id = task_session_id.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        recording_manager.start(
+            &task_session_id,
+            &file_path,
+            include_io_labels,
+            include_timestamps,
+        )
+    })
+    .await;
+
+    match result {
+        Ok(Ok(())) => {
+            let _ = app.emit("sessions-changed", ());
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(session_id = %log_session_id, %error, "Failed to auto-start recording");
+        }
+        Err(error) => {
+            tracing::warn!(session_id = %log_session_id, %error, "Auto recording task failed");
+        }
+    }
+}
+
+fn build_auto_recording_file_path(
+    app: &tauri::AppHandle,
+    configured_dir: &str,
+    session_name: &str,
+) -> AppResult<PathBuf> {
+    let dir = if configured_dir.trim().is_empty() {
+        default_recording_dir(app)?
+    } else {
+        PathBuf::from(configured_dir)
+    };
+    let timestamp = time::OffsetDateTime::now_local()
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+        .format(time::macros::format_description!(
+            "[year]-[month]-[day]T[hour]-[minute]-[second]"
+        ))
+        .unwrap_or_else(|_| "1970-01-01T00-00-00".to_string());
+
+    Ok(dir.join(format!(
+        "recording-{}-{timestamp}.log",
+        safe_recording_name(session_name)
+    )))
+}
+
+fn default_recording_dir(app: &tauri::AppHandle) -> AppResult<PathBuf> {
+    match app.path().download_dir() {
+        Ok(path) => Ok(path),
+        Err(_) => dirs::download_dir()
+            .or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
+            .ok_or_else(|| AppError::Config("Failed to resolve Downloads directory".to_string())),
+    }
+}
+
+fn safe_recording_name(name: &str) -> String {
+    let mut safe = String::new();
+    let mut last_was_replacement = false;
+
+    for ch in name.chars() {
+        if ch.is_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            safe.push(ch);
+            last_was_replacement = false;
+        } else if !last_was_replacement {
+            safe.push('_');
+            last_was_replacement = true;
+        }
+    }
+
+    if safe.is_empty() {
+        "session".to_string()
+    } else {
+        safe
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_recording_name;
+
+    #[test]
+    fn safe_recording_name_preserves_readable_parts() {
+        assert_eq!(safe_recording_name(""), "session");
+        assert_eq!(safe_recording_name("my session!/prod"), "my_session_prod");
+        assert_eq!(safe_recording_name("中台 算法库"), "中台_算法库");
+        assert_eq!(safe_recording_name("ssh.host_01-prod"), "ssh.host_01-prod");
+    }
 }
 
 #[tauri::command]
