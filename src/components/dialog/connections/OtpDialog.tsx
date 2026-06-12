@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { OtpCodePanel } from "@/components/panel/security-auth/OtpCodePanel";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { invoke } from "@/lib/invoke";
 import { logger } from "@/lib/logger";
@@ -33,32 +33,15 @@ interface OtpDialogProps {
   onDone: () => void;
 }
 
-function getOtpSlotClassName(length: number) {
-  if (length >= 9) return "h-8 flex-1 basis-0 min-w-0 text-xs";
-  if (length >= 7) return "h-8 w-8 text-xs sm:h-9 sm:w-9 sm:text-sm";
-  return undefined;
-}
-
 export function OtpDialog({ request, onDone }: OtpDialogProps) {
   const { t } = useTranslation();
   const [responses, setResponses] = useState<string[]>([]);
-  const [codeLengths, setCodeLengths] = useState<number[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
-
-  const handleCodeChange = useCallback((code: string) => {
-    setCodeLengths((prev) => {
-      if (prev[0] === code.length) return prev;
-      const next = [...prev];
-      next[0] = code.length;
-      return next;
-    });
-  }, []);
 
   useEffect(() => {
     if (request) {
       setResponses(request.prompts.map(() => ""));
-      setCodeLengths(request.prompts.map(() => 6));
       setSubmitting(false);
     }
   }, [request]);
@@ -130,13 +113,6 @@ export function OtpDialog({ request, onDone }: OtpDialogProps) {
     const next = [...responses];
     next[0] = code;
     setResponses(next);
-
-    setCodeLengths((prev) => {
-      if ((prev[0] ?? 0) >= code.length) return prev;
-      const nextLengths = [...prev];
-      nextLengths[0] = code.length;
-      return nextLengths;
-    });
   };
 
   return (
@@ -155,47 +131,35 @@ export function OtpDialog({ request, onDone }: OtpDialogProps) {
         </DialogHeader>
 
         <div className="min-w-0 space-y-3 py-2">
-          {request?.prompts.map((p, promptIndex) => {
-            const codeLength = codeLengths[promptIndex] ?? 6;
-            const slotClassName = getOtpSlotClassName(codeLength);
-
-            return (
-              <div
-                key={`${request.requestId}-${p.prompt}-${p.echo ? "echo" : "masked"}`}
-                className="min-w-0"
-              >
-                <Label className="text-[0.6875rem] text-muted-foreground">
-                  {p.prompt.replace(/:\s*$/, "")}
-                </Label>
-                <InputOTP
-                  ref={promptIndex === 0 ? firstInputRef : undefined}
-                  maxLength={codeLength}
-                  value={responses[promptIndex] ?? ""}
-                  onChange={(val) => {
-                    const next = [...responses];
-                    next[promptIndex] = val;
-                    setResponses(next);
-                  }}
-                  containerClassName="mt-1 w-full min-w-0"
-                >
-                  <InputOTPGroup className={codeLength >= 9 ? "w-full" : undefined}>
-                    {Array.from({ length: codeLength }, (_, index) => ({
-                      index,
-                      key: `slot-${index}`,
-                    })).map((slot) => (
-                      <InputOTPSlot key={slot.key} index={slot.index} className={slotClassName} />
-                    ))}
-                  </InputOTPGroup>
-                </InputOTP>
-              </div>
-            );
-          })}
+          {request?.prompts.map((p, promptIndex) => (
+            <div
+              key={`${request.requestId}-${p.prompt}-${p.echo ? "echo" : "masked"}`}
+              className="min-w-0"
+            >
+              <Label className="text-[0.6875rem] text-muted-foreground">
+                {p.prompt.replace(/:\s*$/, "")}
+              </Label>
+              <Input
+                ref={promptIndex === 0 ? firstInputRef : undefined}
+                type={p.echo ? "text" : "password"}
+                value={responses[promptIndex] ?? ""}
+                onChange={(event) => {
+                  const next = [...responses];
+                  next[promptIndex] = event.target.value;
+                  setResponses(next);
+                }}
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+          ))}
 
           {request?.otpEntryId && (
             <OtpCodePanel
               otpEntryId={request.otpEntryId}
               onSendToInput={handleSendToInput}
-              onCodeChange={handleCodeChange}
               variant="dialog"
             />
           )}
