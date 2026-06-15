@@ -25,6 +25,12 @@
     "lint": "node scripts/check-no-console.mjs && biome check src/",
     "format": "biome check --write src/",
     "format:check": "biome check --check src/",
+    "fmt": "pnpm fmt:frontend && pnpm fmt:rust",
+    "fmt:frontend": "prettier --write .",
+    "fmt:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml",
+    "fmt:check": "pnpm fmt:frontend:check && pnpm fmt:rust:check",
+    "fmt:frontend:check": "prettier --check .",
+    "fmt:rust:check": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
     "i18n:check": "prettier --check src/i18n/locales/*.json",
     "i18n:fix": "prettier --write src/i18n/locales/*.json"
   },
