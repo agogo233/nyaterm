@@ -96,7 +96,7 @@ tokio = { version = "1", features = [
     "process",
 ] }
 russh = { version = "0.61", features = ["des", "dsa"] }
-russh-sftp = "2.3.0"
+russh-sftp = { path = "crates/russh-sftp" }
 ssh-key = { version = "0.6", features = ["std"] }
 portable-pty = "0.8"
 uuid = { version = "1", features = ["v4"] }
