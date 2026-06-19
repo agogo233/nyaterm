@@ -1,4 +1,13 @@
-import { type DragEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type DragEvent,
+  memo,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ResizeHandle from "@/components/layout/ResizeHandle";
 import {
   isTerminalWindowSplit,
@@ -8,9 +17,27 @@ import {
   type TerminalWindowSplit,
 } from "@/lib/tabWindows";
 import type { PaneSplitDirection, SavedConnection, Tab } from "@/types/global";
-import DropZoneOverlay, { type DropZone } from "./TabDockDropOverlay";
 import PaneWorkspace from "./PaneWorkspace";
 import TabBar from "./TabBar";
+import DropZoneOverlay, { type DropZone } from "./TabDockDropOverlay";
+
+interface LeafContentRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface TabPlacement {
+  tab: Tab;
+  leafId: string;
+  active: boolean;
+}
+
+interface DropState {
+  leafId: string;
+  zone: DropZone;
+}
 
 interface TabWindowsWorkspaceProps {
   layout: TerminalWindowNode | null;
@@ -48,39 +75,85 @@ interface TabWindowsWorkspaceProps {
   onConnectionError?: (tabId: string, paneId: string, sessionId: string, error: string) => void;
 }
 
+type LeafContentRectChange = (leafId: string, rect: LeafContentRect | null) => void;
+type LeafDragHandler = (leafId: string, event: DragEvent<HTMLDivElement>) => void;
+
+interface WindowNodeViewExtraProps {
+  workspaceRef: RefObject<HTMLDivElement | null>;
+  dropState: DropState | null;
+  onLeafContentRectChange: LeafContentRectChange;
+  onLeafDragOver: LeafDragHandler;
+  onLeafDragLeave: LeafDragHandler;
+  onLeafDrop: LeafDragHandler;
+}
+
+type WindowNodeViewProps = Omit<
+  TabWindowsWorkspaceProps,
+  | "layout"
+  | "onActivatePane"
+  | "onUpdatePaneSplitRatio"
+  | "onReconnectPane"
+  | "onReconnected"
+  | "onDisconnectedCloseRequested"
+  | "onConnectionError"
+> &
+  WindowNodeViewExtraProps;
+
+function areRectsEqual(left: LeafContentRect | undefined, right: LeafContentRect) {
+  return (
+    !!left &&
+    Math.abs(left.left - right.left) < 0.5 &&
+    Math.abs(left.top - right.top) < 0.5 &&
+    Math.abs(left.width - right.width) < 0.5 &&
+    Math.abs(left.height - right.height) < 0.5
+  );
+}
+
+function collectTabPlacements(
+  node: TerminalWindowNode,
+  tabsById: Map<string, Tab>,
+): TabPlacement[] {
+  if (isTerminalWindowSplit(node)) {
+    return [
+      ...collectTabPlacements(node.first, tabsById),
+      ...collectTabPlacements(node.second, tabsById),
+    ];
+  }
+
+  const tabs = node.tabIds.map((tabId) => tabsById.get(tabId)).filter((tab): tab is Tab => !!tab);
+  const activeTab =
+    (node.activeTabId ? tabs.find((tab) => tab.id === node.activeTabId) : null) ?? tabs[0] ?? null;
+
+  return tabs.map((tab) => ({
+    tab,
+    leafId: node.id,
+    active: activeTab?.id === tab.id,
+  }));
+}
+
+function collectLeafTabIds(node: TerminalWindowNode): Map<string, string[]> {
+  const leaves = new Map<string, string[]>();
+
+  const visit = (current: TerminalWindowNode) => {
+    if (isTerminalWindowSplit(current)) {
+      visit(current.first);
+      visit(current.second);
+      return;
+    }
+    leaves.set(current.id, current.tabIds);
+  };
+
+  visit(node);
+  return leaves;
+}
+
 function SplitWindow({
   split,
-  tabsById,
-  focusedTabId,
-  unreadTabIds,
-  onSelectTab,
-  onAddTab,
-  onConnectConnection,
-  onTabClose,
-  onDuplicateSession,
-  onMultiplexSshSession,
-  onReconnectSession,
-  onDisconnectSession,
-  onSplitSession,
-  onUnsplit,
-  onCloseSession,
-  onCloseAll,
-  onCloseInactive,
-  onCloseRight,
-  onSessionInfo,
-  onReorderTabs,
-  onMoveTabToLeaf,
-  onSplitTabToLeaf,
-  onActivatePane,
-  onUpdatePaneSplitRatio,
   onUpdateWindowSplitRatio,
-  onReconnectPane,
-  onReconnected,
-  onDisconnectedCloseRequested,
-  onConnectionError,
+  ...props
 }: {
   split: TerminalWindowSplit;
-} & Omit<TabWindowsWorkspaceProps, "layout">) {
+} & WindowNodeViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isHorizontal = split.direction === "horizontal";
 
@@ -103,68 +176,16 @@ function SplitWindow({
       >
         <WindowNodeView
           node={split.first}
-          tabsById={tabsById}
-          focusedTabId={focusedTabId}
-          unreadTabIds={unreadTabIds}
-          onSelectTab={onSelectTab}
-          onAddTab={onAddTab}
-          onConnectConnection={onConnectConnection}
-          onTabClose={onTabClose}
-          onDuplicateSession={onDuplicateSession}
-          onMultiplexSshSession={onMultiplexSshSession}
-          onReconnectSession={onReconnectSession}
-          onDisconnectSession={onDisconnectSession}
-          onSplitSession={onSplitSession}
-          onUnsplit={onUnsplit}
-          onCloseSession={onCloseSession}
-          onCloseAll={onCloseAll}
-          onCloseInactive={onCloseInactive}
-          onCloseRight={onCloseRight}
-          onSessionInfo={onSessionInfo}
-          onReorderTabs={onReorderTabs}
-          onMoveTabToLeaf={onMoveTabToLeaf}
-          onSplitTabToLeaf={onSplitTabToLeaf}
-          onActivatePane={onActivatePane}
-          onUpdatePaneSplitRatio={onUpdatePaneSplitRatio}
           onUpdateWindowSplitRatio={onUpdateWindowSplitRatio}
-          onReconnectPane={onReconnectPane}
-          onReconnected={onReconnected}
-          onDisconnectedCloseRequested={onDisconnectedCloseRequested}
-          onConnectionError={onConnectionError}
+          {...props}
         />
       </div>
       <ResizeHandle direction={isHorizontal ? "vertical" : "horizontal"} onResize={handleResize} />
       <div className="min-h-0 min-w-0 flex-1">
         <WindowNodeView
           node={split.second}
-          tabsById={tabsById}
-          focusedTabId={focusedTabId}
-          unreadTabIds={unreadTabIds}
-          onSelectTab={onSelectTab}
-          onAddTab={onAddTab}
-          onConnectConnection={onConnectConnection}
-          onTabClose={onTabClose}
-          onDuplicateSession={onDuplicateSession}
-          onMultiplexSshSession={onMultiplexSshSession}
-          onReconnectSession={onReconnectSession}
-          onDisconnectSession={onDisconnectSession}
-          onSplitSession={onSplitSession}
-          onUnsplit={onUnsplit}
-          onCloseSession={onCloseSession}
-          onCloseAll={onCloseAll}
-          onCloseInactive={onCloseInactive}
-          onCloseRight={onCloseRight}
-          onSessionInfo={onSessionInfo}
-          onReorderTabs={onReorderTabs}
-          onMoveTabToLeaf={onMoveTabToLeaf}
-          onSplitTabToLeaf={onSplitTabToLeaf}
-          onActivatePane={onActivatePane}
-          onUpdatePaneSplitRatio={onUpdatePaneSplitRatio}
           onUpdateWindowSplitRatio={onUpdateWindowSplitRatio}
-          onReconnectPane={onReconnectPane}
-          onReconnected={onReconnected}
-          onDisconnectedCloseRequested={onDisconnectedCloseRequested}
-          onConnectionError={onConnectionError}
+          {...props}
         />
       </div>
     </div>
@@ -193,159 +214,71 @@ function LeafWindow({
   onSessionInfo,
   onReorderTabs,
   onMoveTabToLeaf,
-  onSplitTabToLeaf,
-  onActivatePane,
-  onUpdatePaneSplitRatio,
-  onReconnectPane,
-  onReconnected,
-  onDisconnectedCloseRequested,
-  onConnectionError,
+  workspaceRef,
+  dropState,
+  onLeafContentRectChange,
+  onLeafDragOver,
+  onLeafDragLeave,
+  onLeafDrop,
 }: {
   leaf: TerminalWindowLeaf;
-} & Omit<TabWindowsWorkspaceProps, "layout" | "onUpdateWindowSplitRatio">) {
-  const [dropZone, setDropZone] = useState<DropZone | null>(null);
+} & Omit<
+  WindowNodeViewProps,
+  | "node"
+  | "onUpdateWindowSplitRatio"
+  | "onLeafContentRectChange"
+  | "onLeafDragOver"
+  | "onLeafDragLeave"
+  | "onLeafDrop"
+> &
+  Pick<
+    WindowNodeViewProps,
+    "onLeafContentRectChange" | "onLeafDragOver" | "onLeafDragLeave" | "onLeafDrop"
+  >) {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const tabs = useMemo(
     () => leaf.tabIds.map((tabId) => tabsById.get(tabId)).filter((tab): tab is Tab => !!tab),
     [leaf.tabIds, tabsById],
   );
-  const contentTabs = useMemo(
-    () => Array.from(tabsById.values()).filter((tab) => leaf.tabIds.includes(tab.id)),
-    [leaf.tabIds, tabsById],
-  );
   const activeTab =
     (leaf.activeTabId ? tabs.find((tab) => tab.id === leaf.activeTabId) : null) ?? tabs[0] ?? null;
-  const sourceTabIds = leaf.tabIds;
-
-  const isTabDragEvent = useCallback((event: DragEvent<HTMLDivElement>) => {
-    return event.dataTransfer.types.includes("application/nyaterm-tab");
-  }, []);
-
-  const detectDropZone = useCallback(
-    (event: DragEvent<HTMLDivElement>): DropZone | null => {
-      const content = contentRef.current;
-      if (!content) return null;
-
-      const rect = content.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return null;
-
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      if (x < 0 || y < 0 || x > rect.width || y > rect.height) return null;
-
-      const horizontalThreshold = Math.min(100, Math.max(24, rect.width * 0.3));
-      const verticalThreshold = Math.min(100, Math.max(24, rect.height * 0.3));
-      const edgeDistances = [
-        { direction: "left" as const, distance: x, threshold: horizontalThreshold },
-        { direction: "right" as const, distance: rect.width - x, threshold: horizontalThreshold },
-        { direction: "top" as const, distance: y, threshold: verticalThreshold },
-        { direction: "bottom" as const, distance: rect.height - y, threshold: verticalThreshold },
-      ]
-        .filter((edge) => edge.distance <= edge.threshold)
-        .sort((left, right) => left.distance - right.distance);
-
-      const edge = edgeDistances[0];
-      if (edge && onSplitTabToLeaf) {
-        return { type: "edge", direction: edge.direction };
-      }
-
-      return onMoveTabToLeaf ? { type: "center" } : null;
-    },
-    [onMoveTabToLeaf, onSplitTabToLeaf],
-  );
-
-  const clearDropZone = useCallback(() => {
-    setDropZone(null);
-  }, []);
+  const dropZone = dropState?.leafId === leaf.id ? dropState.zone : null;
 
   useEffect(() => {
-    window.addEventListener("blur", clearDropZone);
-    return () => {
-      window.removeEventListener("blur", clearDropZone);
-    };
-  }, [clearDropZone]);
-
-  const handleContentDragOver = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      if (!isTabDragEvent(event)) {
-        clearDropZone();
-        return;
-      }
-
-      const nextZone = detectDropZone(event);
-      if (!nextZone) {
-        clearDropZone();
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.dataTransfer.dropEffect = "move";
-      setDropZone((current) => {
-        if (
-          current?.type === nextZone.type &&
-          (current.type !== "edge" ||
-            nextZone.type !== "edge" ||
-            current.direction === nextZone.direction)
-        ) {
-          return current;
-        }
-        return nextZone;
-      });
-    },
-    [clearDropZone, detectDropZone, isTabDragEvent],
-  );
-
-  const handleContentDragLeave = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
+    const updateRect = () => {
       const content = contentRef.current;
-      const relatedTarget = event.relatedTarget;
-      if (content && relatedTarget instanceof Node && content.contains(relatedTarget)) {
-        return;
-      }
-      clearDropZone();
-    },
-    [clearDropZone],
-  );
+      const workspace = workspaceRef.current;
+      if (!content || !workspace) return;
 
-  const handleContentDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      if (!isTabDragEvent(event)) {
-        clearDropZone();
-        return;
-      }
+      const contentRect = content.getBoundingClientRect();
+      const workspaceRect = workspace.getBoundingClientRect();
+      onLeafContentRectChange(leaf.id, {
+        left: contentRect.left - workspaceRect.left,
+        top: contentRect.top - workspaceRect.top,
+        width: contentRect.width,
+        height: contentRect.height,
+      });
+    };
 
-      const tabId = event.dataTransfer.getData("application/nyaterm-tab");
-      const zone = dropZone ?? detectDropZone(event);
+    const scheduleUpdate = () => {
+      requestAnimationFrame(updateRect);
+    };
 
-      if (!tabId || !zone) {
-        clearDropZone();
-        return;
-      }
+    scheduleUpdate();
 
-      event.preventDefault();
-      event.stopPropagation();
-      clearDropZone();
+    const observer = new ResizeObserver(scheduleUpdate);
+    if (contentRef.current) observer.observe(contentRef.current);
+    if (workspaceRef.current) observer.observe(workspaceRef.current);
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("nyaterm:refresh-terminals", scheduleUpdate);
 
-      if (zone.type === "edge") {
-        onSplitTabToLeaf?.(tabId, leaf.id, zone.direction);
-        return;
-      }
-
-      if (sourceTabIds.includes(tabId)) return;
-      onMoveTabToLeaf?.(tabId, leaf.id, sourceTabIds.length);
-    },
-    [
-      clearDropZone,
-      detectDropZone,
-      dropZone,
-      isTabDragEvent,
-      leaf.id,
-      onMoveTabToLeaf,
-      onSplitTabToLeaf,
-      sourceTabIds,
-    ],
-  );
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("nyaterm:refresh-terminals", scheduleUpdate);
+      onLeafContentRectChange(leaf.id, null);
+    };
+  }, [leaf.id, onLeafContentRectChange, workspaceRef]);
 
   return (
     <div
@@ -391,26 +324,10 @@ function LeafWindow({
       <div
         ref={contentRef}
         className="relative flex-1 overflow-hidden"
-        onDragOver={handleContentDragOver}
-        onDragLeave={handleContentDragLeave}
-        onDrop={handleContentDrop}
+        onDragOver={(event) => onLeafDragOver(leaf.id, event)}
+        onDragLeave={(event) => onLeafDragLeave(leaf.id, event)}
+        onDrop={(event) => onLeafDrop(leaf.id, event)}
       >
-        {contentTabs.map((tab) => (
-          <PaneWorkspace
-            key={tab.id}
-            tab={tab}
-            visible={activeTab?.id === tab.id}
-            onActivatePane={(paneId) => {
-              onSelectTab(leaf.id, tab.id);
-              onActivatePane(tab.id, paneId);
-            }}
-            onUpdateSplitRatio={(splitId, ratio) => onUpdatePaneSplitRatio(tab.id, splitId, ratio)}
-            onReconnectPane={onReconnectPane}
-            onReconnected={onReconnected}
-            onDisconnectedCloseRequested={onDisconnectedCloseRequested}
-            onConnectionError={onConnectionError}
-          />
-        ))}
         {dropZone && <DropZoneOverlay zone={dropZone} />}
       </div>
     </div>
@@ -439,17 +356,16 @@ function WindowNodeView({
   onSessionInfo,
   onReorderTabs,
   onMoveTabToLeaf,
-  onSplitTabToLeaf,
-  onActivatePane,
-  onUpdatePaneSplitRatio,
   onUpdateWindowSplitRatio,
-  onReconnectPane,
-  onReconnected,
-  onDisconnectedCloseRequested,
-  onConnectionError,
+  workspaceRef,
+  dropState,
+  onLeafContentRectChange,
+  onLeafDragOver,
+  onLeafDragLeave,
+  onLeafDrop,
 }: {
   node: TerminalWindowNode;
-} & Omit<TabWindowsWorkspaceProps, "layout">) {
+} & WindowNodeViewProps) {
   if (isTerminalWindowSplit(node)) {
     return (
       <SplitWindow
@@ -474,14 +390,13 @@ function WindowNodeView({
         onSessionInfo={onSessionInfo}
         onReorderTabs={onReorderTabs}
         onMoveTabToLeaf={onMoveTabToLeaf}
-        onSplitTabToLeaf={onSplitTabToLeaf}
-        onActivatePane={onActivatePane}
-        onUpdatePaneSplitRatio={onUpdatePaneSplitRatio}
         onUpdateWindowSplitRatio={onUpdateWindowSplitRatio}
-        onReconnectPane={onReconnectPane}
-        onReconnected={onReconnected}
-        onDisconnectedCloseRequested={onDisconnectedCloseRequested}
-        onConnectionError={onConnectionError}
+        workspaceRef={workspaceRef}
+        dropState={dropState}
+        onLeafContentRectChange={onLeafContentRectChange}
+        onLeafDragOver={onLeafDragOver}
+        onLeafDragLeave={onLeafDragLeave}
+        onLeafDrop={onLeafDrop}
       />
     );
   }
@@ -509,21 +424,291 @@ function WindowNodeView({
       onSessionInfo={onSessionInfo}
       onReorderTabs={onReorderTabs}
       onMoveTabToLeaf={onMoveTabToLeaf}
-      onSplitTabToLeaf={onSplitTabToLeaf}
-      onActivatePane={onActivatePane}
-      onUpdatePaneSplitRatio={onUpdatePaneSplitRatio}
-      onReconnectPane={onReconnectPane}
-      onReconnected={onReconnected}
-      onDisconnectedCloseRequested={onDisconnectedCloseRequested}
-      onConnectionError={onConnectionError}
+      workspaceRef={workspaceRef}
+      dropState={dropState}
+      onLeafContentRectChange={onLeafContentRectChange}
+      onLeafDragOver={onLeafDragOver}
+      onLeafDragLeave={onLeafDragLeave}
+      onLeafDrop={onLeafDrop}
     />
   );
 }
 
-function TabWindowsWorkspace({ layout, ...props }: TabWindowsWorkspaceProps) {
+function TerminalContentHost({
+  placements,
+  leafRects,
+  dropState,
+  onSelectTab,
+  onActivatePane,
+  onUpdatePaneSplitRatio,
+  onReconnectPane,
+  onReconnected,
+  onDisconnectedCloseRequested,
+  onConnectionError,
+  onLeafDragOver,
+  onLeafDragLeave,
+  onLeafDrop,
+}: {
+  placements: TabPlacement[];
+  leafRects: Map<string, LeafContentRect>;
+  dropState: DropState | null;
+  onSelectTab: TabWindowsWorkspaceProps["onSelectTab"];
+  onActivatePane: TabWindowsWorkspaceProps["onActivatePane"];
+  onUpdatePaneSplitRatio: TabWindowsWorkspaceProps["onUpdatePaneSplitRatio"];
+  onReconnectPane?: TabWindowsWorkspaceProps["onReconnectPane"];
+  onReconnected?: TabWindowsWorkspaceProps["onReconnected"];
+  onDisconnectedCloseRequested?: TabWindowsWorkspaceProps["onDisconnectedCloseRequested"];
+  onConnectionError?: TabWindowsWorkspaceProps["onConnectionError"];
+  onLeafDragOver: LeafDragHandler;
+  onLeafDragLeave: LeafDragHandler;
+  onLeafDrop: LeafDragHandler;
+}) {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10">
+      {placements.map(({ tab, leafId, active }) => {
+        const rect = leafRects.get(leafId);
+        const visible = active && !!rect && rect.width > 0 && rect.height > 0;
+        const dropZone = dropState?.leafId === leafId ? dropState.zone : null;
+
+        return (
+          <div
+            key={tab.id}
+            className="absolute pointer-events-auto"
+            style={{
+              display: visible ? "block" : "none",
+              left: rect?.left ?? 0,
+              top: rect?.top ?? 0,
+              width: rect?.width ?? 0,
+              height: rect?.height ?? 0,
+            }}
+            onDragOver={(event) => onLeafDragOver(leafId, event)}
+            onDragLeave={(event) => onLeafDragLeave(leafId, event)}
+            onDrop={(event) => onLeafDrop(leafId, event)}
+          >
+            <PaneWorkspace
+              tab={tab}
+              visible={visible}
+              onActivatePane={(paneId) => {
+                onSelectTab(leafId, tab.id);
+                onActivatePane(tab.id, paneId);
+              }}
+              onUpdateSplitRatio={(splitId, ratio) =>
+                onUpdatePaneSplitRatio(tab.id, splitId, ratio)
+              }
+              onReconnectPane={onReconnectPane}
+              onReconnected={onReconnected}
+              onDisconnectedCloseRequested={onDisconnectedCloseRequested}
+              onConnectionError={onConnectionError}
+            />
+            {visible && dropZone && <DropZoneOverlay zone={dropZone} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TabWindowsWorkspace({
+  layout,
+  tabsById,
+  onMoveTabToLeaf,
+  onSplitTabToLeaf,
+  onSelectTab,
+  onActivatePane,
+  onUpdatePaneSplitRatio,
+  onReconnectPane,
+  onReconnected,
+  onDisconnectedCloseRequested,
+  onConnectionError,
+  ...props
+}: TabWindowsWorkspaceProps) {
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [leafRects, setLeafRects] = useState<Map<string, LeafContentRect>>(() => new Map());
+  const [dropState, setDropState] = useState<DropState | null>(null);
+
+  const placements = useMemo(
+    () => (layout ? collectTabPlacements(layout, tabsById) : []),
+    [layout, tabsById],
+  );
+  const leafTabIds = useMemo(() => (layout ? collectLeafTabIds(layout) : new Map()), [layout]);
+
+  const handleLeafContentRectChange = useCallback<LeafContentRectChange>((leafId, rect) => {
+    setLeafRects((current) => {
+      if (!rect) {
+        if (!current.has(leafId)) return current;
+        const next = new Map(current);
+        next.delete(leafId);
+        return next;
+      }
+
+      if (areRectsEqual(current.get(leafId), rect)) return current;
+      const next = new Map(current);
+      next.set(leafId, rect);
+      return next;
+    });
+  }, []);
+
+  const clearDropState = useCallback(() => {
+    setDropState(null);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("blur", clearDropState);
+    return () => {
+      window.removeEventListener("blur", clearDropState);
+    };
+  }, [clearDropState]);
+
+  const isTabDragEvent = useCallback((event: DragEvent<HTMLDivElement>) => {
+    return event.dataTransfer.types.includes("application/nyaterm-tab");
+  }, []);
+
+  const detectDropZone = useCallback(
+    (leafId: string, event: DragEvent<HTMLDivElement>): DropZone | null => {
+      const workspace = workspaceRef.current;
+      const rect = leafRects.get(leafId);
+      if (!workspace || !rect || rect.width <= 0 || rect.height <= 0) return null;
+
+      const workspaceRect = workspace.getBoundingClientRect();
+      const x = event.clientX - workspaceRect.left - rect.left;
+      const y = event.clientY - workspaceRect.top - rect.top;
+      if (x < 0 || y < 0 || x > rect.width || y > rect.height) return null;
+
+      const horizontalThreshold = Math.min(180, Math.max(48, rect.width * 0.38));
+      const verticalThreshold = Math.min(140, Math.max(40, rect.height * 0.34));
+      const edgeDistances = [
+        { direction: "left" as const, distance: x, threshold: horizontalThreshold },
+        { direction: "right" as const, distance: rect.width - x, threshold: horizontalThreshold },
+        { direction: "top" as const, distance: y, threshold: verticalThreshold },
+        { direction: "bottom" as const, distance: rect.height - y, threshold: verticalThreshold },
+      ]
+        .filter((edge) => edge.distance <= edge.threshold)
+        .sort((left, right) => left.distance - right.distance);
+
+      const edge = edgeDistances[0];
+      if (edge && onSplitTabToLeaf) {
+        return { type: "edge", direction: edge.direction };
+      }
+
+      return onMoveTabToLeaf ? { type: "center" } : null;
+    },
+    [leafRects, onMoveTabToLeaf, onSplitTabToLeaf],
+  );
+
+  const handleLeafDragOver = useCallback<LeafDragHandler>(
+    (leafId, event) => {
+      if (!isTabDragEvent(event)) {
+        clearDropState();
+        return;
+      }
+
+      const nextZone = detectDropZone(leafId, event);
+      if (!nextZone) {
+        clearDropState();
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      setDropState((current) => {
+        if (
+          current?.leafId === leafId &&
+          current.zone.type === nextZone.type &&
+          (current.zone.type !== "edge" ||
+            nextZone.type !== "edge" ||
+            current.zone.direction === nextZone.direction)
+        ) {
+          return current;
+        }
+        return { leafId, zone: nextZone };
+      });
+    },
+    [clearDropState, detectDropZone, isTabDragEvent],
+  );
+
+  const handleLeafDragLeave = useCallback<LeafDragHandler>((leafId, event) => {
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {
+      return;
+    }
+    setDropState((current) => (current?.leafId === leafId ? null : current));
+  }, []);
+
+  const handleLeafDrop = useCallback<LeafDragHandler>(
+    (leafId, event) => {
+      if (!isTabDragEvent(event)) {
+        clearDropState();
+        return;
+      }
+
+      const tabId = event.dataTransfer.getData("application/nyaterm-tab");
+      const zone = dropState?.leafId === leafId ? dropState.zone : detectDropZone(leafId, event);
+
+      if (!tabId || !zone) {
+        clearDropState();
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      clearDropState();
+
+      if (zone.type === "edge") {
+        onSplitTabToLeaf?.(tabId, leafId, zone.direction);
+        return;
+      }
+
+      const sourceTabIds = leafTabIds.get(leafId) ?? [];
+      if (sourceTabIds.includes(tabId)) return;
+      onMoveTabToLeaf?.(tabId, leafId, sourceTabIds.length);
+    },
+    [
+      clearDropState,
+      detectDropZone,
+      dropState,
+      isTabDragEvent,
+      leafTabIds,
+      onMoveTabToLeaf,
+      onSplitTabToLeaf,
+    ],
+  );
+
   if (!layout) return null;
 
-  return <WindowNodeView node={layout} {...props} />;
+  return (
+    <div ref={workspaceRef} className="relative h-full w-full min-h-0 min-w-0 overflow-hidden">
+      <WindowNodeView
+        node={layout}
+        tabsById={tabsById}
+        onMoveTabToLeaf={onMoveTabToLeaf}
+        onSplitTabToLeaf={onSplitTabToLeaf}
+        onSelectTab={onSelectTab}
+        workspaceRef={workspaceRef}
+        dropState={dropState}
+        onLeafContentRectChange={handleLeafContentRectChange}
+        onLeafDragOver={handleLeafDragOver}
+        onLeafDragLeave={handleLeafDragLeave}
+        onLeafDrop={handleLeafDrop}
+        {...props}
+      />
+      <TerminalContentHost
+        placements={placements}
+        leafRects={leafRects}
+        dropState={dropState}
+        onSelectTab={onSelectTab}
+        onActivatePane={onActivatePane}
+        onUpdatePaneSplitRatio={onUpdatePaneSplitRatio}
+        onReconnectPane={onReconnectPane}
+        onReconnected={onReconnected}
+        onDisconnectedCloseRequested={onDisconnectedCloseRequested}
+        onConnectionError={onConnectionError}
+        onLeafDragOver={handleLeafDragOver}
+        onLeafDragLeave={handleLeafDragLeave}
+        onLeafDrop={handleLeafDrop}
+      />
+    </div>
+  );
 }
 
 export default memo(TabWindowsWorkspace);

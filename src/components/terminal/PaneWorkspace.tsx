@@ -174,7 +174,7 @@ function PaneNodeView({
     <div
       className={`relative h-full w-full overflow-hidden ${
         showChrome ? "rounded-sm border" : ""
-      } ${isActive ? "ring-1 ring-primary/60" : ""}`}
+      } ${showChrome && isActive ? "ring-1 ring-primary/60" : ""}`}
       style={{
         borderColor: showChrome ? "var(--df-border)" : undefined,
         backgroundColor: "var(--df-bg-terminal)",
