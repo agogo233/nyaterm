@@ -37,4 +37,4 @@ pub(crate) use session::update_cwd_if_changed;
 pub use session::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
-pub use telnet::create_telnet_session;
+pub use telnet::{TelnetEnterMode, TelnetSessionConfig, create_telnet_session};

@@ -55,6 +55,21 @@ pub enum ConnectionType {
         ai_execution_profile: AiExecutionProfile,
         #[serde(default = "default_backspace_mode_telnet")]
         backspace_mode: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        raw_tcp_cli: bool,
+        #[serde(
+            default = "default_telnet_enter_mode",
+            skip_serializing_if = "is_default_telnet_enter_mode"
+        )]
+        enter_mode: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        local_echo: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        force_character_at_a_time: bool,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        send_naws: bool,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        send_sga: bool,
     },
     Serial {
         port_name: String,
@@ -103,8 +118,14 @@ fn default_backspace_mode_serial() -> String {
 fn default_backspace_mode_telnet() -> String {
     "del".to_string()
 }
+fn default_telnet_enter_mode() -> String {
+    "cr".to_string()
+}
 fn is_ai_execution_profile_auto(value: &AiExecutionProfile) -> bool {
     *value == AiExecutionProfile::Auto
+}
+fn default_true() -> bool {
+    true
 }
 
 // ── Auth block ──────────────────────────────────────────────────────────────
@@ -135,6 +156,12 @@ fn default_auth_mode() -> String {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+fn is_true(value: &bool) -> bool {
+    *value
+}
+fn is_default_telnet_enter_mode(value: &str) -> bool {
+    value == "cr"
 }
 
 // ── Network block ───────────────────────────────────────────────────────────
@@ -416,6 +443,76 @@ mod tests {
             panic!("expected ssh connection");
         };
         assert!(!x11_forwarding);
+    }
+
+    #[test]
+    fn telnet_connection_defaults_compatibility_options() {
+        let connection: SavedConnection = serde_json::from_value(serde_json::json!({
+            "id": "conn-1",
+            "name": "Test",
+            "type": "telnet",
+            "host": "example.com",
+            "port": 23
+        }))
+        .expect("connection");
+
+        let ConnectionType::Telnet {
+            raw_tcp_cli,
+            enter_mode,
+            local_echo,
+            force_character_at_a_time,
+            send_naws,
+            send_sga,
+            ..
+        } = connection.config
+        else {
+            panic!("expected telnet connection");
+        };
+
+        assert!(!raw_tcp_cli);
+        assert_eq!(enter_mode, "cr");
+        assert!(!local_echo);
+        assert!(!force_character_at_a_time);
+        assert!(send_naws);
+        assert!(send_sga);
+    }
+
+    #[test]
+    fn telnet_connection_preserves_compatibility_options() {
+        let connection: SavedConnection = serde_json::from_value(serde_json::json!({
+            "id": "conn-1",
+            "name": "Test",
+            "type": "telnet",
+            "host": "example.com",
+            "port": 8080,
+            "raw_tcp_cli": true,
+            "enter_mode": "lf",
+            "local_echo": true,
+            "force_character_at_a_time": true,
+            "send_naws": false,
+            "send_sga": false
+        }))
+        .expect("connection");
+
+        let ConnectionType::Telnet {
+            raw_tcp_cli,
+            enter_mode,
+            local_echo,
+            force_character_at_a_time,
+            send_naws,
+            send_sga,
+            ..
+        } = connection.config
+        else {
+            panic!("expected telnet connection");
+        };
+
+        assert!(raw_tcp_cli);
+        assert_eq!(enter_mode, "lf");
+        assert!(local_echo);
+        assert!(force_character_at_a_time);
+        assert!(!send_naws);
+        assert!(!send_sga);
     }
 
     #[test]

@@ -211,6 +211,18 @@ export interface SavedConnection {
   stop_bits?: string;
   /** Backspace key mode for SSH/Telnet/Serial connections ("ctrl_h" or "del"). */
   backspace_mode?: string;
+  /** Telnet-only: bypass Telnet option negotiation for embedded/raw TCP CLIs. */
+  raw_tcp_cli?: boolean;
+  /** Telnet-only: Enter send mode ("crlf", "cr", or "lf"). */
+  enter_mode?: "crlf" | "cr" | "lf";
+  /** Telnet-only: locally echo typed input when the remote does not echo. */
+  local_echo?: boolean;
+  /** Telnet-only: write each input character to the socket immediately. */
+  force_character_at_a_time?: boolean;
+  /** Telnet-only: send NAWS resize subnegotiation in standard Telnet mode. */
+  send_naws?: boolean;
+  /** Telnet-only: accept/respond to SGA negotiation in standard Telnet mode. */
+  send_sga?: boolean;
   /** SSH-only: enables X11 forwarding for remote graphical applications. */
   x11_forwarding?: boolean;
 }

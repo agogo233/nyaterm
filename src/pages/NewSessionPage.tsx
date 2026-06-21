@@ -109,6 +109,12 @@ export default function NewSessionPage() {
   const [workingDir, setWorkingDir] = useState("");
   const [serialBackspaceMode, setSerialBackspaceMode] = useState("ctrl_h");
   const [telnetBackspaceMode, setTelnetBackspaceMode] = useState("del");
+  const [telnetRawTcpCli, setTelnetRawTcpCli] = useState(false);
+  const [telnetEnterMode, setTelnetEnterMode] = useState<"crlf" | "cr" | "lf">("cr");
+  const [telnetLocalEcho, setTelnetLocalEcho] = useState(false);
+  const [telnetForceCharacterAtATime, setTelnetForceCharacterAtATime] = useState(false);
+  const [telnetSendNaws, setTelnetSendNaws] = useState(true);
+  const [telnetSendSga, setTelnetSendSga] = useState(true);
 
   useEffect(() => {
     invoke<Group[]>("get_groups")
@@ -168,6 +174,12 @@ export default function NewSessionPage() {
           setHost(found.host || "");
           setTelnetPort(found.port || 23);
           setTelnetBackspaceMode(found.backspace_mode || "del");
+          setTelnetRawTcpCli(found.raw_tcp_cli ?? false);
+          setTelnetEnterMode(found.enter_mode || "cr");
+          setTelnetLocalEcho(found.local_echo ?? false);
+          setTelnetForceCharacterAtATime(found.force_character_at_a_time ?? false);
+          setTelnetSendNaws(found.send_naws ?? true);
+          setTelnetSendSga(found.send_sga ?? true);
         } else if (found.type === "local_terminal") {
           setShellPath(found.shell_path || "powershell.exe");
           setShellArgs(found.shell_args || "");
@@ -243,6 +255,12 @@ export default function NewSessionPage() {
     setWorkingDir("");
     setSerialBackspaceMode("ctrl_h");
     setTelnetBackspaceMode("del");
+    setTelnetRawTcpCli(false);
+    setTelnetEnterMode("cr");
+    setTelnetLocalEcho(false);
+    setTelnetForceCharacterAtATime(false);
+    setTelnetSendNaws(true);
+    setTelnetSendSga(true);
     setShowIconPicker(false);
     setError("");
     setConnecting(false);
@@ -518,6 +536,12 @@ export default function NewSessionPage() {
               host: normalizedHost,
               port: telnetPort,
               backspace_mode: telnetBackspaceMode,
+              raw_tcp_cli: telnetRawTcpCli,
+              enter_mode: telnetEnterMode,
+              local_echo: telnetLocalEcho,
+              force_character_at_a_time: telnetForceCharacterAtATime,
+              send_naws: telnetSendNaws,
+              send_sga: telnetSendSga,
             }
           : {}),
         ...(currentTab === "local"
@@ -861,6 +885,18 @@ export default function NewSessionPage() {
               setPort={setTelnetPort}
               backspaceMode={telnetBackspaceMode}
               setBackspaceMode={setTelnetBackspaceMode}
+              rawTcpCli={telnetRawTcpCli}
+              setRawTcpCli={setTelnetRawTcpCli}
+              enterMode={telnetEnterMode}
+              setEnterMode={setTelnetEnterMode}
+              localEcho={telnetLocalEcho}
+              setLocalEcho={setTelnetLocalEcho}
+              forceCharacterAtATime={telnetForceCharacterAtATime}
+              setForceCharacterAtATime={setTelnetForceCharacterAtATime}
+              sendNaws={telnetSendNaws}
+              setSendNaws={setTelnetSendNaws}
+              sendSga={telnetSendSga}
+              setSendSga={setTelnetSendSga}
             />
           </TabsContent>
 

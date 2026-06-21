@@ -145,15 +145,32 @@ pub async fn create_telnet_session(
         Some((guard, cancel_rx)) => (Some(guard), Some(cancel_rx)),
         None => (None, None),
     };
-    let (h, p, n, bs_mode) = if let Some(ref cid) = connection_id {
+    let cfg = if let Some(ref cid) = connection_id {
         let conn = config::load_connection_by_id(&app, cid)?;
         match conn.config {
             config::ConnectionType::Telnet {
                 host: ref ch,
                 port: cp,
                 backspace_mode,
+                raw_tcp_cli,
+                enter_mode,
+                local_echo,
+                force_character_at_a_time,
+                send_naws,
+                send_sga,
                 ..
-            } => (ch.clone(), cp, conn.name.clone(), backspace_mode),
+            } => core::TelnetSessionConfig {
+                host: ch.clone(),
+                port: cp,
+                name: conn.name.clone(),
+                backspace_mode,
+                raw_tcp_cli,
+                enter_mode: core::TelnetEnterMode::from_config_value(&enter_mode),
+                local_echo,
+                force_character_at_a_time,
+                send_naws,
+                send_sga,
+            },
             _ => {
                 return Err(AppError::Config(
                     "Connection is not a Telnet connection".to_string(),
@@ -161,22 +178,19 @@ pub async fn create_telnet_session(
             }
         }
     } else {
-        (
-            host.ok_or_else(|| AppError::Config("host is required".to_string()))?,
-            port.unwrap_or(23),
-            name.unwrap_or_else(|| "Telnet".to_string()),
-            "del".to_string(),
-        )
+        core::TelnetSessionConfig {
+            host: host.ok_or_else(|| AppError::Config("host is required".to_string()))?,
+            port: port.unwrap_or(23),
+            name: name.unwrap_or_else(|| "Telnet".to_string()),
+            ..Default::default()
+        }
     };
     let marked_connection_id = connection_id.clone();
     let session_id = core::create_telnet_session(
         app.clone(),
         state.inner().clone(),
-        h,
-        p,
+        cfg,
         connection_id,
-        n,
-        bs_mode,
         Some(window.label().to_string()),
     )
     .await?;

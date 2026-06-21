@@ -31,18 +31,72 @@ const OPT_ECHO: u8 = 1;
 const OPT_SUPPRESS_GO_AHEAD: u8 = 3;
 const OPT_NAWS: u8 = 31;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelnetEnterMode {
+    Crlf,
+    Cr,
+    Lf,
+}
+
+impl Default for TelnetEnterMode {
+    fn default() -> Self {
+        Self::Cr
+    }
+}
+
+impl TelnetEnterMode {
+    pub fn from_config_value(value: &str) -> Self {
+        match value {
+            "crlf" => Self::Crlf,
+            "lf" => Self::Lf,
+            _ => Self::Cr,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TelnetSessionConfig {
+    pub host: String,
+    pub port: u16,
+    pub name: String,
+    pub backspace_mode: String,
+    pub raw_tcp_cli: bool,
+    pub enter_mode: TelnetEnterMode,
+    pub local_echo: bool,
+    pub force_character_at_a_time: bool,
+    pub send_naws: bool,
+    pub send_sga: bool,
+}
+
+impl Default for TelnetSessionConfig {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: 23,
+            name: "Telnet".to_string(),
+            backspace_mode: "del".to_string(),
+            raw_tcp_cli: false,
+            enter_mode: TelnetEnterMode::Cr,
+            local_echo: false,
+            force_character_at_a_time: false,
+            send_naws: true,
+            send_sga: true,
+        }
+    }
+}
+
 /// Respond to a Telnet option negotiation request.
-fn negotiate_response(command: u8, option: u8) -> Vec<u8> {
+fn negotiate_response(command: u8, option: u8, send_naws: bool, send_sga: bool) -> Vec<u8> {
     match command {
         WILL => {
-            if option == OPT_ECHO || option == OPT_SUPPRESS_GO_AHEAD {
+            if option == OPT_ECHO || (send_sga && option == OPT_SUPPRESS_GO_AHEAD) {
                 vec![IAC, DO, option]
             } else {
                 vec![IAC, DONT, option]
             }
         }
         DO => {
-            if option == OPT_NAWS {
+            if send_naws && option == OPT_NAWS {
                 vec![IAC, WILL, option]
             } else {
                 vec![IAC, WONT, option]
@@ -67,6 +121,29 @@ fn build_naws(cols: u16, rows: u16) -> Vec<u8> {
         IAC,
         SE,
     ]
+}
+
+fn maybe_build_naws(cols: u16, rows: u16, config: &TelnetSessionConfig) -> Option<Vec<u8>> {
+    if config.raw_tcp_cli || !config.send_naws {
+        None
+    } else {
+        Some(build_naws(cols, rows))
+    }
+}
+
+fn unescape_iac_iac(data: &[u8]) -> Vec<u8> {
+    let mut visible = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] == IAC && i + 1 < data.len() && data[i + 1] == IAC {
+            visible.push(IAC);
+            i += 2;
+        } else {
+            visible.push(data[i]);
+            i += 1;
+        }
+    }
+    visible
 }
 
 /// Strip IAC sequences from raw data, returning only user-visible bytes.
@@ -113,16 +190,196 @@ fn strip_telnet_commands(data: &[u8], on_negotiate: &mut impl FnMut(u8, u8)) -> 
     visible
 }
 
+fn normalize_enter_bytes(data: &[u8], enter_mode: TelnetEnterMode) -> Vec<u8> {
+    let replacement: &[u8] = match enter_mode {
+        TelnetEnterMode::Crlf => b"\r\n",
+        TelnetEnterMode::Cr => b"\r",
+        TelnetEnterMode::Lf => b"\n",
+    };
+    let mut normalized = Vec::with_capacity(data.len());
+    for byte in data {
+        if *byte == b'\r' {
+            normalized.extend_from_slice(replacement);
+        } else {
+            normalized.push(*byte);
+        }
+    }
+    normalized
+}
+
+fn split_write_chunks(data: &[u8], force_character_at_a_time: bool) -> Vec<Vec<u8>> {
+    if !force_character_at_a_time {
+        return vec![data.to_vec()];
+    }
+
+    String::from_utf8_lossy(data)
+        .chars()
+        .map(|ch| {
+            let mut buf = [0u8; 4];
+            ch.encode_utf8(&mut buf).as_bytes().to_vec()
+        })
+        .collect()
+}
+
+fn local_echo_text(data: &[u8]) -> String {
+    let mut visible = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        match data[i] {
+            0x1b => {
+                i += 1;
+                if i < data.len() && data[i] == b'[' {
+                    i += 1;
+                    while i < data.len() && !(0x40..=0x7e).contains(&data[i]) {
+                        i += 1;
+                    }
+                } else if i < data.len() && data[i] == b']' {
+                    i += 1;
+                    while i < data.len() {
+                        if data[i] == 0x07 {
+                            break;
+                        }
+                        if data[i] == 0x1b && i + 1 < data.len() && data[i + 1] == b'\\' {
+                            i += 1;
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+            }
+            b'\r' => {
+                if i + 1 < data.len() && data[i + 1] == b'\n' {
+                    i += 1;
+                }
+                visible.extend_from_slice(b"\r\n");
+            }
+            b'\n' => visible.extend_from_slice(b"\r\n"),
+            0x20..=0x7e | b'\t' => visible.push(data[i]),
+            byte if byte >= 0x80 => visible.push(byte),
+            _ => {}
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&visible).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DO, IAC, OPT_NAWS, OPT_SUPPRESS_GO_AHEAD, TelnetEnterMode, TelnetSessionConfig, WILL,
+        maybe_build_naws, negotiate_response, normalize_enter_bytes, split_write_chunks,
+        strip_telnet_commands,
+    };
+
+    #[test]
+    fn standard_negotiation_responds_by_default() {
+        assert_eq!(
+            negotiate_response(WILL, OPT_SUPPRESS_GO_AHEAD, true, true),
+            vec![IAC, DO, OPT_SUPPRESS_GO_AHEAD]
+        );
+    }
+
+    #[test]
+    fn send_sga_false_rejects_sga() {
+        assert_ne!(
+            negotiate_response(WILL, OPT_SUPPRESS_GO_AHEAD, true, false),
+            vec![IAC, DO, OPT_SUPPRESS_GO_AHEAD]
+        );
+    }
+
+    #[test]
+    fn send_naws_false_rejects_naws_negotiation() {
+        assert_ne!(
+            negotiate_response(DO, OPT_NAWS, false, true),
+            vec![IAC, WILL, OPT_NAWS]
+        );
+    }
+
+    #[test]
+    fn raw_mode_can_suppress_negotiation_responses() {
+        let config = TelnetSessionConfig {
+            raw_tcp_cli: true,
+            ..Default::default()
+        };
+        let mut responses = Vec::new();
+        if !config.raw_tcp_cli {
+            let _ = strip_telnet_commands(&[IAC, WILL, OPT_SUPPRESS_GO_AHEAD], &mut |cmd, opt| {
+                responses.push(negotiate_response(
+                    cmd,
+                    opt,
+                    config.send_naws,
+                    config.send_sga,
+                ));
+            });
+        }
+        assert!(responses.is_empty());
+    }
+
+    #[test]
+    fn send_naws_false_prevents_naws_resize_payload() {
+        let config = TelnetSessionConfig {
+            send_naws: false,
+            ..Default::default()
+        };
+        assert!(maybe_build_naws(80, 24, &config).is_none());
+    }
+
+    #[test]
+    fn raw_mode_prevents_naws_resize_payload() {
+        let config = TelnetSessionConfig {
+            raw_tcp_cli: true,
+            ..Default::default()
+        };
+        assert!(maybe_build_naws(80, 24, &config).is_none());
+    }
+
+    #[test]
+    fn enter_conversion_maps_carriage_return() {
+        assert_eq!(
+            normalize_enter_bytes(b"show\r", TelnetEnterMode::Crlf),
+            b"show\r\n"
+        );
+        assert_eq!(
+            normalize_enter_bytes(b"show\r", TelnetEnterMode::Cr),
+            b"show\r"
+        );
+        assert_eq!(
+            normalize_enter_bytes(b"show\r", TelnetEnterMode::Lf),
+            b"show\n"
+        );
+    }
+
+    #[test]
+    fn force_character_at_a_time_preserves_utf8_order() {
+        let chunks = split_write_chunks("a中\r".as_bytes(), true);
+        assert_eq!(
+            chunks,
+            vec![b"a".to_vec(), "中".as_bytes().to_vec(), b"\r".to_vec()]
+        );
+        let joined: Vec<u8> = chunks.into_iter().flatten().collect();
+        assert_eq!(joined, "a中\r".as_bytes());
+    }
+
+    #[test]
+    fn strip_telnet_commands_emits_naws_response_request() {
+        let mut seen = Vec::new();
+        let visible = strip_telnet_commands(b"hi\xff\xfd\x1f", &mut |cmd, opt| {
+            seen.push((cmd, opt));
+        });
+        assert_eq!(visible, b"hi");
+        assert_eq!(seen, vec![(DO, OPT_NAWS)]);
+    }
+}
+
 pub async fn create_telnet_session(
     app: AppHandle,
     manager: Arc<SessionManager>,
-    host: String,
-    port: u16,
+    config: TelnetSessionConfig,
     connection_id: Option<String>,
-    name: String,
-    backspace_mode: String,
     owner_window_label: Option<String>,
 ) -> AppResult<String> {
+    let host = config.host.clone();
+    let port = config.port;
     log_event(StructuredLog {
         level: StructuredLogLevel::Info,
         domain: "session.lifecycle".to_string(),
@@ -144,7 +401,7 @@ pub async fn create_telnet_session(
 
     let session_info = SessionInfo {
         id: session_id.clone(),
-        name,
+        name: config.name.clone(),
         session_type: SessionType::Telnet,
         connected: true,
         owner_window_label,
@@ -167,17 +424,7 @@ pub async fn create_telnet_session(
     let mgr = manager.clone();
 
     tokio::spawn(async move {
-        telnet_session_task(
-            app,
-            sid,
-            mgr,
-            cmd_rx,
-            host,
-            port,
-            connection_id,
-            backspace_mode,
-        )
-        .await;
+        telnet_session_task(app, sid, mgr, cmd_rx, config, connection_id).await;
     });
 
     Ok(session_id)
@@ -188,12 +435,12 @@ async fn telnet_session_task(
     session_id: String,
     manager: Arc<SessionManager>,
     mut cmd_rx: mpsc::UnboundedReceiver<SessionCommand>,
-    host: String,
-    port: u16,
+    config: TelnetSessionConfig,
     connection_id: Option<String>,
-    backspace_mode: String,
 ) {
-    let backspace_as_bs = backspace_mode == "ctrl_h";
+    let backspace_as_bs = config.backspace_mode == "ctrl_h";
+    let host = config.host.clone();
+    let port = config.port;
     let addr = format!("{}:{}", host, port);
     let stream = match TcpStream::connect(&addr).await {
         Ok(s) => s,
@@ -252,6 +499,7 @@ async fn telnet_session_task(
 
     let (negotiate_tx, mut negotiate_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
+    let reader_config = config.clone();
     let reader_handle = tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         let mut zmodem_detector = ZmodemDetector::new();
@@ -264,13 +512,22 @@ async fn telnet_session_task(
             match reader.read(&mut buf).await {
                 Ok(0) => break,
                 Ok(n) => {
-                    let neg_tx = negotiate_tx.clone();
-                    let visible = strip_telnet_commands(&buf[..n], &mut |cmd, opt| {
-                        let resp = negotiate_response(cmd, opt);
-                        if !resp.is_empty() {
-                            let _ = neg_tx.send(resp);
-                        }
-                    });
+                    let visible = if reader_config.raw_tcp_cli {
+                        unescape_iac_iac(&buf[..n])
+                    } else {
+                        let neg_tx = negotiate_tx.clone();
+                        strip_telnet_commands(&buf[..n], &mut |cmd, opt| {
+                            let resp = negotiate_response(
+                                cmd,
+                                opt,
+                                reader_config.send_naws,
+                                reader_config.send_sga,
+                            );
+                            if !resp.is_empty() {
+                                let _ = neg_tx.send(resp);
+                            }
+                        })
+                    };
                     if visible.is_empty() {
                         continue;
                     }
@@ -418,10 +675,24 @@ async fn telnet_session_task(
                         if backspace_as_bs {
                             remap_del_to_bs(&mut data);
                         }
+                        let data = normalize_enter_bytes(&data, config.enter_mode);
+                        if config.local_echo {
+                            let echoed = local_echo_text(&data);
+                            if !echoed.is_empty() {
+                                output.push_owned(echoed);
+                            }
+                        }
                         if let Some(ref recorder) = recording_mgr {
                             recorder.write_input(&session_id, &data);
                         }
-                        if let Err(e) = writer.write_all(&data).await {
+                        let mut write_failed = None;
+                        for chunk in split_write_chunks(&data, config.force_character_at_a_time) {
+                            if let Err(e) = writer.write_all(&chunk).await {
+                                write_failed = Some(e);
+                                break;
+                            }
+                        }
+                        if let Some(e) = write_failed {
                             log_rate_limited(StructuredLog {
                                 level: StructuredLogLevel::Warn,
                                 domain: "session.lifecycle".to_string(),
@@ -451,8 +722,9 @@ async fn telnet_session_task(
                         }
                     }
                     Some(SessionCommand::Resize { cols, rows }) => {
-                        let naws = build_naws(cols as u16, rows as u16);
-                        let _ = writer.write_all(&naws).await;
+                        if let Some(naws) = maybe_build_naws(cols as u16, rows as u16, &config) {
+                            let _ = writer.write_all(&naws).await;
+                        }
                     }
                     Some(SessionCommand::PauseOutput) => {
                         let _ = pause_tx.send(true);
