@@ -137,6 +137,9 @@ serialport = "4"
 strip-ansi-escapes = "0.2"
 arboard = "3"
 opendal = { version = "0.55", features = [
+    "services-aliyun-drive",
+    "services-gdrive",
+    "services-onedrive",
     "services-s3",
     "services-webdav",
     "layers-tracing",
