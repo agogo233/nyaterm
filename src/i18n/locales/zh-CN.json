@@ -1051,6 +1051,8 @@
     "aliyunDriveRefreshTokenDesc": "OpenDAL 用于刷新访问权限的 AliyunDrive 长期 Refresh Token。",
     "aliyunDriveType": "Drive Type",
     "aliyunDriveTypeDesc": "通常填写 resource。如果你的 AliyunDrive 应用配置为备份盘访问，可填写 backup。",
+    "altAsMeta": "将 Option 作为 Meta/Alt 键",
+    "altAsMetaDesc": "在 macOS 上，Option+f 等快捷键发送 ESC + 按键，而不是输入 ƒ 等特殊字符。",
     "apiKey": "API 密钥",
     "appId": "App ID",
     "appKey": "App Key",
