@@ -15,7 +15,7 @@ use crate::error::{AppError, AppResult};
 use crate::observability::{StructuredLog, StructuredLogLevel, log_event, log_rate_limited};
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc as std_mpsc};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
@@ -229,6 +229,7 @@ fn serial_session_thread(
 
     let reader_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let reader_flag = reader_running.clone();
+    let (reader_done_tx, reader_done_rx) = std_mpsc::channel::<()>();
 
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
@@ -363,15 +364,25 @@ fn serial_session_thread(
             }
         }
         output_reader.close();
-        let _ = app_reader.emit(&format!("session-closed-{}", sid_reader), ());
+        let _ = reader_done_tx.send(());
     });
 
     // Command loop
     loop {
-        let cmd = match cmd_rx.blocking_recv() {
-            Some(c) => c,
-            None => break,
+        match reader_done_rx.try_recv() {
+            Ok(()) | Err(std_mpsc::TryRecvError::Disconnected) => break,
+            Err(std_mpsc::TryRecvError::Empty) => {}
+        }
+
+        let cmd = match cmd_rx.try_recv() {
+            Ok(cmd) => cmd,
+            Err(mpsc::error::TryRecvError::Disconnected) => break,
+            Err(mpsc::error::TryRecvError::Empty) => {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
         };
+
         match cmd {
             SessionCommand::Attach => {
                 output.attach();

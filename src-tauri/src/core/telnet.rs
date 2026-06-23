@@ -681,15 +681,16 @@ async fn telnet_session_task(
     let (pause_tx, mut pause_rx) = tokio::sync::watch::channel(false);
 
     let (negotiate_tx, mut negotiate_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (reader_done_tx, mut reader_done_rx) = mpsc::unbounded_channel::<()>();
 
     let reader_config = config.clone();
     let reader_handle = tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         let mut zmodem_detector = ZmodemDetector::new();
-        loop {
+        'reader: loop {
             while *pause_rx.borrow() {
                 if pause_rx.changed().await.is_err() {
-                    return;
+                    break 'reader;
                 }
             }
             match reader.read(&mut buf).await {
@@ -818,7 +819,7 @@ async fn telnet_session_task(
             }
         }
         output_reader.close();
-        let _ = app_reader.emit(&format!("session-closed-{}", sid_reader), ());
+        let _ = reader_done_tx.send(());
     });
 
     let line_edit_active = config.raw_tcp_cli && config.local_line_edit;
@@ -848,6 +849,10 @@ async fn telnet_session_task(
             }
             Some(zdata) = zmodem_out_rx.recv() => {
                 let _ = writer.write_all(&zdata).await;
+            }
+            reader_done = reader_done_rx.recv() => {
+                let _ = reader_done;
+                break;
             }
             cmd = cmd_rx.recv() => {
                 match cmd {

@@ -21,7 +21,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 #[cfg(target_os = "windows")]
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, mpsc as std_mpsc};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
@@ -867,6 +868,7 @@ fn pty_session_thread(
     let output_reader = output.clone();
     let manager_reader = manager.clone();
     let suppress_startup_output = startup_script.is_some();
+    let (reader_done_tx, reader_done_rx) = std_mpsc::channel::<()>();
     std::thread::spawn(move || {
         let mut raw_buf = [0u8; 4096];
         let mut stripper = OscStripper::new(&ready_marker);
@@ -1017,7 +1019,7 @@ fn pty_session_thread(
             }
         }
         output_reader.close();
-        let _ = app_read.emit(&format!("session-closed-{}", sid_read), ());
+        let _ = reader_done_tx.send(());
     });
 
     let recording_mgr: Option<Arc<RecordingManager>> = app
@@ -1033,14 +1035,23 @@ fn pty_session_thread(
         }
     }
     loop {
+        match reader_done_rx.try_recv() {
+            Ok(()) | Err(std_mpsc::TryRecvError::Disconnected) => break,
+            Err(std_mpsc::TryRecvError::Empty) => {}
+        }
+
         // Drain any ZMODEM outgoing data first (non-blocking).
         while let Ok(data) = zmodem_out_rx.try_recv() {
             let _ = write_to_pty(&mut *writer, &data);
         }
 
-        let cmd = match cmd_rx.blocking_recv() {
-            Some(c) => c,
-            None => break,
+        let cmd = match cmd_rx.try_recv() {
+            Ok(cmd) => cmd,
+            Err(mpsc::error::TryRecvError::Disconnected) => break,
+            Err(mpsc::error::TryRecvError::Empty) => {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
         };
         match cmd {
             SessionCommand::Attach => {
