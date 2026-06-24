@@ -14,6 +14,8 @@ pub(crate) mod x11_forwarding;
 pub use auth::PendingAuthManager;
 pub(crate) use auth::load_saved_ssh_config;
 pub use client::HostKeyVerifyManager;
-pub(crate) use client::{SshConfig, SshConnectionHandles, SshHandle, SshRawHandle};
+pub(crate) use client::{
+    SshConfig, SshConnectionHandles, SshHandle, SshRawHandle, SshStartupCommand,
+};
 pub use session::{create_multiplexed_ssh_session, create_ssh_handle, create_ssh_session};
 pub(crate) use tunnel::TunnelManager;

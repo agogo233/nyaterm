@@ -1,7 +1,7 @@
 use super::auth::{authenticate_handle, load_saved_ssh_config};
 use super::client::{
-    SshConfig, SshConnectionHandles, SshHandle, SshHandler, SshRawHandle, build_client_config,
-    connect_via_stream, connect_with_proxy,
+    SshConfig, SshConnectionHandles, SshHandle, SshHandler, SshRawHandle, SshStartupCommand,
+    build_client_config, connect_via_stream, connect_with_proxy,
 };
 use super::io::{open_shell_channel, ssh_io_loop};
 use crate::config::AiExecutionProfile;
@@ -167,15 +167,24 @@ pub async fn create_ssh_session(
     connection_id: Option<String>,
     owner_window_label: Option<String>,
     cancel_rx: Option<oneshot::Receiver<()>>,
+    startup_command: Option<SshStartupCommand>,
 ) -> AppResult<String> {
     if let Some(mut cancel_rx) = cancel_rx {
         return tokio::select! {
-            result = create_ssh_session_inner(app, manager, config, connection_id, owner_window_label) => result,
+            result = create_ssh_session_inner(app, manager, config, connection_id, owner_window_label, startup_command) => result,
             _ = &mut cancel_rx => Err(AppError::Cancelled("Session creation cancelled".to_string())),
         };
     }
 
-    create_ssh_session_inner(app, manager, config, connection_id, owner_window_label).await
+    create_ssh_session_inner(
+        app,
+        manager,
+        config,
+        connection_id,
+        owner_window_label,
+        startup_command,
+    )
+    .await
 }
 
 async fn create_ssh_session_inner(
@@ -184,6 +193,7 @@ async fn create_ssh_session_inner(
     mut config: SshConfig,
     connection_id: Option<String>,
     owner_window_label: Option<String>,
+    startup_command: Option<SshStartupCommand>,
 ) -> AppResult<String> {
     set_owner_window_label(&mut config, owner_window_label.clone());
     tracing::info!(
@@ -260,6 +270,7 @@ async fn create_ssh_session_inner(
     let io_handle = ssh_connection.clone();
     let io_connection_id = connection_id.clone();
     let post_login = config.post_login.clone();
+    let startup_command = startup_command.clone();
     let backspace_mode = config.backspace_mode.clone();
     tokio::spawn(async move {
         ssh_io_loop(
@@ -274,6 +285,7 @@ async fn create_ssh_session_inner(
             injection_script,
             ready_marker,
             post_login,
+            startup_command,
             backspace_mode,
             initial_notice,
         )
@@ -289,6 +301,7 @@ pub async fn create_multiplexed_ssh_session(
     app: AppHandle,
     manager: Arc<SessionManager>,
     source_session_id: &str,
+    startup_command: Option<SshStartupCommand>,
 ) -> AppResult<String> {
     let (config, ssh_connection, owner_window_label) = {
         let sessions = manager.sessions.lock().await;
@@ -346,6 +359,7 @@ pub async fn create_multiplexed_ssh_session(
             Some(connection_id),
             owner_window_label,
             None,
+            startup_command,
         )
         .await;
     }
@@ -386,6 +400,7 @@ pub async fn create_multiplexed_ssh_session(
     let io_handle = ssh_connection.clone();
     let io_connection_id = config.connection_id.clone();
     let post_login = config.post_login.clone();
+    let startup_command = startup_command.clone();
     let backspace_mode = config.backspace_mode.clone();
     tokio::spawn(async move {
         ssh_io_loop(
@@ -400,6 +415,7 @@ pub async fn create_multiplexed_ssh_session(
             injection_script,
             ready_marker,
             post_login,
+            startup_command,
             backspace_mode,
             initial_notice,
         )

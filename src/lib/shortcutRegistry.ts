@@ -3,7 +3,13 @@ const IS_MAC = navigator.userAgent.includes("Mac");
 /** Platform-aware modifier label for shortcut display. */
 export const MOD = IS_MAC ? "\u2318" : "Ctrl";
 
-export type ShortcutCategory = "terminal" | "tab" | "view" | "special" | "fileExplorer";
+export type ShortcutCategory =
+  | "terminal"
+  | "tab"
+  | "view"
+  | "special"
+  | "fileExplorer"
+  | "savedConnections";
 
 export interface ShortcutDefinition {
   id: string;
@@ -20,6 +26,7 @@ export const SHORTCUT_CATEGORIES: { key: ShortcutCategory; labelKey: string }[] 
   { key: "tab", labelKey: "settings.shortcutCategories.tab" },
   { key: "view", labelKey: "settings.shortcutCategories.view" },
   { key: "fileExplorer", labelKey: "settings.shortcutCategories.fileExplorer" },
+  { key: "savedConnections", labelKey: "settings.shortcutCategories.savedConnections" },
   { key: "special", labelKey: "settings.shortcutCategories.special" },
 ];
 
@@ -115,6 +122,30 @@ export const SHORTCUT_REGISTRY: ShortcutDefinition[] = [
     labelKey: "settings.shortcutLabels.switchTab",
     defaultKeys: "ctrl+1-9, meta+1-9",
   },
+  {
+    id: "tab.duplicateSession",
+    category: "tab",
+    labelKey: "settings.shortcutLabels.duplicateSession",
+    defaultKeys: "ctrl+shift+d, meta+shift+d",
+  },
+  {
+    id: "tab.multiplexSsh",
+    category: "tab",
+    labelKey: "settings.shortcutLabels.multiplexSsh",
+    defaultKeys: "ctrl+shift+m, meta+shift+m",
+  },
+  {
+    id: "tab.duplicateSessionWithCommand",
+    category: "tab",
+    labelKey: "settings.shortcutLabels.duplicateSessionWithCommand",
+    defaultKeys: "ctrl+alt+d, meta+alt+d",
+  },
+  {
+    id: "tab.multiplexSshWithCommand",
+    category: "tab",
+    labelKey: "settings.shortcutLabels.multiplexSshWithCommand",
+    defaultKeys: "ctrl+alt+m, meta+alt+m",
+  },
 
   // --- View / Layout ---
   {
@@ -172,6 +203,15 @@ export const SHORTCUT_REGISTRY: ShortcutDefinition[] = [
     category: "fileExplorer",
     labelKey: "settings.shortcutLabels.renameFile",
     defaultKeys: "F2",
+    contextual: true,
+  },
+
+  // --- Saved Connections ---
+  {
+    id: "savedConnections.copySelected",
+    category: "savedConnections",
+    labelKey: "settings.shortcutLabels.copySelectedSavedConnections",
+    defaultKeys: "ctrl+alt+c, meta+alt+c",
     contextual: true,
   },
 

@@ -41,6 +41,12 @@ pub struct SshPostLoginConfig {
     pub delay_ms: u64,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct SshStartupCommand {
+    pub command: String,
+    pub delay_ms: u64,
+}
+
 /// Authentication method: none, password, or key (with optional passphrase).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]

@@ -10,6 +10,7 @@ import {
   MdDriveFileRenameOutline,
   MdHorizontalSplit,
   MdInfoOutline,
+  MdInput,
   MdLinkOff,
   MdMerge,
   MdPlayArrow,
@@ -55,6 +56,8 @@ interface TabContextMenuProps {
   tabs: Tab[];
   onDuplicateSession: (tab: Tab) => void | Promise<void>;
   onMultiplexSshSession: (tab: Tab) => void | Promise<void>;
+  onDuplicateSessionWithCommand: (tab: Tab) => void | Promise<void>;
+  onMultiplexSshSessionWithCommand: (tab: Tab) => void | Promise<void>;
   onReconnectSession: (tab: Tab) => void | Promise<void>;
   onDisconnectSession: (tab: Tab) => void | Promise<void>;
   onSplitSession: (tab: Tab, direction: PaneSplitDirection) => void | Promise<void>;
@@ -78,6 +81,8 @@ export default function TabContextMenu({
   tabs,
   onDuplicateSession,
   onMultiplexSshSession,
+  onDuplicateSessionWithCommand,
+  onMultiplexSshSessionWithCommand,
   onReconnectSession,
   onDisconnectSession,
   onSplitSession,
@@ -207,12 +212,35 @@ export default function TabContextMenu({
         </ContextMenuItem>
 
         <ContextMenuItem
-          disabled={!canMultiplexSsh}
-          onClick={() => void onMultiplexSshSession(tab)}
+          disabled={!canSpawnSession}
+          onClick={() => void onDuplicateSessionWithCommand(tab)}
         >
-          <MdCallSplit className={iconClass} />
-          {t("tabCtx.multiplexSsh")}
+          <MdInput className={iconClass} />
+          {t("tabCtx.duplicateWithCommand")}
         </ContextMenuItem>
+
+        <ContextMenuSub>
+          <ContextMenuSubTrigger disabled={!canMultiplexSsh}>
+            <MdCallSplit className={iconClass} />
+            {t("tabCtx.sshAdvanced")}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            <ContextMenuItem
+              disabled={!canMultiplexSsh}
+              onClick={() => void onMultiplexSshSession(tab)}
+            >
+              <MdCallSplit className={iconClass} />
+              {t("tabCtx.multiplexSsh")}
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={!canMultiplexSsh}
+              onClick={() => void onMultiplexSshSessionWithCommand(tab)}
+            >
+              <MdInput className={iconClass} />
+              {t("tabCtx.multiplexSshWithCommand")}
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
 
         <ContextMenuItem disabled={!canReconnect} onClick={() => void onReconnectSession(tab)}>
           <MdRefresh className={iconClass} />

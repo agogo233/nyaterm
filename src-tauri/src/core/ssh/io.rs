@@ -1,4 +1,4 @@
-use super::client::{SshHandle, SshHandler, SshPostLoginConfig};
+use super::client::{SshHandle, SshHandler, SshPostLoginConfig, SshStartupCommand};
 use crate::core::capture::OutputCaptureProcessor;
 use crate::core::input::remap_del_to_bs;
 use crate::core::ssh::osc::{self, OscStripper, ShellKind};
@@ -170,12 +170,12 @@ enum InjectionTimeoutEvent {
     FallbackToNormal,
 }
 
-struct PendingPostLogin {
+struct PendingStartupCommand {
     input: Vec<u8>,
     delay_ms: u64,
 }
 
-pub(super) fn build_post_login_input(command: &str) -> Option<Vec<u8>> {
+pub(super) fn build_startup_command_input(command: &str) -> Option<Vec<u8>> {
     if command.trim().is_empty() {
         return None;
     }
@@ -189,7 +189,7 @@ pub(super) fn build_post_login_input(command: &str) -> Option<Vec<u8>> {
 }
 
 fn arm_post_login_timer(
-    pending_post_login: &Option<PendingPostLogin>,
+    pending_post_login: &Option<PendingStartupCommand>,
     post_login_deadline: &mut Option<Pin<Box<Sleep>>>,
 ) {
     if post_login_deadline.is_none() {
@@ -313,6 +313,7 @@ pub(super) async fn ssh_io_loop(
     injection_script: Option<String>,
     ready_marker: String,
     post_login: Option<SshPostLoginConfig>,
+    startup_command: Option<SshStartupCommand>,
     backspace_mode: String,
     initial_notice: Option<String>,
 ) {
@@ -339,11 +340,20 @@ pub(super) async fn ssh_io_loop(
     };
     let mut pending_script = injection_script;
     let mut pending_post_login = post_login.and_then(|config| {
-        build_post_login_input(&config.command).map(|input| PendingPostLogin {
+        build_startup_command_input(&config.command).map(|input| PendingStartupCommand {
             input,
             delay_ms: config.delay_ms,
         })
     });
+    let mut pending_startup_command = startup_command.and_then(|config| {
+        build_startup_command_input(&config.command).map(|input| PendingStartupCommand {
+            input,
+            delay_ms: config.delay_ms,
+        })
+    });
+    if pending_post_login.is_none() {
+        pending_post_login = pending_startup_command.take();
+    }
     let mut post_login_deadline: Option<Pin<Box<Sleep>>> = None;
     arm_post_login_timer(&pending_post_login, &mut post_login_deadline);
     let mut remote_exit_status: Option<u32> = None;
@@ -613,6 +623,19 @@ pub(super) async fn ssh_io_loop(
                         delay_ms = pending.delay_ms,
                         "Sent SSH post-login command"
                     );
+                    arm_post_login_timer(&pending_startup_command, &mut post_login_deadline);
+                    continue;
+                }
+                if let Some(pending) = pending_startup_command.take() {
+                    if let Some(ref recorder) = recording_mgr {
+                        recorder.write_input(&session_id, &pending.input);
+                    }
+                    let _ = channel.data(&pending.input[..]).await;
+                    tracing::info!(
+                        session_id = %session_id,
+                        delay_ms = pending.delay_ms,
+                        "Sent SSH startup command"
+                    );
                 }
             }
         }
@@ -726,7 +749,7 @@ fn emit_visible_text(
 mod tests {
     use super::{
         INITIAL_INJECT_DELAY_MS, INJECT_TIMEOUT_SECS, InjectionEvent, InjectionTimeoutEvent,
-        IoPhase, PendingPostLogin, build_post_login_input, handle_injection_result,
+        IoPhase, PendingStartupCommand, build_startup_command_input, handle_injection_result,
         handle_injection_timeout, should_send_initial_injection,
     };
     use crate::core::ssh::osc::OscResult;
@@ -735,21 +758,21 @@ mod tests {
 
     #[test]
     fn post_login_input_normalizes_line_endings_and_adds_enter() {
-        let input = build_post_login_input("cd /opt/app\nclear").expect("input");
+        let input = build_startup_command_input("cd /opt/app\nclear").expect("input");
 
         assert_eq!(input, b"cd /opt/app\rclear\r");
     }
 
     #[test]
     fn post_login_input_preserves_existing_trailing_enter() {
-        let input = build_post_login_input("uptime\r").expect("input");
+        let input = build_startup_command_input("uptime\r").expect("input");
 
         assert_eq!(input, b"uptime\r");
     }
 
     #[test]
     fn post_login_input_ignores_blank_commands() {
-        assert!(build_post_login_input(" \n\t ").is_none());
+        assert!(build_startup_command_input(" \n\t ").is_none());
     }
 
     fn osc_result(ready: bool, visible_after_ready: &str) -> OscResult {
@@ -808,7 +831,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_login_timer_can_arm_while_injection_is_waiting_for_ready() {
-        let pending_post_login = Some(PendingPostLogin {
+        let pending_post_login = Some(PendingStartupCommand {
             input: b"uptime\r".to_vec(),
             delay_ms: 1,
         });

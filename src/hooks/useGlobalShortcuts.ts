@@ -11,6 +11,10 @@ export interface ShortcutCallbacks {
   onOpenSessionSwitcher: () => void;
   onNewLocalTerminal: () => void;
   onCloseTab: () => void;
+  onDuplicateSession: () => void;
+  onMultiplexSsh: () => void;
+  onDuplicateSessionWithCommand: () => void;
+  onMultiplexSshWithCommand: () => void;
   onNextTab: () => void;
   onPrevTab: () => void;
   onSwitchTab: (index: number) => void;
@@ -37,6 +41,14 @@ export function useGlobalShortcuts(
   useHotkeys(k("tab.quickSwitch"), cb.onOpenSessionSwitcher, HOTKEY_OPTIONS);
   useHotkeys(k("tab.newLocalTerminal"), cb.onNewLocalTerminal, HOTKEY_OPTIONS);
   useHotkeys(k("tab.close"), cb.onCloseTab, HOTKEY_OPTIONS);
+  useHotkeys(k("tab.duplicateSession"), cb.onDuplicateSession, HOTKEY_OPTIONS);
+  useHotkeys(k("tab.multiplexSsh"), cb.onMultiplexSsh, HOTKEY_OPTIONS);
+  useHotkeys(
+    k("tab.duplicateSessionWithCommand"),
+    cb.onDuplicateSessionWithCommand,
+    HOTKEY_OPTIONS,
+  );
+  useHotkeys(k("tab.multiplexSshWithCommand"), cb.onMultiplexSshWithCommand, HOTKEY_OPTIONS);
   useHotkeys(k("tab.next"), cb.onNextTab, HOTKEY_OPTIONS);
   useHotkeys(k("tab.prev"), cb.onPrevTab, HOTKEY_OPTIONS);
 

@@ -25,16 +25,8 @@ import {
   MdTerminal,
 } from "react-icons/md";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import TabRenameDialog from "@/components/dialog/terminal/TabRenameDialog";
+import TabStartupCommandDialog from "@/components/dialog/terminal/TabStartupCommandDialog";
 import type { TabMouseAction } from "@/lib/interactionSettings";
 import { normalizeTabMouseAction } from "@/lib/interactionSettings";
 import { getActiveGroupForSession, isSessionPausedInGroup } from "@/lib/syncInputGroups";
@@ -68,6 +60,16 @@ interface TabBarProps {
   onConnectConnection: (connection: SavedConnection) => void | Promise<void>;
   onDuplicateSession: (tab: Tab) => void | Promise<void>;
   onMultiplexSshSession: (tab: Tab) => void | Promise<void>;
+  onDuplicateSessionWithCommand: (
+    tab: Tab,
+    command: string,
+    delayMs: number,
+  ) => void | Promise<void>;
+  onMultiplexSshSessionWithCommand: (
+    tab: Tab,
+    command: string,
+    delayMs: number,
+  ) => void | Promise<void>;
   onReconnectSession: (tab: Tab) => void | Promise<void>;
   onDisconnectSession: (tab: Tab) => void | Promise<void>;
   onSplitSession: (tab: Tab, direction: PaneSplitDirection) => void | Promise<void>;
@@ -228,6 +230,8 @@ function TabBar({
   onConnectConnection,
   onDuplicateSession,
   onMultiplexSshSession,
+  onDuplicateSessionWithCommand,
+  onMultiplexSshSessionWithCommand,
   onReconnectSession,
   onDisconnectSession,
   onSplitSession,
@@ -247,6 +251,14 @@ function TabBar({
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [renameTab, setRenameTab] = useState<Tab | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [commandDialog, setCommandDialog] = useState<{
+    tab: Tab;
+    action: "duplicate" | "multiplex";
+  } | null>(null);
+  const [commandValue, setCommandValue] = useState("");
+  const [commandDelayMs, setCommandDelayMs] = useState(
+    appSettings.interaction.duplicate_session_command_delay_ms,
+  );
   const pendingOpenTabFocusRef = useRef<Tab | null>(null);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const tabButtonRefs = useRef(new Map<string, HTMLDivElement>());
@@ -517,6 +529,65 @@ function TabBar({
     },
     [savedConnections, t],
   );
+
+  const openCommandDialog = useCallback(
+    (tab: Tab, action: "duplicate" | "multiplex") => {
+      setCommandDialog({ tab, action });
+      setCommandValue("");
+      setCommandDelayMs(appSettings.interaction.duplicate_session_command_delay_ms);
+    },
+    [appSettings.interaction.duplicate_session_command_delay_ms],
+  );
+
+  const closeCommandDialog = useCallback(() => {
+    setCommandDialog(null);
+    setCommandValue("");
+    setCommandDelayMs(appSettings.interaction.duplicate_session_command_delay_ms);
+  }, [appSettings.interaction.duplicate_session_command_delay_ms]);
+
+  const handleCommandDialogSubmit = useCallback(() => {
+    if (!commandDialog) return;
+    const trimmedCommand = commandValue.trim();
+    if (!trimmedCommand) {
+      toast.error(t("tabCtx.commandRequired"));
+      return;
+    }
+    const { action, tab } = commandDialog;
+    const delayMs = Math.max(0, Math.min(60000, Math.round(commandDelayMs)));
+    closeCommandDialog();
+
+    if (action === "duplicate") {
+      void onDuplicateSessionWithCommand(tab, trimmedCommand, delayMs);
+    } else {
+      void onMultiplexSshSessionWithCommand(tab, trimmedCommand, delayMs);
+    }
+  }, [
+    closeCommandDialog,
+    commandDelayMs,
+    commandDialog,
+    commandValue,
+    onDuplicateSessionWithCommand,
+    onMultiplexSshSessionWithCommand,
+    t,
+  ]);
+
+  useLayoutEffect(() => {
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string; action?: "duplicate" | "multiplex" }>)
+        .detail;
+      if (!detail?.tabId || !detail.action) return;
+      const tab = tabs.find((item) => item.id === detail.tabId);
+      if (!tab) return;
+      if (detail.action === "multiplex" && !canMultiplexTab(tab, savedConnections)) return;
+      if (detail.action === "duplicate" && !canSpawnSessionFromTab(tab)) return;
+      openCommandDialog(tab, detail.action);
+    };
+
+    window.addEventListener("nyaterm:open-tab-startup-command-dialog", listener);
+    return () => {
+      window.removeEventListener("nyaterm:open-tab-startup-command-dialog", listener);
+    };
+  }, [openCommandDialog, savedConnections, tabs]);
 
   const isTabMouseActionEnabled = useCallback(
     (tab: Tab, action: TabMouseAction) => {
@@ -987,6 +1058,10 @@ function TabBar({
           tabs={tabs}
           onDuplicateSession={onDuplicateSession}
           onMultiplexSshSession={onMultiplexSshSession}
+          onDuplicateSessionWithCommand={(targetTab) => openCommandDialog(targetTab, "duplicate")}
+          onMultiplexSshSessionWithCommand={(targetTab) =>
+            openCommandDialog(targetTab, "multiplex")
+          }
           onReconnectSession={onReconnectSession}
           onDisconnectSession={onDisconnectSession}
           onSplitSession={onSplitSession}
@@ -1245,40 +1320,27 @@ function TabBar({
         </DropdownMenu>
       </div>
 
-      <Dialog open={!!renameTab} onOpenChange={(open) => !open && setRenameTab(null)}>
-        <DialogContent showCloseButton={false} className="max-w-xs">
-          <DialogHeader>
-            <DialogTitle className="text-sm">{t("tabCtx.renameTitle")}</DialogTitle>
-            <DialogDescription className="sr-only">{t("tabCtx.renameTitle")}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Input
-              className="text-sm"
-              value={renameValue}
-              onChange={(event) => setRenameValue(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  void handleRenameSubmit();
-                }
-              }}
-              maxLength={64}
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setRenameTab(null)}>
-              {t("dialog.cancel")}
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => void handleRenameSubmit()}
-              disabled={!renameValue.trim()}
-            >
-              {t("dialog.save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TabRenameDialog
+        open={!!renameTab}
+        value={renameValue}
+        onOpenChange={(open) => {
+          if (!open) setRenameTab(null);
+        }}
+        onValueChange={setRenameValue}
+        onSubmit={handleRenameSubmit}
+      />
+
+      <TabStartupCommandDialog
+        open={!!commandDialog}
+        value={commandValue}
+        delayMs={commandDelayMs}
+        onOpenChange={(open) => {
+          if (!open) closeCommandDialog();
+        }}
+        onValueChange={setCommandValue}
+        onDelayMsChange={setCommandDelayMs}
+        onSubmit={handleCommandDialogSubmit}
+      />
     </>
   );
 }

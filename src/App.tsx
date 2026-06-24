@@ -128,9 +128,15 @@ async function closeStaleCreatedSession(sessionId: string) {
   }
 }
 
+type StartupCommandRequest = {
+  command: string;
+  delayMs: number;
+};
+
 async function createSessionForConnection(
   connection: Pick<SavedConnection, "id" | "type">,
   createRequestId?: string,
+  startupCommand?: StartupCommandRequest,
 ) {
   switch (connection.type) {
     case "local_terminal":
@@ -152,8 +158,31 @@ async function createSessionForConnection(
       return invoke<string>("create_ssh_session", {
         connectionId: connection.id,
         createRequestId,
+        startupCommand: startupCommand ?? null,
       });
   }
+}
+
+function buildStartupCommandPayload(startupCommand?: StartupCommandRequest) {
+  if (!startupCommand || !startupCommand.command.trim()) return null;
+  return {
+    command: startupCommand.command,
+    delayMs: Math.max(0, Math.min(60000, Math.round(startupCommand.delayMs))),
+  };
+}
+
+async function sendStartupCommandToSession(
+  sessionId: string,
+  startupCommand: StartupCommandRequest,
+) {
+  const delayMs = Math.max(0, Math.min(60000, Math.round(startupCommand.delayMs)));
+  if (delayMs > 0) {
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+  }
+  await sendSessionInput(sessionId, buildTerminalCommandInput(startupCommand.command), {
+    preview: { kind: "reset" },
+    registerSubmission: startupCommand.command,
+  });
 }
 
 function safeRecordingName(name: string) {
@@ -842,7 +871,11 @@ function App() {
   );
 
   const createSessionForPane = useCallback(
-    async (pane: Pick<SessionPane, "type" | "connectionId">, createRequestId?: string) => {
+    async (
+      pane: Pick<SessionPane, "type" | "connectionId">,
+      createRequestId?: string,
+      startupCommand?: StartupCommandRequest,
+    ) => {
       switch (pane.type) {
         case "Local":
           return invoke<string>("create_local_session", {
@@ -866,6 +899,7 @@ function App() {
           return invoke<string>("create_ssh_session", {
             connectionId: pane.connectionId,
             createRequestId,
+            startupCommand: buildStartupCommandPayload(startupCommand),
           });
       }
     },
@@ -1219,7 +1253,7 @@ function App() {
   // --- Tab context-menu callbacks ---
 
   const handleDuplicateSession = useCallback(
-    async (tab: Tab) => {
+    async (tab: Tab, startupCommand?: StartupCommandRequest) => {
       const pane = getActivePane(tab);
       if (!canCreateSessionFromPane(pane)) return;
 
@@ -1236,12 +1270,24 @@ function App() {
           current ? insertTabAfterInLeaf(current, tab.id, tabId, tabId) : current,
         );
         try {
-          const sessionId = await createSessionForPane(pane, createRequestId);
+          const sessionId = await createSessionForPane(pane, createRequestId, startupCommand);
           if (!hasTab(tabId)) {
             await closeStaleCreatedSession(sessionId);
             return;
           }
           updateTabSession(tabId, sessionId);
+          if (startupCommand && pane.type !== "SSH") {
+            void sendStartupCommandToSession(sessionId, startupCommand).catch((error) => {
+              logger.error({
+                domain: "session.lifecycle",
+                event: "session.startup_command_failed",
+                message: "Failed to send startup command to duplicated session",
+                ids: { session_id: sessionId },
+                error,
+              });
+              toast.error(t("tabCtx.duplicateFailed"));
+            });
+          }
           if (pane.connectionId) {
             recordRecentConnection(pane.connectionId);
           }
@@ -1284,7 +1330,7 @@ function App() {
   );
 
   const handleMultiplexSshSession = useCallback(
-    async (tab: Tab) => {
+    async (tab: Tab, startupCommand?: StartupCommandRequest) => {
       const pane = getActivePane(tab);
       if (!pane || pane.type !== "SSH" || pane.connecting || pane.connectError) return;
 
@@ -1305,6 +1351,7 @@ function App() {
 
         const sessionId = await invoke<string>("create_multiplexed_ssh_session", {
           sourceSessionId: pane.sessionId,
+          startupCommand: buildStartupCommandPayload(startupCommand),
         });
         if (!hasTab(tabId)) {
           await closeStaleCreatedSession(sessionId);
@@ -1336,6 +1383,53 @@ function App() {
     },
     [addPendingTab, hasTab, markTabConnectionFailed, recordRecentConnection, t, updateTabSession],
   );
+
+  const handleDuplicateSessionWithCommand = useCallback(
+    (tab: Tab, command: string, delayMs: number) =>
+      handleDuplicateSession(tab, { command, delayMs }),
+    [handleDuplicateSession],
+  );
+
+  const handleMultiplexSshSessionWithCommand = useCallback(
+    (tab: Tab, command: string, delayMs: number) =>
+      handleMultiplexSshSession(tab, { command, delayMs }),
+    [handleMultiplexSshSession],
+  );
+
+  const getActiveTab = useCallback(
+    () => tabs.find((tab) => tab.id === activeTabId) ?? null,
+    [activeTabId, tabs],
+  );
+
+  const handleDuplicateActiveSession = useCallback(() => {
+    const tab = getActiveTab();
+    if (tab) void handleDuplicateSession(tab);
+  }, [getActiveTab, handleDuplicateSession]);
+
+  const handleMultiplexActiveSshSession = useCallback(() => {
+    const tab = getActiveTab();
+    if (tab) void handleMultiplexSshSession(tab);
+  }, [getActiveTab, handleMultiplexSshSession]);
+
+  const handleDuplicateActiveSessionWithCommand = useCallback(() => {
+    const tab = getActiveTab();
+    if (!tab) return;
+    window.dispatchEvent(
+      new CustomEvent("nyaterm:open-tab-startup-command-dialog", {
+        detail: { tabId: tab.id, action: "duplicate" },
+      }),
+    );
+  }, [getActiveTab]);
+
+  const handleMultiplexActiveSshSessionWithCommand = useCallback(() => {
+    const tab = getActiveTab();
+    if (!tab) return;
+    window.dispatchEvent(
+      new CustomEvent("nyaterm:open-tab-startup-command-dialog", {
+        detail: { tabId: tab.id, action: "multiplex" },
+      }),
+    );
+  }, [getActiveTab]);
 
   const handleReconnectSession = useCallback(
     async (tab: Tab) => {
@@ -1794,6 +1888,10 @@ function App() {
       onOpenSessionSwitcher: handleOpenSessionSwitcher,
       onNewLocalTerminal: handleNewLocalTerminal,
       onCloseTab: handleCloseActiveTab,
+      onDuplicateSession: handleDuplicateActiveSession,
+      onMultiplexSsh: handleMultiplexActiveSshSession,
+      onDuplicateSessionWithCommand: handleDuplicateActiveSessionWithCommand,
+      onMultiplexSshWithCommand: handleMultiplexActiveSshSessionWithCommand,
       onNextTab: handleNextTab,
       onPrevTab: handlePrevTab,
       onSwitchTab: handleSwitchTab,
@@ -2292,6 +2390,8 @@ function App() {
           onTabClose: handleCloseWorkspaceTab,
           onDuplicateSession: handleDuplicateSession,
           onMultiplexSshSession: handleMultiplexSshSession,
+          onDuplicateSessionWithCommand: handleDuplicateSessionWithCommand,
+          onMultiplexSshSessionWithCommand: handleMultiplexSshSessionWithCommand,
           onReconnectSession: handleReconnectSession,
           onDisconnectSession: handleDisconnectSession,
           onSplitSession: handleSplitSession,

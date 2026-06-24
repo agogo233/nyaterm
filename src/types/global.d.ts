@@ -827,6 +827,7 @@ export interface InteractionSettings {
   command_suggestions_enabled: boolean;
   command_suggestion_min_chars: number;
   command_suggestion_max_chars: number;
+  duplicate_session_command_delay_ms: number;
   word_separators: string;
   alt_as_meta: boolean;
   mac_ime_compatibility: boolean;

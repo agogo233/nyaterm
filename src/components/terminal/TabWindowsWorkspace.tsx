@@ -50,6 +50,16 @@ interface TabWindowsWorkspaceProps {
   onTabClose: (tab: Tab) => void | Promise<void>;
   onDuplicateSession: (tab: Tab) => void | Promise<void>;
   onMultiplexSshSession: (tab: Tab) => void | Promise<void>;
+  onDuplicateSessionWithCommand: (
+    tab: Tab,
+    command: string,
+    delayMs: number,
+  ) => void | Promise<void>;
+  onMultiplexSshSessionWithCommand: (
+    tab: Tab,
+    command: string,
+    delayMs: number,
+  ) => void | Promise<void>;
   onReconnectSession: (tab: Tab) => void | Promise<void>;
   onDisconnectSession: (tab: Tab) => void | Promise<void>;
   onSplitSession: (tab: Tab, direction: PaneSplitDirection) => void | Promise<void>;
@@ -203,6 +213,8 @@ function LeafWindow({
   onTabClose,
   onDuplicateSession,
   onMultiplexSshSession,
+  onDuplicateSessionWithCommand,
+  onMultiplexSshSessionWithCommand,
   onReconnectSession,
   onDisconnectSession,
   onSplitSession,
@@ -304,6 +316,8 @@ function LeafWindow({
         onConnectConnection={(connection) => onConnectConnection(leaf.id, connection)}
         onDuplicateSession={onDuplicateSession}
         onMultiplexSshSession={onMultiplexSshSession}
+        onDuplicateSessionWithCommand={onDuplicateSessionWithCommand}
+        onMultiplexSshSessionWithCommand={onMultiplexSshSessionWithCommand}
         onReconnectSession={onReconnectSession}
         onDisconnectSession={onDisconnectSession}
         onSplitSession={onSplitSession}
@@ -345,6 +359,8 @@ function WindowNodeView({
   onTabClose,
   onDuplicateSession,
   onMultiplexSshSession,
+  onDuplicateSessionWithCommand,
+  onMultiplexSshSessionWithCommand,
   onReconnectSession,
   onDisconnectSession,
   onSplitSession,
@@ -379,6 +395,8 @@ function WindowNodeView({
         onTabClose={onTabClose}
         onDuplicateSession={onDuplicateSession}
         onMultiplexSshSession={onMultiplexSshSession}
+        onDuplicateSessionWithCommand={onDuplicateSessionWithCommand}
+        onMultiplexSshSessionWithCommand={onMultiplexSshSessionWithCommand}
         onReconnectSession={onReconnectSession}
         onDisconnectSession={onDisconnectSession}
         onSplitSession={onSplitSession}
@@ -413,6 +431,8 @@ function WindowNodeView({
       onTabClose={onTabClose}
       onDuplicateSession={onDuplicateSession}
       onMultiplexSshSession={onMultiplexSshSession}
+      onDuplicateSessionWithCommand={onDuplicateSessionWithCommand}
+      onMultiplexSshSessionWithCommand={onMultiplexSshSessionWithCommand}
       onReconnectSession={onReconnectSession}
       onDisconnectSession={onDisconnectSession}
       onSplitSession={onSplitSession}

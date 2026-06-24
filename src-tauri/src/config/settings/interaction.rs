@@ -12,6 +12,8 @@ pub struct InteractionSettings {
     pub command_suggestion_min_chars: usize,
     #[serde(default = "default_command_suggestion_max_chars")]
     pub command_suggestion_max_chars: usize,
+    #[serde(default = "default_duplicate_session_command_delay_ms")]
+    pub duplicate_session_command_delay_ms: u64,
     #[serde(default = "default_word_separators")]
     pub word_separators: String,
     #[serde(default)]
@@ -34,6 +36,10 @@ fn default_command_suggestion_min_chars() -> usize {
 
 fn default_command_suggestion_max_chars() -> usize {
     64
+}
+
+fn default_duplicate_session_command_delay_ms() -> u64 {
+    1000
 }
 
 fn default_word_separators() -> String {
@@ -67,6 +73,7 @@ impl Default for InteractionSettings {
             command_suggestions_enabled: true,
             command_suggestion_min_chars: default_command_suggestion_min_chars(),
             command_suggestion_max_chars: default_command_suggestion_max_chars(),
+            duplicate_session_command_delay_ms: default_duplicate_session_command_delay_ms(),
             word_separators: default_word_separators(),
             alt_as_meta: false,
             mac_ime_compatibility: false,
@@ -109,6 +116,7 @@ mod tests {
         assert_eq!(settings.tab_double_click_action, "disconnect_session");
         assert_eq!(settings.tab_middle_click_action, "rename_tab");
         assert_eq!(settings.tab_right_click_action, "none");
+        assert_eq!(settings.duplicate_session_command_delay_ms, 1000);
         assert!(!settings.alt_as_meta);
         assert!(!settings.mac_ime_compatibility);
     }

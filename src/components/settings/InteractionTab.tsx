@@ -22,6 +22,17 @@ import {
   SettingSwitch,
 } from "./SettingFormItems";
 
+const MIN_DUPLICATE_SESSION_COMMAND_DELAY_MS = 0;
+const MAX_DUPLICATE_SESSION_COMMAND_DELAY_MS = 60000;
+
+function normalizeDuplicateSessionCommandDelayMs(value: number) {
+  if (!Number.isFinite(value)) return 1000;
+  return Math.max(
+    MIN_DUPLICATE_SESSION_COMMAND_DELAY_MS,
+    Math.min(MAX_DUPLICATE_SESSION_COMMAND_DELAY_MS, Math.round(value)),
+  );
+}
+
 export function InteractionTab() {
   const { t } = useTranslation();
   const { appSettings, updateAppSettings } = useApp();
@@ -131,6 +142,21 @@ export function InteractionTab() {
           value={interaction.word_separators}
           controlClassName="max-w-2xl"
           onChange={(e) => updateInteraction({ word_separators: e.target.value })}
+        />
+
+        <SettingNumberInput
+          label={t("settings.duplicateSessionCommandDelay")}
+          desc={t("settings.duplicateSessionCommandDelayDesc")}
+          value={interaction.duplicate_session_command_delay_ms}
+          min={MIN_DUPLICATE_SESSION_COMMAND_DELAY_MS}
+          max={MAX_DUPLICATE_SESSION_COMMAND_DELAY_MS}
+          step={100}
+          controlClassName="max-w-sm"
+          onChange={(v) =>
+            updateInteraction({
+              duplicate_session_command_delay_ms: normalizeDuplicateSessionCommandDelayMs(v),
+            })
+          }
         />
 
         <SettingRow label={t("settings.altAsMeta")} desc={t("settings.altAsMetaDesc")}>

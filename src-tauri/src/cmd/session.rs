@@ -13,6 +13,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupCommandPayload {
+    command: String,
+    delay_ms: u64,
+}
+
 #[tauri::command]
 pub async fn create_ssh_session(
     app: tauri::AppHandle,
@@ -21,6 +28,7 @@ pub async fn create_ssh_session(
     recording_state: tauri::State<'_, Arc<RecordingManager>>,
     connection_id: String,
     create_request_id: Option<String>,
+    startup_command: Option<StartupCommandPayload>,
 ) -> AppResult<String> {
     let ssh_config = ssh::load_saved_ssh_config(&app, &connection_id)?;
     let pending_creation = state.begin_session_creation(create_request_id).await;
@@ -36,6 +44,10 @@ pub async fn create_ssh_session(
         Some(connection_id.clone()),
         Some(window.label().to_string()),
         cancel_rx,
+        startup_command.map(|command| ssh::SshStartupCommand {
+            command: command.command,
+            delay_ms: command.delay_ms,
+        }),
     )
     .await?;
     drop(guard);
@@ -58,10 +70,18 @@ pub async fn create_multiplexed_ssh_session(
     state: tauri::State<'_, Arc<SessionManager>>,
     recording_state: tauri::State<'_, Arc<RecordingManager>>,
     source_session_id: String,
+    startup_command: Option<StartupCommandPayload>,
 ) -> AppResult<String> {
-    let session_id =
-        ssh::create_multiplexed_ssh_session(app.clone(), state.inner().clone(), &source_session_id)
-            .await?;
+    let session_id = ssh::create_multiplexed_ssh_session(
+        app.clone(),
+        state.inner().clone(),
+        &source_session_id,
+        startup_command.map(|command| ssh::SshStartupCommand {
+            command: command.command,
+            delay_ms: command.delay_ms,
+        }),
+    )
+    .await?;
     maybe_start_auto_recording(
         &app,
         state.inner().as_ref(),

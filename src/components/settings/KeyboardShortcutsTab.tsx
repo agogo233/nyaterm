@@ -78,6 +78,7 @@ export function KeyboardShortcutsTab() {
       tab: [],
       view: [],
       fileExplorer: [],
+      savedConnections: [],
       special: [],
     };
 
