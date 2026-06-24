@@ -1441,11 +1441,12 @@ function FileExplorer({
       }> = [];
 
       if (askEach) {
-        for (const entry of entries) {
+        if (entries.length === 1) {
+          const entry = entries[0];
           const safeName = await sanitizeDownloadFileName(entry.name);
           if (entry.is_dir) {
             const localDir = await openDialog({ directory: true });
-            if (!localDir || typeof localDir !== "string") continue;
+            if (!localDir || typeof localDir !== "string") return;
             const localPath = await join(localDir, safeName);
             downloads.push({
               sessionId: activeSessionId,
@@ -1456,13 +1457,28 @@ function FileExplorer({
             });
           } else {
             const localPath = await saveDialog({ defaultPath: safeName });
-            if (!localPath) continue;
+            if (!localPath) return;
             downloads.push({
               sessionId: activeSessionId,
               fileName: entry.name,
               remotePath: getEntryFullPath(entry),
               localPath,
               kind: "file",
+            });
+          }
+        } else {
+          const localDir = await openDialog({ directory: true });
+          if (!localDir || typeof localDir !== "string") return;
+
+          for (const entry of entries) {
+            const safeName = await sanitizeDownloadFileName(entry.name);
+            const localPath = await join(localDir, safeName);
+            downloads.push({
+              sessionId: activeSessionId,
+              fileName: entry.name,
+              remotePath: getEntryFullPath(entry),
+              localPath,
+              kind: entry.is_dir ? "directory" : "file",
             });
           }
         }
