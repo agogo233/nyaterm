@@ -1,4 +1,3 @@
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -9,7 +8,7 @@ use crate::observability::{
 };
 use serde_json::Value;
 
-const HISTORY_LIMIT: usize = 200;
+const HISTORY_LIMIT: usize = 100;
 pub(super) const HISTORY_LOG_DOMAIN: &str = "cloud_sync.history";
 pub(super) const HISTORY_LOG_EVENT: &str = "entry";
 
@@ -50,16 +49,27 @@ pub(super) fn read_cloud_sync_history_from_logs(
         .map(|settings| settings.diagnostics.retention_days)
         .unwrap_or(7);
     let log_dir = crate::runtime::log_dir(app)?;
+    read_cloud_sync_history_from_log_dir(&log_dir, retention_days, HISTORY_LIMIT)
+}
+
+fn read_cloud_sync_history_from_log_dir(
+    log_dir: &Path,
+    retention_days: u32,
+    limit: usize,
+) -> AppResult<Vec<CloudSyncHistoryEntry>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+
     let mut entries = Vec::new();
 
-    for path in collect_cloud_sync_log_files(&log_dir, retention_days)? {
-        let file = match std::fs::File::open(&path) {
-            Ok(file) => file,
+    for path in collect_cloud_sync_log_files(log_dir, retention_days)? {
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
             Err(_) => continue,
         };
-        let reader = BufReader::new(file);
 
-        for line in reader.lines().map_while(Result::ok) {
+        for line in content.lines().rev() {
             if line.trim().is_empty() {
                 continue;
             }
@@ -68,14 +78,15 @@ pub(super) fn read_cloud_sync_history_from_logs(
             };
             if let Some(entry) = parse_history_entry(value) {
                 entries.push(entry);
+                if entries.len() >= limit {
+                    entries.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
+                    return Ok(entries);
+                }
             }
         }
     }
 
     entries.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
-    if entries.len() > HISTORY_LIMIT {
-        entries.truncate(HISTORY_LIMIT);
-    }
     Ok(entries)
 }
 
@@ -100,11 +111,15 @@ fn collect_cloud_sync_log_files(log_dir: &Path, retention_days: u32) -> AppResul
         if modified < min_modified {
             continue;
         }
-        files.push(path);
+        files.push((path, modified));
     }
 
-    files.sort();
-    Ok(files)
+    files.sort_by(|(left_path, left_modified), (right_path, right_modified)| {
+        right_modified
+            .cmp(left_modified)
+            .then_with(|| right_path.cmp(left_path))
+    });
+    Ok(files.into_iter().map(|(path, _)| path).collect())
 }
 
 fn is_cloud_sync_log_file(path: &Path) -> bool {
@@ -140,4 +155,95 @@ fn parse_history_entry(value: Value) -> Option<CloudSyncHistoryEntry> {
         duration_ms: data.get("duration_ms").and_then(Value::as_u64),
         message: root.get("message")?.as_str()?.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_only_the_most_recent_history_entries() {
+        let dir = temp_log_dir("recent-limit");
+        write_history_log(
+            &dir.join(format!("{LOG_FILE_PREFIX}-old.{LOG_FILE_SUFFIX}")),
+            &[history_line("old-1", 1), history_line("old-2", 2)],
+        );
+        write_history_log(
+            &dir.join(format!("{LOG_FILE_PREFIX}-new.{LOG_FILE_SUFFIX}")),
+            &[
+                history_line("new-3", 3),
+                history_line("new-4", 4),
+                history_line("new-5", 5),
+            ],
+        );
+
+        let entries = read_cloud_sync_history_from_log_dir(&dir, 7, 2).expect("read history");
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["new-5", "new-4"]
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reads_older_files_only_until_limit_is_filled() {
+        let dir = temp_log_dir("cross-file-limit");
+        write_history_log(
+            &dir.join(format!("{LOG_FILE_PREFIX}-old.{LOG_FILE_SUFFIX}")),
+            &[history_line("old-1", 1), history_line("old-2", 2)],
+        );
+        write_history_log(
+            &dir.join(format!("{LOG_FILE_PREFIX}-new.{LOG_FILE_SUFFIX}")),
+            &[history_line("new-3", 3)],
+        );
+
+        let entries = read_cloud_sync_history_from_log_dir(&dir, 7, 2).expect("read history");
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["new-3", "old-2"]
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn temp_log_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "nyaterm-cloud-sync-history-{name}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp log dir");
+        dir
+    }
+
+    fn write_history_log(path: &Path, lines: &[String]) {
+        std::fs::write(path, lines.join("\n")).expect("write history log");
+    }
+
+    fn history_line(id: &str, timestamp_ms: u64) -> String {
+        serde_json::json!({
+            "domain": HISTORY_LOG_DOMAIN,
+            "event": HISTORY_LOG_EVENT,
+            "message": format!("history {id}"),
+            "data": {
+                "id": id,
+                "timestamp_ms": timestamp_ms,
+                "kind": "sync",
+                "status": "success",
+                "trigger": "manual_push",
+                "provider": "webdav",
+                "revision": null,
+                "duration_ms": 1,
+            }
+        })
+        .to_string()
+    }
 }
