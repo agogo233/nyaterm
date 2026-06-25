@@ -32,13 +32,18 @@ function stripKnownPromptPrefix(input: string): string {
   return input;
 }
 
-/** Remove known shell prompt prefixes so command parsing stays stable across shells. */
-export function sanitizeTerminalCommand(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) {
+/** Remove known shell prompt prefixes while preserving command spacing. */
+export function stripTerminalCommandPrompt(input: string): string {
+  const withoutLeadingWhitespace = input.trimStart();
+  if (!withoutLeadingWhitespace.trim()) {
     return "";
   }
 
-  const withoutPrompt = stripKnownPromptPrefix(stripLeadingEnvPrefixes(trimmed));
+  return stripKnownPromptPrefix(stripLeadingEnvPrefixes(withoutLeadingWhitespace));
+}
+
+/** Remove known shell prompt prefixes so command parsing stays stable across shells. */
+export function sanitizeTerminalCommand(input: string): string {
+  const withoutPrompt = stripTerminalCommandPrompt(input);
   return withoutPrompt.trim();
 }

@@ -1,5 +1,5 @@
 import type { SessionInputPreview } from "@/lib/sessionInput";
-import { sanitizeTerminalCommand } from "@/lib/terminalCommand";
+import { sanitizeTerminalCommand, stripTerminalCommandPrompt } from "@/lib/terminalCommand";
 
 export interface TerminalInputState {
   value: string;
@@ -191,12 +191,12 @@ export function applyTerminalPastedInputData(
 }
 
 function normalizeLineContent(value: string): string {
-  return value.replace(/\r?\n/gu, "").trimEnd();
+  return value.replace(/\r?\n/gu, "");
 }
 
 function addCandidate(candidates: Set<string>, value: string): void {
-  const normalized = normalizeLineContent(value);
-  if (normalized.trim()) {
+  const normalized = stripTerminalCommandPrompt(normalizeLineContent(value));
+  if (sanitizeTerminalCommand(normalized)) {
     candidates.add(normalized);
   }
 }
@@ -204,13 +204,15 @@ function addCandidate(candidates: Set<string>, value: string): void {
 function addSuffixCandidate(candidates: Set<string>, source: string, prefix: string): void {
   const normalizedSource = normalizeLineContent(source);
   const normalizedPrefix = normalizeLineContent(prefix);
-  if (!normalizedSource || !normalizedPrefix) {
+  const comparableSource = sanitizeTerminalCommand(normalizedSource);
+  const comparablePrefix = sanitizeTerminalCommand(normalizedPrefix);
+  if (!comparableSource || !comparablePrefix) {
     return;
   }
 
-  const index = normalizedSource.lastIndexOf(normalizedPrefix);
+  const index = comparableSource.lastIndexOf(comparablePrefix);
   if (index >= 0) {
-    addCandidate(candidates, normalizedSource.slice(index));
+    addCandidate(candidates, stripTerminalCommandPrompt(normalizedSource).slice(index));
   }
 }
 
@@ -239,7 +241,7 @@ function chooseTerminalLineCommand(previousValue: string, lineContent: string): 
     }
 
     if (!best || score > best.score) {
-      best = { value: command, score };
+      best = { value: candidate, score };
     }
   }
 
