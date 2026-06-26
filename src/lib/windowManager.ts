@@ -26,8 +26,22 @@ const AUTO_UPLOAD_WINDOW_PREFIX = "auto-upload-";
 const FILE_EDITOR_WINDOW_PREFIX = "file-editor-";
 const AUTO_UPLOAD_OWNER_SEPARATOR = "--";
 const MODAL_CHILD_BASE_LABELS = new Set(["settings", "new-session", "quick-command"]);
+const MODAL_GROUP_RAISE_SUPPRESS_MS = 250;
+const MODAL_TOPMOST_PULSE_MS = 120;
 const registeredDestroyedHandlers = new Set<string>();
 let ownerMainWindowLabel = MAIN_WINDOW_LABEL;
+let modalGroupRaiseInFlight = false;
+let suppressChildFocusSyncUntil = 0;
+let modalTopmostPulseId = 0;
+
+type ModalGroupRaiseReason = "open" | "main-focus" | "child-focus" | "backdrop" | "close";
+
+interface ModalGroupRaiseOptions {
+  focusLabel?: string;
+  excludedLabel?: string;
+  requestAttention?: boolean;
+  reason?: ModalGroupRaiseReason;
+}
 
 export function isMainWindowLabel(label: string) {
   return label === MAIN_WINDOW_LABEL || label.startsWith(MAIN_WINDOW_PREFIX);
@@ -143,17 +157,87 @@ async function applyModalWindowState(excludedLabel?: string) {
   await setMainWindowModalBlocking(mainWindow, hasModalChild);
 
   if (hasModalChild) {
-    const topModalWindow = remainingModalWindows[remainingModalWindows.length - 1];
-    await topModalWindow.setAlwaysOnTop(needsAlwaysOnTop(topModalWindow.label)).catch(() => {});
-    const isVisible = await topModalWindow.isVisible().catch(() => false);
-    if (isVisible) {
-      await topModalWindow.setFocus().catch(() => {});
-    }
+    await raiseModalChildWindowGroup({
+      excludedLabel,
+      reason: excludedLabel ? "close" : "open",
+    });
     return;
   }
 
   await mainWindow.show().catch(() => {});
   await mainWindow.setFocus().catch(() => {});
+}
+
+function orderedModalWindowsForFocus(windows: WebviewWindow[], focusLabel?: string) {
+  const focusWindow = focusLabel
+    ? windows.find((window) => window.label === focusLabel)
+    : undefined;
+  const topModalWindow = focusWindow ?? windows[windows.length - 1];
+  if (!topModalWindow) return { orderedWindows: windows, topModalWindow: undefined };
+
+  return {
+    orderedWindows: windows
+      .filter((window) => window.label !== topModalWindow.label)
+      .concat(topModalWindow),
+    topModalWindow,
+  };
+}
+
+function restoreModalTopmostStates(windows: WebviewWindow[], pulseId: number) {
+  window.setTimeout(() => {
+    if (pulseId !== modalTopmostPulseId) return;
+    windows.forEach((modalWindow) => {
+      void modalWindow.setAlwaysOnTop(needsAlwaysOnTop(modalWindow.label)).catch(() => {});
+    });
+  }, MODAL_TOPMOST_PULSE_MS);
+}
+
+export function shouldSuppressModalChildFocusSync() {
+  return Date.now() < suppressChildFocusSyncUntil;
+}
+
+export async function raiseModalChildWindowGroup(options: ModalGroupRaiseOptions = {}) {
+  if (modalGroupRaiseInFlight) return;
+  if (options.reason === "child-focus" && shouldSuppressModalChildFocusSync()) return;
+
+  modalGroupRaiseInFlight = true;
+  suppressChildFocusSyncUntil = Date.now() + MODAL_GROUP_RAISE_SUPPRESS_MS;
+
+  try {
+    const modalWindows = (await getOpenModalChildWindows()).filter(
+      (modalWindow) => modalWindow.label !== options.excludedLabel,
+    );
+    const { orderedWindows, topModalWindow } = orderedModalWindowsForFocus(
+      modalWindows,
+      options.focusLabel,
+    );
+    if (!topModalWindow) return;
+
+    modalTopmostPulseId += 1;
+    const pulseId = modalTopmostPulseId;
+
+    await Promise.all(
+      orderedWindows.map(async (modalWindow) => {
+        await modalWindow.show().catch(() => {});
+        await modalWindow.setAlwaysOnTop(true).catch(() => {});
+      }),
+    );
+
+    for (const modalWindow of orderedWindows) {
+      await modalWindow.setFocus().catch(() => {});
+    }
+
+    if (options.requestAttention) {
+      await topModalWindow.requestUserAttention(UserAttentionType.Critical).catch(() => {});
+    }
+
+    restoreModalTopmostStates(orderedWindows, pulseId);
+  } finally {
+    window.setTimeout(() => {
+      modalGroupRaiseInFlight = false;
+      suppressChildFocusSyncUntil = Math.max(suppressChildFocusSyncUntil, 0);
+    }, MODAL_GROUP_RAISE_SUPPRESS_MS);
+  }
 }
 
 function attachChildWindowDestroyedHandler(label: string, win: WebviewWindow) {
@@ -178,16 +262,7 @@ export async function prepareForModalChildClose(closingLabel: string) {
 }
 
 export async function bounceTopModalWindow() {
-  const modalWindows = await getOpenModalChildWindows();
-  const topModalWindow = modalWindows[modalWindows.length - 1];
-  if (!topModalWindow) return;
-
-  const isVisible = await topModalWindow.isVisible().catch(() => false);
-  if (!isVisible) return;
-
-  await topModalWindow.requestUserAttention(UserAttentionType.Critical).catch(() => {});
-  await topModalWindow.setAlwaysOnTop(needsAlwaysOnTop(topModalWindow.label)).catch(() => {});
-  await topModalWindow.setFocus().catch(() => {});
+  await raiseModalChildWindowGroup({ requestAttention: true, reason: "backdrop" });
 }
 
 export async function openChildWindow(opts: ChildWindowOptions) {

@@ -1,3 +1,4 @@
+import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { lazy, Suspense, useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -32,7 +33,9 @@ export default function ChildWindowRouter({ windowType }: { windowType: string }
     }
     const currentWindow = getCurrentWindow();
     let unlistenCloseRequested: (() => void) | undefined;
+    let unlistenFocusChanged: (() => void) | undefined;
     let programmaticClose = false;
+    let lastFocusEmitAt = 0;
 
     currentWindow.show().catch(() => {});
 
@@ -52,8 +55,27 @@ export default function ChildWindowRouter({ windowType }: { windowType: string }
       })
       .catch(() => {});
 
+    if (isModalChildLabel(currentWindow.label)) {
+      currentWindow
+        .onFocusChanged(({ payload: focused }) => {
+          if (!focused) return;
+          const now = Date.now();
+          if (now - lastFocusEmitAt < 100) return;
+          lastFocusEmitAt = now;
+          emit("modal-child-window-focused", {
+            label: currentWindow.label,
+            ownerLabel,
+          });
+        })
+        .then((unlisten) => {
+          unlistenFocusChanged = unlisten;
+        })
+        .catch(() => {});
+    }
+
     return () => {
       unlistenCloseRequested?.();
+      unlistenFocusChanged?.();
     };
   }, []);
 

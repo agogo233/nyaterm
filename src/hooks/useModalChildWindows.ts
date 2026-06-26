@@ -1,10 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
 import {
-  bounceTopModalWindow,
   getOpenModalChildWindowLabels,
   isOwnedModalChildLabel,
   prepareForModalChildClose,
+  raiseModalChildWindowGroup,
   syncMainWindowModalState,
 } from "@/lib/windowManager";
 
@@ -50,6 +50,16 @@ export function useModalChildWindows() {
           void refreshOpenModalChildWindows();
         }, 250);
       }),
+      listen<{ label: string; ownerLabel?: string | null }>(
+        "modal-child-window-focused",
+        ({ payload }) => {
+          if (!isOwnedModalChildLabel(payload.label)) return;
+          void raiseModalChildWindowGroup({
+            focusLabel: payload.label,
+            reason: "child-focus",
+          });
+        },
+      ),
     ];
 
     return () => {
@@ -69,7 +79,7 @@ export function useModalChildWindows() {
         .onFocusChanged(({ payload: focused }) => {
           if (!focused || modalChildWindowCount === 0) return;
           void syncMainWindowModalState();
-          void bounceTopModalWindow();
+          void raiseModalChildWindowGroup({ reason: "main-focus" });
         })
         .then((unlisten) => {
           unlistenFocusChanged = unlisten;
