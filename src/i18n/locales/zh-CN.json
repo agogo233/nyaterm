@@ -552,6 +552,8 @@
     "duplicateKindFile": "文件",
     "duplicateKindFolder": "文件夹",
     "duplicateOverwrite": "覆盖",
+    "duplicateOverwriteAllForTask": "覆盖并不再询问",
+    "duplicateOverwriteAllForTaskDesc": "仅对本次上传任务生效，后续上传仍会询问。",
     "duplicateSkip": "跳过",
     "duplicateTitle": "目标已存在",
     "error": "错误",

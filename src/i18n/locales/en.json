@@ -552,6 +552,8 @@
     "duplicateKindFile": "file",
     "duplicateKindFolder": "folder",
     "duplicateOverwrite": "Overwrite",
+    "duplicateOverwriteAllForTask": "Overwrite and don't ask again",
+    "duplicateOverwriteAllForTaskDesc": "Only for this upload task; future uploads will still ask.",
     "duplicateSkip": "Skip",
     "duplicateTitle": "Target already exists",
     "error": "Error",
