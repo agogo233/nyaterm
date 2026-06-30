@@ -871,7 +871,6 @@ export default function SavedConnections({
       startY: e.clientY,
       dragging: false,
     };
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handlePointerDragMove = (e: React.PointerEvent) => {
@@ -886,6 +885,7 @@ export default function SavedConnections({
       if (!moved) return;
       state.dragging = true;
       dragSourceRef.current = { type: state.type, id: state.id };
+      e.currentTarget.setPointerCapture(e.pointerId);
     }
 
     const source = { type: state.type, id: state.id } as const;
@@ -911,6 +911,8 @@ export default function SavedConnections({
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
 
+    if (!state.dragging) return;
+
     const source = { type: state.type, id: state.id } as const;
     const target = state.dragging ? resolvePointerItemTarget(e.clientX, e.clientY, source) : null;
     setDragTarget(null);
@@ -922,7 +924,7 @@ export default function SavedConnections({
       void dropSourceToRoot(source);
     }
 
-    if (state.dragging) e.preventDefault();
+    e.preventDefault();
   };
 
   const handlePointerDragCancel = (e: React.PointerEvent) => {

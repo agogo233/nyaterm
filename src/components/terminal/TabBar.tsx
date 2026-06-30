@@ -804,7 +804,6 @@ function TabBar({
       startY: event.clientY,
       dragging: false,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -822,6 +821,7 @@ function TabBar({
       draggedTabIdRef.current = state.tabId;
       droppedTabRef.current = false;
       setDraggedTabId(state.tabId);
+      event.currentTarget.setPointerCapture(event.pointerId);
     }
 
     setDropIndex(getInsertionIndexFromClientX(event.clientX));
@@ -837,6 +837,8 @@ function TabBar({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+
+    if (!state.dragging) return;
 
     if (state.dragging && isDragEndFallbackNearTabStrip(event.clientX, event.clientY)) {
       handleDropAtIndex(getInsertionIndexFromClientX(event.clientX));
@@ -859,10 +861,12 @@ function TabBar({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     pointerDragRef.current = null;
-    resetDragState();
-    window.setTimeout(() => {
-      suppressTabClickRef.current = false;
-    }, 0);
+    if (state.dragging) {
+      resetDragState();
+      window.setTimeout(() => {
+        suppressTabClickRef.current = false;
+      }, 0);
+    }
   };
 
   const handleDragEnd = (event: DragEvent<HTMLDivElement>) => {
@@ -1143,6 +1147,9 @@ function TabBar({
                   ? "text-[var(--df-text-muted)]"
                   : "text-[var(--df-text-dimmed)] opacity-0 group-hover:opacity-100"
               } hover:!bg-red-500/10 hover:!text-red-500 active:scale-90 active:!bg-red-500/20`}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+              }}
               onClick={(event) => {
                 event.stopPropagation();
                 void onTabClose(tab);

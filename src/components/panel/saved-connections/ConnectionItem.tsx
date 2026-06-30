@@ -344,6 +344,9 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
                 style={{ color: "var(--df-text-dimmed)" }}
                 aria-label={directConnectLabel}
                 onPointerEnter={closeAndSuppressDetails}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
                   closeAndSuppressDetails();
@@ -361,6 +364,9 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
                 style={{ color: "var(--df-text-dimmed)" }}
                 aria-label={t("savedConnections.edit")}
                 onPointerEnter={closeAndSuppressDetails}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
                   closeAndSuppressDetails();
@@ -378,6 +384,9 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
                 style={{ color: "var(--df-text-dimmed)" }}
                 aria-label={t("savedConnections.delete")}
                 onPointerEnter={closeAndSuppressDetails}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
                   closeAndSuppressDetails();
