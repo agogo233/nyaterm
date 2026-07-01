@@ -26,6 +26,7 @@ import {
   MdTerminal,
 } from "react-icons/md";
 import { toast } from "sonner";
+import CloseAllSessionsDialog from "@/components/dialog/terminal/CloseAllSessionsDialog";
 import TabRenameDialog from "@/components/dialog/terminal/TabRenameDialog";
 import TabStartupCommandDialog from "@/components/dialog/terminal/TabStartupCommandDialog";
 import type { TabMouseAction } from "@/lib/interactionSettings";
@@ -266,6 +267,8 @@ function TabBar({
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [renameTab, setRenameTab] = useState<Tab | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [closeAllDialogOpen, setCloseAllDialogOpen] = useState(false);
+  const [closingAllSessions, setClosingAllSessions] = useState(false);
   const [commandDialog, setCommandDialog] = useState<{
     tab: Tab;
     action: "duplicate" | "multiplex";
@@ -589,6 +592,18 @@ function TabBar({
     onMultiplexSshSessionWithCommand,
     t,
   ]);
+
+  const handleConfirmCloseAll = useCallback(async () => {
+    if (closingAllSessions) return;
+
+    setClosingAllSessions(true);
+    try {
+      await onCloseAll();
+      setCloseAllDialogOpen(false);
+    } finally {
+      setClosingAllSessions(false);
+    }
+  }, [closingAllSessions, onCloseAll]);
 
   useLayoutEffect(() => {
     const listener = (event: Event) => {
@@ -1190,7 +1205,7 @@ function TabBar({
           onSplitSession={onSplitSession}
           onUnsplit={onUnsplit}
           onCloseSession={onCloseSession}
-          onCloseAll={onCloseAll}
+          onCloseAll={() => setCloseAllDialogOpen(true)}
           onCloseInactive={onCloseInactive}
           onCloseRight={onCloseRight}
           onSessionInfo={onSessionInfo}
@@ -1463,6 +1478,16 @@ function TabBar({
         onValueChange={setCommandValue}
         onDelayMsChange={setCommandDelayMs}
         onSubmit={handleCommandDialogSubmit}
+      />
+
+      <CloseAllSessionsDialog
+        open={closeAllDialogOpen}
+        closing={closingAllSessions}
+        onOpenChange={(open) => {
+          if (closingAllSessions && !open) return;
+          setCloseAllDialogOpen(open);
+        }}
+        onConfirm={handleConfirmCloseAll}
       />
     </>
   );

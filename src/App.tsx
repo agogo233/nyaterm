@@ -1987,8 +1987,6 @@ function App() {
   );
 
   const handleCloseAllTabs = useCallback(async () => {
-    if (!window.confirm(t("tabCtx.closeAllConfirm"))) return;
-
     const results = await Promise.all(tabs.map((tab) => closeWorkspaceTabSessions(tab)));
     const successfulTabIds = tabs.filter((_, index) => results[index]).map((tab) => tab.id);
 
