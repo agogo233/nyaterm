@@ -57,6 +57,7 @@ const COMPOSE_SERVICE_ROW_HEIGHT = 58;
 const TAB_GAP_PX = 4;
 const TAB_LIST_PADDING_PX = 8;
 const MIN_TAB_WIDTH_PX = 62;
+const DOCKER_RESOURCE_TABS: DockerResourceTab[] = ["images", "volumes", "networks", "compose"];
 const SHELL_SELECTOR =
   "if command -v bash >/dev/null 2>&1; then exec bash; elif command -v zsh >/dev/null 2>&1; then exec zsh; elif command -v fish >/dev/null 2>&1; then exec fish; elif command -v ash >/dev/null 2>&1; then exec ash; else exec sh; fi";
 
@@ -273,6 +274,31 @@ export default function DockerManager({ activeSessionId }: DockerManagerProps) {
       void fetchResourceTab(activeSessionId, tab);
     }
   }, [activeSessionId, enabled, fetchResourceTab, loadedTabs, loadingTabs, overview, tab]);
+
+  useEffect(() => {
+    if (!enabled || !activeSessionId || !overview?.available) return;
+
+    for (const resourceTab of DOCKER_RESOURCE_TABS) {
+      if (resourceTab === "compose" && !overview.compose_available) continue;
+      if (
+        loadedTabs.has(resourceTab) ||
+        loadingTabs.has(resourceTab) ||
+        failedTabs.has(resourceTab)
+      ) {
+        continue;
+      }
+      void fetchResourceTab(activeSessionId, resourceTab);
+    }
+  }, [
+    activeSessionId,
+    enabled,
+    failedTabs,
+    fetchResourceTab,
+    loadedTabs,
+    loadingTabs,
+    overview?.available,
+    overview?.compose_available,
+  ]);
 
   useEffect(() => {
     if (tab === "compose" && overview && !overview.compose_available) {
@@ -1191,7 +1217,11 @@ function AdaptiveDockerTabsList({
       className="relative flex h-8 w-full items-center gap-1 rounded-md bg-muted/25 p-1"
     >
       {visibleItems.map((item) => (
-        <TabsTrigger key={item.value} value={item.value} className="min-w-0 px-2 text-[0.6875rem]">
+        <TabsTrigger
+          key={item.value}
+          value={item.value}
+          className="min-w-0 flex-none px-2 text-[0.6875rem]"
+        >
           <span className="min-w-0 truncate">{item.label}</span>
           <span className="shrink-0 font-mono text-[0.625rem] text-muted-foreground">
             {item.count ?? "-"}
@@ -1236,7 +1266,7 @@ function AdaptiveDockerTabsList({
               if (node) itemMeasureRefs.current.set(item.value, node);
               else itemMeasureRefs.current.delete(item.value);
             }}
-            className="inline-flex h-6 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-[0.6875rem] font-medium"
+            className="inline-flex h-7 items-center justify-center gap-1.5 whitespace-nowrap border border-transparent px-2 text-[0.6875rem] font-medium"
           >
             <span>{item.label}</span>
             <span className="font-mono text-[0.625rem]">{item.count ?? "-"}</span>
