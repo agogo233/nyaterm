@@ -53,6 +53,7 @@ import {
   resolveIndexedKeys,
 } from "@/lib/shortcutRegistry";
 import { registerTerminalContextProvider } from "@/lib/terminalContext";
+import { sendTerminalClearInput } from "@/lib/terminalControlInput";
 import { getTerminalDropOverlayCopy, handleTerminalFileDrop } from "@/lib/terminalFileDrop";
 import { resolveTerminalFontSize } from "@/lib/terminalFontSize";
 import {
@@ -522,6 +523,7 @@ export default function XTerminal({
       minimumContrastRatio: appearance.minimum_contrast_ratio,
       wordSeparator: interaction.word_separators,
       macOptionIsMeta: interaction.alt_as_meta,
+      scrollOnEraseInDisplay: true,
       theme: { ...terminalThemeColors },
       allowTransparency: terminalTransparencyEnabled,
       allowProposedApi: true,
@@ -1109,7 +1111,7 @@ export default function XTerminal({
       }
       if (matchesKeyEvent(resolveShortcutKeys("terminal.clear", kb), e)) {
         e.preventDefault();
-        terminal.clear();
+        sendTerminalClearInput(terminal);
         return false;
       }
       if (matchesKeyEvent(resolveShortcutKeys("terminal.pasteSelected", kb), e)) {
@@ -2130,8 +2132,7 @@ export default function XTerminal({
     const handleClear = () => {
       const terminal = terminalRef.current;
       if (!active || !terminal) return;
-      terminal.clear();
-      gutterLineOffsetRef.current = 0;
+      sendTerminalClearInput(terminal, { focus: active });
     };
 
     window.addEventListener("nyaterm:clear-terminal", handleClear);

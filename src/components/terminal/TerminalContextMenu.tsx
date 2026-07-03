@@ -17,6 +17,7 @@ import {
 import { useTerminalAppSettings } from "@/context/AppContext";
 import { resolveDisplayKeys } from "@/hooks/useShortcutMap";
 import { openAIAssistant } from "@/lib/aiEvents";
+import { sendTerminalClearInput } from "@/lib/terminalControlInput";
 import type { SearchEngine } from "@/types/global";
 import TranslationDialog from "../dialog/terminal/TranslationDialog";
 import { type QuickIconDef, SEARCH_ICONS } from "../icons";
@@ -147,8 +148,9 @@ export default function TerminalContextMenu({
   }, [ctxSelection.text, pasteText, terminalRef]);
 
   const doClearScreen = useCallback(() => {
-    terminalRef.current?.clear();
-    terminalRef.current?.focus();
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    sendTerminalClearInput(terminal, { focus: true });
   }, [terminalRef]);
 
   const doClearAll = useCallback(() => {

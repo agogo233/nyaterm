@@ -64,7 +64,7 @@ export const SHORTCUT_REGISTRY: ShortcutDefinition[] = [
     id: "terminal.clear",
     category: "terminal",
     labelKey: "terminalCtx.clearScreen",
-    defaultKeys: "ctrl+shift+k, meta+shift+k",
+    defaultKeys: "ctrl+l, meta+l",
   },
   {
     id: "terminal.selectAll",
