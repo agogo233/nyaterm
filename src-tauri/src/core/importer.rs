@@ -18,7 +18,6 @@ struct ImportedSession {
     port: u16,
     username: String,
     auth_type: String,
-    /// Hierarchical group path segments, e.g. ["亚鸿", "湖北"].
     group_path: Option<Vec<String>>,
 }
 
