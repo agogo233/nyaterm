@@ -74,6 +74,7 @@ export function useCredentialAutofill(
   const credentialsRef = useRef<SavedCredential[]>([]);
   const credentialsLoadedRef = useRef(false);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
+  const reloadAfterInFlightRef = useRef(false);
   const detectionInFlightRef = useRef(false);
   const detectionPendingRef = useRef(false);
   const outputBufferRef = useRef("");
@@ -91,10 +92,15 @@ export function useCredentialAutofill(
     if (credentialsLoadedRef.current && !force) return;
 
     if (loadInFlightRef.current) {
+      if (force) reloadAfterInFlightRef.current = true;
       await loadInFlightRef.current;
+      if (force && reloadAfterInFlightRef.current) {
+        await loadCredentials(true);
+      }
       return;
     }
 
+    reloadAfterInFlightRef.current = false;
     const promise = invoke<SavedCredential[]>("get_saved_credentials")
       .then((creds) => {
         credentialsRef.current = creds;
