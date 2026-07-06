@@ -222,7 +222,16 @@ NyaTerm 支持导入其他客户端的会话配置，目前可导入：
 - **WindTerm**（`.sessions`）
 - **SecureCRT**（`.xml`）
 - **FinalShell**（`conn` 目录）
+- **Termius**（本机 IndexedDB）
 - **NyaTerm JSON**（`.json`）
+
+### 从 Termius 导入
+
+选择 **Termius** 后，NyaTerm 会读取本机 Termius 的 IndexedDB，并通过系统凭据管理器 / Keychain / Secret Service 中的 `Termius/localKey` 解密会话数据。
+
+可导入内容包括 SSH 主机、分组、用户名、密码和 SSH 私钥。为了避免产生半可信配置，只要任何 Termius 加密字段无法解密，本次导入会整体失败且不会写入连接。
+
+如果默认路径未找到，可以手动选择 Termius 的 `file__0.indexeddb.leveldb` 目录。
 
 ### 从 NyaTerm JSON 导入
 

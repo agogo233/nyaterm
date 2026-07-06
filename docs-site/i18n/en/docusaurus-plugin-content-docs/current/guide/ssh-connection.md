@@ -224,7 +224,16 @@ NyaTerm can import session definitions from other terminal clients. Current supp
 - **WindTerm** (`.sessions`)
 - **SecureCRT** (`.xml`)
 - **FinalShell** (`conn` directory)
+- **Termius** (local IndexedDB)
 - **NyaTerm JSON** (`.json`)
+
+### Import from Termius
+
+Choose **Termius** to read the local Termius IndexedDB and decrypt session data with `Termius/localKey` from the system Credential Manager, Keychain, or Secret Service.
+
+The importer can bring over SSH hosts, groups, usernames, passwords, and SSH private keys. To avoid partially trusted configuration, any Termius encrypted field that cannot be decrypted fails the whole import before anything is written.
+
+If the default path is not found, select the Termius `file__0.indexeddb.leveldb` directory manually.
 
 ### Import from NyaTerm JSON
 
