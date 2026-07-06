@@ -100,6 +100,7 @@ import "@xterm/xterm/css/xterm.css";
 
 const BACKSPACE_INPUT = "\x7f";
 const OSC52_MAX_DECODED_BYTES = 1024 * 1024;
+const LEGACY_CTRL_KEYS = new Set([" ", "@", "[", "\\", "]", "^", "_", "?"]);
 
 interface XTermInternalTrimSource {
   _core?: {
@@ -161,6 +162,20 @@ function decodeOsc52ClipboardText(data: string): string | null {
 
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+function getCtrlPrintableCsiuInput(e: KeyboardEvent): string | null {
+  if (!e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return null;
+
+  const codePoint = e.key.codePointAt(0);
+  if (!codePoint || codePoint < 0x20 || codePoint > 0x7e) return null;
+
+  if (/^[a-z]$/i.test(e.key) || /^[2-8]$/.test(e.key) || LEGACY_CTRL_KEYS.has(e.key)) {
+    return null;
+  }
+
+  const modifier = 1 + 4 + (e.shiftKey ? 1 : 0);
+  return `\x1b[${codePoint};${modifier}u`;
 }
 
 interface SessionCommandAcceptedEvent {
@@ -552,6 +567,7 @@ export default function XTerminal({
       theme: { ...terminalThemeColors },
       allowTransparency: terminalTransparencyEnabled,
       allowProposedApi: true,
+      vtExtensions: { kittyKeyboard: true },
     });
 
     const fitAddon = new FitAddon();
@@ -1182,6 +1198,13 @@ export default function XTerminal({
         ) {
           return false;
         }
+      }
+
+      const ctrlPrintableInput = getCtrlPrintableCsiuInput(e);
+      if (ctrlPrintableInput) {
+        e.preventDefault();
+        terminal.input(ctrlPrintableInput, false);
+        return false;
       }
 
       return true;
