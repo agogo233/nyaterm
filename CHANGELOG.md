@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 This changelog is inferred from release bump commits in git history (for example `chore: bump version to vX.Y.Z`) and grouped by Conventional Commit type.
 
-## [Unreleased]
+## [1.1.13] - 2026-07-06
 
 ### Added
 

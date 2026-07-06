@@ -10,6 +10,56 @@ export type ChangelogRelease = {
 
 const changelogReleasesEn: ChangelogRelease[] = [
   {
+    version: '[1.1.13] - 2026-07-06',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          '**gpu:** Add a GPU monitoring panel for SSH hosts, showing driver/CUDA versions, per-GPU utilization, memory, temperature, power, fan, and a searchable per-process GPU usage list, with a `Show GPU Monitor` toggle and configurable poll interval.',
+          '**docker:** Add a Docker management panel for SSH hosts covering containers, images, volumes, networks, and Compose projects, with container details, logs, exec/enter, lifecycle actions, and confirmed destructive operations such as remove, kill, compose down, and `system prune`.',
+          '**process:** Add a process management panel for SSH hosts with a live, sortable, searchable process list, per-process detail, `renice`, and signal sending (TERM/HUP/STOP/CONT and confirmed KILL).',
+          '**app:** Track live session state so monitor panels bind only to a genuinely active SSH session, and gate activity-panel visibility so toggled-off panels are not auto-opened.',
+          '**ssh:** Add per-connection SSH algorithm preferences with Compatible / Secure / Custom modes, reorderable key-exchange, cipher, MAC, and host-key lists, and Modern/Legacy/Insecure risk labels.',
+          '**connections:** Add a temporary SSH link dialog that opens a one-off session from a pasted `ssh://` URL or `ssh` command string without saving a connection.',
+          '**terminal:** Add session input synchronization via named sync groups, mirroring keystrokes to grouped peers, plus a Send Command target selector for current session, all sessions, or a specific group.',
+          '**file-transfer:** Surface Zmodem (rz/sz) transfers in the transfer list with progress and Zmodem-appropriate controls.',
+          '**terminal:** Add Unicode grapheme support for correct rendering and cursor width of emoji, combining marks, and ZWJ sequences.',
+          '**terminal:** Add a Clear Input action (Ctrl/Cmd+L) available from the context menu and keyboard shortcut.',
+          '**terminal:** Add a Close All Sessions confirmation dialog before closing all tabs.',
+          '**ai:** Add a background execution setting for the AI Assistant.',
+          '**app-lock:** Add window close confirmation and control to the lock screen.',
+          '**window:** Enhance main window state management and positioning.',
+          '**importer:** Extract user and host from WindTerm session imports.',
+        ],
+      },
+      {
+        title: 'Changed',
+        items: [
+          '**terminal:** Expand built-in keyword highlight presets with more error and success phrases.',
+          '**ai:** Improve model name handling for the Deepseek provider.',
+          '**serial:** Refine the serial session form layout for better responsiveness.',
+        ],
+      },
+      {
+        title: 'Fixed',
+        items: [
+          '**russh:** Improve name-list parsing to handle trailing commas and reject invalid entries.',
+          '**ssh:** Improve X11 channel handling in the SSH handler.',
+          '**ssh:** Suppress the flashing console window when running local system shell commands on Windows.',
+          '**hooks:** Add reload handling for forced credential loading.',
+        ],
+      },
+      {
+        title: 'Performance',
+        items: [
+          '**sftp:** Add channel-concurrency limiting and automatic retry with backoff for transient SFTP channel-open failures.',
+          '**watcher:** Use content fingerprinting so auto-upload triggers only on real content changes, not editor metadata-only saves.',
+          '**hooks:** Add a forced-reload option to credential loading.',
+        ],
+      },
+    ],
+  },
+  {
     version: '[1.1.12] - 2026-06-30',
     sections: [
       {
@@ -1469,6 +1519,56 @@ const changelogReleasesEn: ChangelogRelease[] = [
 ];
 
 const changelogReleasesZhCN: ChangelogRelease[] = [
+  {
+    version: '[1.1.13] - 2026-07-06',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**gpu:** 为 SSH 主机新增 GPU 监控面板，展示驱动 / CUDA 版本、每张 GPU 的使用率、显存、温度、功耗、风扇，以及可搜索的 GPU 进程占用列表，并提供 `显示 GPU 监控` 开关和可配置轮询间隔。',
+          '**docker:** 为 SSH 主机新增 Docker 管理面板，涵盖容器、镜像、数据卷、网络和 Compose 项目，支持容器详情、日志、进入 / exec、生命周期操作，以及删除、kill、compose down、`system prune` 等需确认的破坏性操作。',
+          '**process:** 为 SSH 主机新增进程管理面板，提供实时、可排序、可搜索的进程列表、进程详情、`renice` 以及信号发送（TERM/HUP/STOP/CONT 及需确认的 KILL）。',
+          '**app:** 跟踪存活会话状态，使监控面板只绑定到真正处于活动状态的 SSH 会话；并对活动栏面板可见性做门控，避免自动打开已关闭的面板。',
+          '**ssh:** 新增按连接维度的 SSH 算法偏好，提供兼容 / 安全 / 自定义三种模式，支持可重新排序的密钥交换、加密、MAC、主机密钥列表，并标注现代 / 旧版 / 不安全风险等级。',
+          '**connections:** 新增临时 SSH 链接对话框，可从粘贴的 `ssh://` URL 或 `ssh` 命令字符串打开一次性会话，而不保存连接。',
+          '**terminal:** 新增会话输入同步能力，通过命名同步组把按键镜像到组内其他会话，并在发送命令面板中提供当前会话 / 全部会话 / 指定分组的目标选择。',
+          '**file-transfer:** 让 Zmodem（rz/sz）传输以合适的控制方式显示在传输列表中并带实时进度。',
+          '**terminal:** 新增 Unicode grapheme 支持，正确渲染 emoji、组合字符和 ZWJ 序列的显示与光标宽度。',
+          '**terminal:** 新增清空输入动作（Ctrl/Cmd+L），可从右键菜单和快捷键触发。',
+          '**terminal:** 新增关闭全部会话前的确认对话框。',
+          '**ai:** 为 AI 助手新增后台执行设置。',
+          '**app-lock:** 为锁屏新增窗口关闭确认和控制。',
+          '**window:** 增强主窗口状态管理和定位。',
+          '**importer:** 从 WindTerm 会话导入中提取用户和主机。',
+        ],
+      },
+      {
+        title: '变更',
+        items: [
+          '**terminal:** 扩展内置关键词高亮预设，覆盖更多错误和成功短语。',
+          '**ai:** 改进 Deepseek provider 的模型名处理。',
+          '**serial:** 优化串口会话表单布局的响应式表现。',
+        ],
+      },
+      {
+        title: '修复',
+        items: [
+          '**russh:** 改进 name-list 解析，处理尾随逗号并拒绝非法条目。',
+          '**ssh:** 改进 SSH handler 中的 X11 通道处理。',
+          '**ssh:** 抑制 Windows 上运行本地系统 shell 命令时闪现的控制台窗口。',
+          '**hooks:** 为强制凭据加载新增 reload 处理。',
+        ],
+      },
+      {
+        title: '性能',
+        items: [
+          '**sftp:** 新增通道并发限制，并对临时性 SFTP 通道打开失败进行带退避的自动重试。',
+          '**watcher:** 使用内容指纹，使自动上传仅在内容真正变化时触发，而非编辑器仅改动元数据的保存。',
+          '**hooks:** 为凭据加载新增强制重新加载选项。',
+        ],
+      },
+    ],
+  },
   {
     version: '[1.1.12] - 2026-06-30',
     sections: [
