@@ -11,10 +11,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useApp } from "@/context/AppContext";
 import { useConfigTransfer } from "@/hooks/useConfigTransfer";
-import { useApp } from "../../../context/AppContext";
-import { invoke } from "../../../lib/invoke";
-import { logger } from "../../../lib/logger";
+import { invoke } from "@/lib/invoke";
+import { logger } from "@/lib/logger";
 
 interface ImportDialogProps {
   open: boolean;
@@ -81,6 +81,14 @@ const IMPORT_SOURCES: ImportSource[] = [
     picker: "directory",
   },
   {
+    id: "termius",
+    name: "Termius",
+    icon: "/Termius.svg",
+    hint: "local IndexedDB",
+    type: "sessions",
+    picker: "directory",
+  },
+  {
     id: "nyaterm_json",
     name: "JSON",
     icon: MdDataObject,
@@ -120,6 +128,31 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
       return;
     }
 
+    if (source.id === "termius") {
+      try {
+        const count = await invoke<number>("import_termius_sessions", { indexedDbPath: null });
+        if (count > 0) {
+          toast.success(t("savedConnections.importSuccess", { count }));
+          refreshConnections();
+        } else {
+          toast.info(t("savedConnections.importSuccess", { count: 0 }));
+        }
+        return;
+      } catch (e) {
+        const errorText = String(e);
+        if (!errorText.includes("Termius IndexedDB directory was not found")) {
+          logger.error({
+            domain: "settings.persistence",
+            event: "sessions.import_termius_failed",
+            message: "Import Termius sessions failed",
+            error: e,
+          });
+          toast.error(t("savedConnections.importFailed", { error: e }));
+          return;
+        }
+      }
+    }
+
     const selected =
       source.picker === "directory"
         ? await openFileDialog({ directory: true, multiple: false })
@@ -129,7 +162,10 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
           });
     if (!selected) return;
     try {
-      const count = await invoke<number>("import_sessions", { filePath: selected });
+      const count =
+        source.id === "termius"
+          ? await invoke<number>("import_termius_sessions", { indexedDbPath: selected })
+          : await invoke<number>("import_sessions", { filePath: selected });
       if (count > 0) {
         toast.success(t("savedConnections.importSuccess", { count }));
         refreshConnections();

@@ -206,3 +206,14 @@ pub fn import_sessions(app: tauri::AppHandle, file_path: String) -> AppResult<us
     }
     Ok(count)
 }
+
+pub fn import_termius_sessions(
+    app: tauri::AppHandle,
+    indexed_db_path: Option<String>,
+) -> AppResult<usize> {
+    let count = import_prepared_nyaterm_json(&app, parse_termius_indexed_db(indexed_db_path)?)?;
+    if count > 0 {
+        let _ = app.emit("connections-changed", ());
+    }
+    Ok(count)
+}

@@ -21,5 +21,6 @@ include!("windterm.rs");
 include!("securecrt.rs");
 include!("finalshell.rs");
 include!("nyaterm_json.rs");
+include!("termius.rs");
 include!("merge.rs");
 include!("tests.rs");

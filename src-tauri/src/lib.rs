@@ -213,6 +213,7 @@ pub fn run() {
             cmd::watcher::stop_file_watch,
             cmd::translate::translate_text,
             cmd::importer::import_sessions,
+            cmd::importer::import_termius_sessions,
             cmd::backup::export_config,
             cmd::backup::import_config,
             cmd::stats::get_remote_stats,

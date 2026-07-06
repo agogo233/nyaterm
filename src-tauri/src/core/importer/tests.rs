@@ -390,4 +390,202 @@ mod tests {
                 .contains("port must be between 1 and 65535")
         );
     }
+
+    #[test]
+    fn termius_normalizes_local_key_variants() {
+        use base64::Engine as _;
+
+        let raw = "12345678901234567890123456789012";
+        let key = normalize_termius_local_key(raw).expect("raw key");
+        assert_eq!(key.as_ref(), raw.as_bytes());
+
+        let encoded = base64::engine::general_purpose::STANDARD.encode(raw.as_bytes());
+        let key = normalize_termius_local_key(&encoded).expect("base64 key");
+        assert_eq!(key.as_ref(), raw.as_bytes());
+
+        let key = normalize_termius_local_key_bytes(raw.as_bytes()).expect("raw bytes key");
+        assert_eq!(key.as_ref(), raw.as_bytes());
+
+        let utf16le: Vec<u8> = raw
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let key = normalize_termius_local_key_bytes(&utf16le).expect("utf16 key");
+        assert_eq!(key.as_ref(), raw.as_bytes());
+
+        let json = format!(r#"{{"localKey":"{encoded}"}}"#);
+        let key = normalize_termius_local_key(&json).expect("json key");
+        assert_eq!(key.as_ref(), raw.as_bytes());
+    }
+
+    #[test]
+    fn termius_decrypts_secretbox_values_and_rejects_corruption() {
+        let key = *b"12345678901234567890123456789012";
+        let nonce = *b"abcdefghijklmnopqrstuvwx";
+        let encrypted = encrypt_termius_secret_for_test("hello", &key, &nonce);
+
+        let decrypted = decrypt_termius_secret(&encrypted, &key).expect("decrypt value");
+        assert_eq!(decrypted.as_str(), "hello");
+
+        let mut corrupted = encrypted;
+        corrupted.replace_range(corrupted.len() - 2.., "AA");
+        let error = decrypt_termius_secret(&corrupted, &key).unwrap_err();
+        assert!(error.to_string().contains("Cannot decrypt Termius"));
+    }
+
+    #[test]
+    fn termius_tagged_string_parser_handles_multibyte_lengths() {
+        let long = "x".repeat(300);
+        let mut bytes = Vec::new();
+        tagged_string("private_key", &mut bytes);
+        tagged_string(&long, &mut bytes);
+
+        let strings = parse_tagged_strings(&bytes);
+        assert_eq!(strings, vec!["private_key".to_string(), long]);
+    }
+
+    #[test]
+    fn termius_maps_host_ports_from_linked_ssh_configs() {
+        let mut bytes = Vec::new();
+        tagged_string("id", &mut bytes);
+        tagged_integer(20_265_758, &mut bytes);
+        tagged_string("updated_at", &mut bytes);
+        tagged_string("2024-04-30T03:36:37", &mut bytes);
+        tagged_string("address", &mut bytes);
+        tagged_string("ignored.example.com", &mut bytes);
+        tagged_string("status", &mut bytes);
+        tagged_string("SYNCHRONIZED", &mut bytes);
+        tagged_integer(0, &mut bytes);
+        tagged_integer(0, &mut bytes);
+
+        tagged_string("id", &mut bytes);
+        tagged_integer(20_265_758, &mut bytes);
+        tagged_string("updated_at", &mut bytes);
+        tagged_string("2024-04-30T03:36:37", &mut bytes);
+        tagged_string("identity", &mut bytes);
+        tagged_string("id", &mut bytes);
+        tagged_integer(13_239_297, &mut bytes);
+        tagged_string("port", &mut bytes);
+        tagged_integer(22123, &mut bytes);
+        tagged_string("resource_uri", &mut bytes);
+        tagged_string("/api/v3/terminal/ssh/config/20265758/", &mut bytes);
+        tagged_string("status", &mut bytes);
+        tagged_string("SYNCHRONIZED", &mut bytes);
+        tagged_integer(0, &mut bytes);
+        tagged_integer(0, &mut bytes);
+
+        tagged_string("id", &mut bytes);
+        tagged_integer(19_657_566, &mut bytes);
+        tagged_string("updated_at", &mut bytes);
+        tagged_string("2024-04-30T03:36:37", &mut bytes);
+        tagged_string("ssh_config", &mut bytes);
+        tagged_string("id", &mut bytes);
+        tagged_integer(20_265_758, &mut bytes);
+        tagged_string("address", &mut bytes);
+        tagged_string("example.com", &mut bytes);
+        tagged_string("label", &mut bytes);
+        tagged_string("Example", &mut bytes);
+        tagged_string("resource_uri", &mut bytes);
+        tagged_string("/api/v3/terminal/host/19657566/", &mut bytes);
+        tagged_string("status", &mut bytes);
+        tagged_string("SYNCHRONIZED", &mut bytes);
+
+        let values = parse_tagged_values(&bytes);
+        assert!(values.contains(&TermiusTaggedValue::Integer(22123)));
+        let store = collect_termius_store(&values);
+        assert_eq!(store.ssh_configs.len(), 1);
+        assert_eq!(store.hosts.len(), 1);
+        assert_eq!(store.hosts[0].ssh_config_id, Some("20265758".to_string()));
+        assert_eq!(store.ssh_configs[0].port, Some(22123));
+
+        let prepared = prepare_termius_import(store).expect("prepare import");
+        assert_eq!(prepared.connections.len(), 1);
+        assert!(matches!(
+            &prepared.connections[0].config,
+            ConnectionType::Ssh { port: 22123, .. }
+        ));
+    }
+
+    #[test]
+    fn termius_maps_hosts_groups_passwords_and_keys() {
+        crate::utils::crypto::set_master_password(None);
+
+        let store = TermiusRawStore {
+            ssh_configs: Vec::new(),
+            groups: vec![TermiusRawGroup {
+                id: "group-1".to_string(),
+                local_id: Some("group-1".to_string()),
+                label: Some("Production".to_string()),
+                parent_id: None,
+                updated_at: Some("2024-01-01T00:00:00".to_string()),
+            }],
+            ssh_keys: vec![TermiusRawSshKey {
+                id: "key-1".to_string(),
+                local_id: Some("key-1".to_string()),
+                label: Some("Ops key".to_string()),
+                passphrase: Some("passphrase".to_string()),
+                private_key: Some(
+                    "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----"
+                        .to_string(),
+                ),
+                updated_at: Some("2024-01-01T00:00:00".to_string()),
+            }],
+            identities: vec![TermiusRawIdentity {
+                id: "identity-1".to_string(),
+                local_id: Some("identity-1".to_string()),
+                label: Some("Deploy".to_string()),
+                username: Some("deploy".to_string()),
+                password: Some("secret".to_string()),
+                ssh_key_id: Some("key-1".to_string()),
+                updated_at: Some("2024-01-01T00:00:00".to_string()),
+            }],
+            hosts: vec![
+                TermiusRawHost {
+                    id: "host-1".to_string(),
+                    local_id: Some("host-1".to_string()),
+                    label: Some("Web".to_string()),
+                    address: Some("web.example.com".to_string()),
+                    username: None,
+                    password: None,
+                    ssh_config_id: None,
+                    identity_id: Some("identity-1".to_string()),
+                    group_id: Some("group-1".to_string()),
+                    port: Some(2222),
+                    updated_at: Some("2024-01-01T00:00:00".to_string()),
+                },
+                TermiusRawHost {
+                    id: "host-2".to_string(),
+                    local_id: Some("host-2".to_string()),
+                    label: Some("Db".to_string()),
+                    address: Some("db.example.com".to_string()),
+                    username: Some("root".to_string()),
+                    password: Some("db-pass".to_string()),
+                    ssh_config_id: None,
+                    identity_id: None,
+                    group_id: None,
+                    port: None,
+                    updated_at: Some("2024-01-01T00:00:00".to_string()),
+                },
+            ],
+        };
+
+        let prepared = prepare_termius_import(store).expect("prepare termius import");
+
+        assert_eq!(prepared.groups, vec![vec!["Production".to_string()]]);
+        assert_eq!(prepared.ssh_keys.len(), 1);
+        assert_eq!(prepared.passwords.len(), 2);
+        assert_eq!(prepared.connections.len(), 2);
+
+        let key_auth = prepared.connections[0].auth.as_ref().expect("key auth");
+        assert_eq!(key_auth.mode, "key");
+        assert!(key_auth.key_id.is_some());
+        assert_eq!(
+            prepared.connections[0].group_path,
+            Some(vec!["Production".to_string()])
+        );
+
+        let password_auth = prepared.connections[1].auth.as_ref().expect("password auth");
+        assert_eq!(password_auth.mode, "password");
+        assert!(password_auth.password_id.is_some());
+    }
 }
