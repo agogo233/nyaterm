@@ -1247,7 +1247,7 @@
   },
   "settings": {
     "actionLinks": "Action Links",
-    "actionLinksDesc": "Recognize patterns (IP, archive, host:port, path) in terminal output. Ctrl/Cmd+Click to run the default command. Alt+Click to show all actions.",
+    "actionLinksDesc": "Recognize patterns (IP, archive, host:port, path) in terminal output. Ctrl/Cmd+Click to insert the default command. Alt+Click to show all actions.",
     "actionLinksMatcherArchive": "Archive File",
     "actionLinksMatcherArchiveDesc": "extract, list contents",
     "actionLinksMatcherHostPort": "Host:Port",
@@ -1958,6 +1958,7 @@
     "actionLinkKind_hostPort": "Host:Port",
     "actionLinkKind_ip": "IPv4",
     "actionLinkKind_url": "URL",
+    "actionLinkPrepareCommand": "Insert",
     "aiExecuting": "AI is executing a command...",
     "allSessions": "All Sessions (A)",
     "click": "Click",

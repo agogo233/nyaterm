@@ -1247,7 +1247,7 @@
   },
   "settings": {
     "actionLinks": "快捷动作",
-    "actionLinksDesc": "识别终端输出中的 IP、压缩包、host:port 和路径，并提供快捷操作。Ctrl/Cmd + 单击执行默认动作，Alt + 单击查看所有动作。",
+    "actionLinksDesc": "识别终端输出中的 IP、压缩包、host:port 和路径，并提供快捷操作。Ctrl/Cmd + 单击填入默认命令，Alt + 单击查看所有动作。",
     "actionLinksMatcherArchive": "压缩文件",
     "actionLinksMatcherArchiveDesc": "解压、查看内容",
     "actionLinksMatcherHostPort": "Host:Port",
@@ -1958,6 +1958,7 @@
     "actionLinkKind_hostPort": "Host:Port",
     "actionLinkKind_ip": "IPv4",
     "actionLinkKind_url": "URL",
+    "actionLinkPrepareCommand": "填入",
     "aiExecuting": "AI 正在执行命令...",
     "allSessions": "所有会话(A)",
     "click": "单击",
