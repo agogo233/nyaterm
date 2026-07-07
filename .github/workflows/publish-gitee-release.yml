@@ -379,6 +379,7 @@ jobs:
                   "PATCH",
                   f"/repos/{owner_q}/{repo_q}/releases/{release_id}",
                   data={
+                      "tag_name": tag,
                       "name": release_name,
                       "body": initial_body,
                       "prerelease": str(is_prerelease).lower(),
@@ -432,6 +433,7 @@ jobs:
                   "PATCH",
                   f"/repos/{owner_q}/{repo_q}/releases/{release_id}",
                   data={
+                      "tag_name": tag,
                       "name": release_name,
                       "body": final_body,
                       "prerelease": str(is_prerelease).lower(),
@@ -562,6 +564,7 @@ jobs:
               "PATCH",
               f"/repos/{owner_q}/{repo_q}/releases/{release_id}",
               data={
+                  "tag_name": tag,
                   "name": release_name,
                   "body": final_body,
                   "prerelease": str(is_prerelease).lower(),
