@@ -40,6 +40,7 @@ import {
 import { getErrorMessage, shouldPromptConnectionEditOnFailure } from "./lib/errors";
 import { invoke } from "./lib/invoke";
 import { logger } from "./lib/logger";
+import { isMacOS } from "./lib/platform";
 import {
   listenOpenSendCommandPanel,
   type SendCommandPanelDraft,
@@ -293,6 +294,7 @@ function App() {
   const [sendCommandDraft, setSendCommandDraft] = useState<SendCommandPanelDraft | null>(null);
   const [showSessionQuickSwitcher, setShowSessionQuickSwitcher] = useState(false);
   const [showTemporarySshLink, setShowTemporarySshLink] = useState(false);
+  const allowProgrammaticWindowCloseRef = useRef(false);
   const handleSendCommandDraftConsumed = useCallback(() => {
     setSendCommandDraft(null);
   }, []);
@@ -1423,15 +1425,20 @@ function App() {
   useEffect(() => {
     if (!settingsLoaded) return;
     let unlistenCloseRequested: (() => void) | undefined;
-    let programmaticClose = false;
 
     import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
         const currentWindow = getCurrentWindow();
         return currentWindow.onCloseRequested(async (event) => {
-          if (programmaticClose) return;
+          if (allowProgrammaticWindowCloseRef.current) return;
 
           event.preventDefault();
+
+          if (isMacOS) {
+            handleCloseActiveTab();
+            return;
+          }
+
           try {
             await persistWorkspaceLayoutNow();
           } catch (error) {
@@ -1448,12 +1455,12 @@ function App() {
             return;
           }
 
-          programmaticClose = true;
+          allowProgrammaticWindowCloseRef.current = true;
           await currentWindow.close().catch(() => {
-            programmaticClose = false;
+            allowProgrammaticWindowCloseRef.current = false;
           });
           window.setTimeout(() => {
-            programmaticClose = false;
+            allowProgrammaticWindowCloseRef.current = false;
           }, 1000);
         });
       })
@@ -1465,7 +1472,12 @@ function App() {
     return () => {
       unlistenCloseRequested?.();
     };
-  }, [appSettings.general.minimize_to_tray, persistWorkspaceLayoutNow, settingsLoaded]);
+  }, [
+    appSettings.general.minimize_to_tray,
+    handleCloseActiveTab,
+    persistWorkspaceLayoutNow,
+    settingsLoaded,
+  ]);
 
   const handleRequestQuit = useCallback(() => {
     if (tabs.length > 0 && appSettings.general.confirm_on_close !== false) {
@@ -1487,8 +1499,19 @@ function App() {
     }
 
     import("@tauri-apps/api/window")
-      .then(({ getCurrentWindow }) => getCurrentWindow().close())
-      .catch(() => {});
+      .then(({ getCurrentWindow }) => {
+        allowProgrammaticWindowCloseRef.current = true;
+        return getCurrentWindow().close().catch((error) => {
+          allowProgrammaticWindowCloseRef.current = false;
+          throw error;
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        window.setTimeout(() => {
+          allowProgrammaticWindowCloseRef.current = false;
+        }, 1000);
+      });
   }, [appSettings.general.confirm_on_close, appSettings.general.minimize_to_tray, tabs.length]);
 
   useEffect(() => {

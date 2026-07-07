@@ -1189,6 +1189,7 @@ export default function XTerminal({
       ];
       for (const sid of swallowIds) {
         if (matchesKeyEvent(resolveShortcutKeys(sid, kb), e)) {
+          e.preventDefault();
           return false;
         }
       }

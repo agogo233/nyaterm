@@ -108,7 +108,7 @@ export const SHORTCUT_REGISTRY: ShortcutDefinition[] = [
     id: "tab.close",
     category: "tab",
     labelKey: "settings.shortcutLabels.closeTab",
-    defaultKeys: "ctrl+shift+w, meta+shift+w",
+    defaultKeys: "ctrl+shift+w, meta+w, meta+shift+w",
   },
   {
     id: "tab.next",
