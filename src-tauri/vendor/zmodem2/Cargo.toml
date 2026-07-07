@@ -48,6 +48,10 @@ harness = true
 [dependencies.bitflags]
 version = "2.4"
 
+[dependencies.crc32fast]
+version = "1.5"
+default-features = false
+
 [dependencies.hex]
 version = "0.4.3"
 

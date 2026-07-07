@@ -9668,6 +9668,7 @@ name = "zmodem2"
 version = "0.5.0"
 dependencies = [
  "bitflags 2.11.1",
+ "crc32fast",
  "hex",
  "thiserror 1.0.69",
 ]
