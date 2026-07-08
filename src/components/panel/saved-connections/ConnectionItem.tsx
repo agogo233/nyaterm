@@ -375,7 +375,7 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
             <Tooltip open={detailsOpen}>
               <TooltipTrigger asChild>
                 <span
-                  className="flex min-w-0 shrink-0 items-center gap-2 pr-16"
+                  className="flex min-w-0 shrink-0 items-center gap-2 pr-14"
                   onPointerEnter={scheduleDetailsOpen}
                   onPointerLeave={handlePointerLeave}
                 >
@@ -391,11 +391,11 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
               <ConnectionDetailsTooltip conn={conn} savedConnections={savedConnections} t={t} />
             </Tooltip>
             <div
-              className="pointer-events-none sticky right-2 z-10 ml-auto flex shrink-0 items-center gap-0.5 rounded px-1 opacity-0 backdrop-blur-sm transition-opacity group-hover/item:pointer-events-auto group-hover/item:opacity-100"
+              className="pointer-events-none sticky right-2 z-10 ml-auto flex shrink-0 items-center gap-1 rounded px-1 opacity-0 backdrop-blur-sm transition-opacity group-hover/item:pointer-events-auto group-hover/item:opacity-100"
               style={{ backgroundColor: "var(--df-bg-hover)" }}
             >
               <button
-                className="p-0.5 cursor-pointer transition-colors hover:opacity-80"
+                className="flex h-5 w-5 items-center justify-center cursor-pointer rounded transition-colors hover:opacity-80"
                 style={{ color: "var(--df-text-dimmed)" }}
                 aria-label={directConnectLabel}
                 onPointerEnter={closeAndSuppressDetails}
@@ -412,10 +412,10 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
                   handleConnectOnly(conn);
                 }}
               >
-                <MdLink className="text-sm cursor-pointer" />
+                <MdLink className="text-[0.95rem] cursor-pointer" />
               </button>
               <button
-                className="p-0.5 cursor-pointer transition-colors hover:opacity-80"
+                className="flex h-5 w-5 items-center justify-center cursor-pointer rounded transition-colors hover:opacity-80"
                 style={{ color: "var(--df-text-dimmed)" }}
                 aria-label={t("savedConnections.edit")}
                 onPointerEnter={closeAndSuppressDetails}
@@ -432,27 +432,7 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
                   onEditConnection(conn);
                 }}
               >
-                <MdEdit className="text-sm cursor-pointer" />
-              </button>
-              <button
-                className="p-0.5 cursor-pointer hover:text-red-400 transition-colors"
-                style={{ color: "var(--df-text-dimmed)" }}
-                aria-label={t("savedConnections.delete")}
-                onPointerEnter={closeAndSuppressDetails}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                }}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  closeAndSuppressDetails();
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeAndSuppressDetails();
-                  setDeleteTarget(conn);
-                }}
-              >
-                <MdDelete className="text-sm cursor-pointer" />
+                <MdEdit className="text-[0.95rem] cursor-pointer" />
               </button>
             </div>
           </div>
