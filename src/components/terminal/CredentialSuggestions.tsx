@@ -116,7 +116,7 @@ function CredentialSuggestions({
             className="px-1 py-0.5 rounded text-[0.5625rem]"
             style={{ backgroundColor: "var(--df-bg-hover)", color: "var(--df-text-muted)" }}
           >
-            ↑↓
+            ↑↓ Tab
           </Kbd>{" "}
           {t("credentialAutofill.select")}
         </span>

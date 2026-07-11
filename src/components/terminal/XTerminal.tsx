@@ -894,6 +894,21 @@ export default function XTerminal({
       return e.key;
     };
 
+    const moveCredentialSelection = (direction: 1 | -1) => {
+      if (!credentialShowPanelRef.current || credentialMatchesRef.current.length === 0) {
+        return false;
+      }
+
+      const cur = credentialSelectedIndexRef.current;
+      const len = credentialMatchesRef.current.length;
+      const next =
+        direction > 0 ? (cur < 0 || cur >= len - 1 ? 0 : cur + 1) : cur <= 0 ? len - 1 : cur - 1;
+
+      credentialSelectedIndexRef.current = next;
+      setCredentialSelectedIndex(next);
+      return true;
+    };
+
     const moveInputCursorAfterSelection = (
       selectedInputRange: InputSelectionRange,
       targetCursor: number,
@@ -931,6 +946,17 @@ export default function XTerminal({
       if (isShiftInsertPasteEvent(e)) {
         e.preventDefault();
         pasteClipboard().catch(() => {});
+        return false;
+      }
+
+      if (
+        e.key === "Tab" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        moveCredentialSelection(e.shiftKey ? -1 : 1)
+      ) {
+        e.preventDefault();
         return false;
       }
 
@@ -1758,19 +1784,19 @@ export default function XTerminal({
 
       if (credentialShowPanelRef.current && credentialMatchesRef.current.length > 0) {
         if (data === "\x1b[A") {
-          const cur = credentialSelectedIndexRef.current;
-          const len = credentialMatchesRef.current.length;
-          const next = cur <= 0 ? len - 1 : cur - 1;
-          credentialSelectedIndexRef.current = next;
-          setCredentialSelectedIndex(next);
+          moveCredentialSelection(-1);
           return;
         }
         if (data === "\x1b[B") {
-          const cur = credentialSelectedIndexRef.current;
-          const len = credentialMatchesRef.current.length;
-          const next = cur >= len - 1 ? 0 : cur + 1;
-          credentialSelectedIndexRef.current = next;
-          setCredentialSelectedIndex(next);
+          moveCredentialSelection(1);
+          return;
+        }
+        if (data === "\t") {
+          moveCredentialSelection(1);
+          return;
+        }
+        if (data === "\x1b[Z") {
+          moveCredentialSelection(-1);
           return;
         }
         if (data === "\r" && credentialSelectedIndexRef.current >= 0) {
