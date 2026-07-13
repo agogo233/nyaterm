@@ -44,6 +44,7 @@ fn sample_connection(id: &str, group_id: Option<&str>, sort_order: i32) -> Saved
         description: None,
         sort_order,
         icon: None,
+        icon_auto_detect: None,
         auth: Some(ConnectionAuth {
             mode: "password".to_string(),
             password_id: None,

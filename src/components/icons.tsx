@@ -61,7 +61,7 @@ import {
   SiYoutube,
   SiZhihu,
 } from "react-icons/si";
-import type { FileEntry } from "@/types/global";
+import type { FileEntry, RemoteStatsSystem } from "@/types/global";
 
 function createLocalSvgIcon(src: string): IconType {
   const LocalSvgIcon: IconType = ({ className, size, style, title }) => {
@@ -303,6 +303,73 @@ export function resolveConnectionIcon(iconKey?: string | null): QuickIconDef {
   }
 
   return SERVER_ICONS[DEFAULT_CONNECTION_ICON];
+}
+
+function normalizeRemoteSystemText(system: Pick<RemoteStatsSystem, "os" | "arch">): string {
+  return `${system.os ?? ""} ${system.arch ?? ""}`
+    .trim()
+    .replace(/[_./]/g, "-")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+export function inferConnectionIconKeyFromRemoteSystem(
+  system: Pick<RemoteStatsSystem, "os" | "arch"> | null | undefined,
+): string | null {
+  if (!system) return null;
+
+  const text = normalizeRemoteSystemText(system);
+  if (!text) return null;
+
+  const distroMatches: Array<[string[], string]> = [
+    [
+      ["alibaba cloud linux", "alibaba-cloud-linux", "aliyun linux", "alinux"],
+      "alibaba-cloud-linux",
+    ],
+    [["amazon linux", "amzn", "aws linux"], "aws"],
+    [["alma linux", "almalinux"], "alma"],
+    [["alpine"], "alpine"],
+    [["anolis"], "anolis"],
+    [["arch"], "arch"],
+    [["centos", "cent os"], "centos"],
+    [["debian"], "debian"],
+    [["deepin"], "deepin"],
+    [["fedora"], "fedora"],
+    [["huawei", "opencloudos"], "huawei"],
+    [["kali"], "kali"],
+    [["kylin"], "kylin"],
+    [["linux mint", "linuxmint"], "mint"],
+    [["nixos", "nix os"], "nixos"],
+    [["open euler", "openeuler"], "openeuler"],
+    [["opensuse", "open suse", "sles", "suse"], "opensuse"],
+    [["rocky"], "rocky"],
+    [["tencent", "tlinux"], "tencentos"],
+    [["ubuntu"], "ubuntu"],
+    [["uniontech", "uos"], "uos"],
+  ];
+
+  for (const [needles, iconKey] of distroMatches) {
+    if (needles.some((needle) => text.includes(needle))) {
+      return iconKey;
+    }
+  }
+
+  if (text.includes("windows") || text.includes("mingw") || text.includes("msys")) {
+    return "windows";
+  }
+  if (
+    text.includes("darwin") ||
+    text.includes("macos") ||
+    text.includes("mac os") ||
+    text.includes("os x")
+  ) {
+    return "apple";
+  }
+  if (text.includes("linux") || text.includes("gnu")) {
+    return "linux";
+  }
+
+  return null;
 }
 
 export const SEARCH_ICONS: Record<string, QuickIconDef> = {

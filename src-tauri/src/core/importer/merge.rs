@@ -97,6 +97,7 @@ fn import_legacy_sessions(
             description: sess.description,
             sort_order: 0,
             icon: None,
+            icon_auto_detect: None,
             auth: Some(ConnectionAuth {
                 mode: sess.auth_type,
                 password_id: None,
@@ -150,6 +151,7 @@ fn import_prepared_nyaterm_json(
             description: conn.description,
             sort_order: conn.sort_order,
             icon: conn.icon,
+            icon_auto_detect: None,
             auth: conn.auth,
             network: None,
             post_login: None,

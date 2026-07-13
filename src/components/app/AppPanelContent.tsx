@@ -14,6 +14,7 @@ import ResourceMonitor from "@/components/panel/ResourceMonitor";
 import SyncBackupHistoryPanel from "@/components/panel/SyncBackupHistoryPanel";
 import SavedConnections from "@/components/panel/saved-connections";
 import SecurityAuthPanel from "@/components/panel/security-auth";
+import type { RemoteStatsState } from "@/hooks/useRemoteStats";
 import type { AIOpenIntent } from "@/lib/aiEvents";
 import type { NewSessionTarget } from "@/lib/windowManager";
 import type { SavedConnection, SessionInfo, SessionPane } from "@/types/global";
@@ -24,6 +25,8 @@ interface AppPanelContentProps {
   activeConnection: SavedConnection | null;
   activeSessionId: string | null;
   activeSshSessionId: string | null;
+  remoteStatsEnabled: boolean;
+  remoteStats: RemoteStatsState;
   recordingSessions: Set<string>;
   aiIntent: AIOpenIntent | null;
   transferHeight: number;
@@ -50,6 +53,8 @@ export default function AppPanelContent({
   activeConnection,
   activeSessionId,
   activeSshSessionId,
+  remoteStatsEnabled,
+  remoteStats,
   recordingSessions,
   aiIntent,
   transferHeight,
@@ -125,7 +130,13 @@ export default function AppPanelContent({
       case "commandHistory":
         return <CommandHistory activeSessionId={activeSessionId} onCommandSend={onCommandSend} />;
       case "resourceMonitor":
-        return <ResourceMonitor activeSessionId={activeSshSessionId} />;
+        return (
+          <ResourceMonitor
+            activeSessionId={activeSshSessionId}
+            enabled={remoteStatsEnabled}
+            remoteStats={remoteStats}
+          />
+        );
       case "gpuMonitor":
         return <GpuMonitor activeSessionId={activeSshSessionId} />;
       case "processManager":

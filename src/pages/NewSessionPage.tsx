@@ -25,8 +25,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useApp } from "@/context/AppContext";
 import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
 import { isValidSerialBaudRate, MAX_SERIAL_BAUD_RATE, MIN_SERIAL_BAUD_RATE } from "@/lib/serial";
@@ -83,6 +86,7 @@ const isValidPostLoginDelay = (value: number) =>
 
 export default function NewSessionPage() {
   const { t } = useTranslation();
+  const { appSettings } = useApp();
   const params = new URLSearchParams(window.location.search);
   const editId = params.get("edit") ?? undefined;
   const autoConnect = params.get("autoConnect") === "1";
@@ -108,6 +112,7 @@ export default function NewSessionPage() {
   const [hasPassword, setHasPassword] = useState(false);
   const [keyId, setKeyId] = useState("");
   const [iconKey, setIconKey] = useState("");
+  const [iconAutoDetect, setIconAutoDetect] = useState(true);
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
@@ -190,6 +195,7 @@ export default function NewSessionPage() {
         setGroupId(found.group_id || "");
         setDescription(found.description || "");
         setIconKey(found.icon || "");
+        setIconAutoDetect(found.icon_auto_detect ?? !found.icon);
 
         const tabMap: Record<string, string> = {
           ssh: "ssh",
@@ -282,6 +288,7 @@ export default function NewSessionPage() {
     setHasPassword(false);
     setKeyId("");
     setIconKey("");
+    setIconAutoDetect(true);
     setProxyId("");
     setJumpHostId("");
     setOtpId("");
@@ -339,6 +346,11 @@ export default function NewSessionPage() {
     }
     return buildGroupPath(groupId, groupsById) || t("dialog.none");
   }, [groupId, groupsById, newGroupNamePending, t]);
+  const remoteStatsEnabled = appSettings.ui.show_remote_stats ?? true;
+  const iconAutoDetectDisabled = !remoteStatsEnabled;
+  const iconAutoDetectTooltip = !remoteStatsEnabled
+    ? t("dialog.iconAutoDetectRemoteStatsDisabledTooltip")
+    : t("dialog.iconAutoDetectTooltip");
 
   const newGroupParentLabel = useMemo(() => {
     if (!groupId || groupId === "new") {
@@ -625,6 +637,7 @@ export default function NewSessionPage() {
         description: normalizedDescription || undefined,
         sort_order: sortOrder,
         icon: iconKey || undefined,
+        icon_auto_detect: currentTab === "ssh" ? iconAutoDetect : false,
         ...(currentTab === "ssh"
           ? {
               host: normalizedHost,
@@ -763,6 +776,7 @@ export default function NewSessionPage() {
                           title={key === DEFAULT_CONNECTION_ICON ? t("dialog.none") : key}
                           onClick={() => {
                             setIconKey(key);
+                            setIconAutoDetect(false);
                             setShowIconPicker(false);
                           }}
                         >
@@ -780,6 +794,7 @@ export default function NewSessionPage() {
                           title={key}
                           onClick={() => {
                             setIconKey(key);
+                            setIconAutoDetect(false);
                             setShowIconPicker(false);
                           }}
                         >
@@ -797,6 +812,7 @@ export default function NewSessionPage() {
                           title={key}
                           onClick={() => {
                             setIconKey(key);
+                            setIconAutoDetect(false);
                             setShowIconPicker(false);
                           }}
                         >
@@ -805,6 +821,33 @@ export default function NewSessionPage() {
                       );
                     })}
                   </div>
+                  {currentTab === "ssh" && (
+                    <div className="mt-2 border-t pt-2">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div
+                            className={`flex items-center justify-between gap-3 rounded px-1.5 py-1 ${
+                              iconAutoDetectDisabled ? "cursor-not-allowed opacity-70" : ""
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-xs font-medium">
+                                {t("dialog.iconAutoDetect")}
+                              </div>
+                            </div>
+                            <Switch
+                              size="sm"
+                              checked={iconAutoDetect}
+                              disabled={iconAutoDetectDisabled}
+                              onCheckedChange={setIconAutoDetect}
+                              aria-label={t("dialog.iconAutoDetect")}
+                            />
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{iconAutoDetectTooltip}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
                 </PopoverContent>
               </Popover>
             </div>

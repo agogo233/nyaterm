@@ -265,6 +265,8 @@ pub struct SavedConnection {
     pub sort_order: i32,
     #[serde(default)]
     pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_auto_detect: Option<bool>,
 
     #[serde(default)]
     pub auth: Option<ConnectionAuth>,

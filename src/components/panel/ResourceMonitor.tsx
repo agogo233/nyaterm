@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FaMemory } from "react-icons/fa6";
 import { LuCpu } from "react-icons/lu";
@@ -13,11 +13,7 @@ import {
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useApp } from "@/context/AppContext";
-import { invoke } from "@/lib/invoke";
-import type { RemoteStats } from "@/types/global";
-
-const MAX_CONSECUTIVE_FAILURES = 3;
+import type { RemoteStatsState } from "@/hooks/useRemoteStats";
 
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return "0 B";
@@ -164,69 +160,18 @@ function SectionCard({
 
 interface ResourceMonitorProps {
   activeSessionId: string | null;
+  enabled: boolean;
+  remoteStats: RemoteStatsState;
 }
 
-export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProps) {
+export default function ResourceMonitor({
+  activeSessionId,
+  enabled,
+  remoteStats,
+}: ResourceMonitorProps) {
   const { t } = useTranslation();
-  const { appSettings } = useApp();
-  const [stats, setStats] = useState<RemoteStats | null>(null);
-  const [error, setError] = useState(false);
-  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [cpuExpanded, setCpuExpanded] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const fetchingRef = useRef(false);
-  const failCountRef = useRef(0);
-
-  const enabled = appSettings.ui.show_remote_stats ?? true;
-  const pollIntervalMs = Math.max(1, appSettings.ui.remote_stats_interval ?? 3) * 1000;
-
-  const fetchStats = useCallback(async (sessionId: string, manual = false) => {
-    if (fetchingRef.current) return;
-    fetchingRef.current = true;
-    if (manual) setIsManualRefreshing(true);
-
-    try {
-      const data = await invoke<RemoteStats>("get_remote_stats", { sessionId });
-      setStats(data);
-      setError(false);
-      failCountRef.current = 0;
-    } catch {
-      failCountRef.current += 1;
-      setError(true);
-      if (failCountRef.current >= MAX_CONSECUTIVE_FAILURES) {
-        setStats(null);
-      }
-    } finally {
-      fetchingRef.current = false;
-      if (manual) setIsManualRefreshing(false);
-    }
-  }, []);
-
-  const handleRefresh = useCallback(() => {
-    if (!enabled || !activeSessionId) return;
-    void fetchStats(activeSessionId, true);
-  }, [activeSessionId, enabled, fetchStats]);
-
-  useEffect(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-
-    if (!enabled || !activeSessionId) {
-      setStats(null);
-      setError(false);
-      failCountRef.current = 0;
-      return;
-    }
-
-    fetchStats(activeSessionId);
-    pollRef.current = setInterval(() => fetchStats(activeSessionId), pollIntervalMs);
-
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [enabled, activeSessionId, pollIntervalMs, fetchStats]);
+  const { stats, error, isManualRefreshing, refresh } = remoteStats;
 
   const memTotal = stats ? stats.memory.used + stats.memory.available : 0;
   const memUsedPct = memTotal > 0 ? (stats!.memory.used / memTotal) * 100 : 0;
@@ -244,7 +189,7 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-40"
-                onClick={handleRefresh}
+                onClick={refresh}
                 disabled={!enabled || !activeSessionId || isManualRefreshing}
                 aria-label={t("resourceMonitor.refresh")}
               >

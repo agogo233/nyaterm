@@ -83,6 +83,60 @@ pub fn save_connection(
     Ok(target_id)
 }
 
+fn update_connection_icon_in_config(
+    cfg: &mut config::AppConfig,
+    connection_id: &str,
+    icon: Option<String>,
+    icon_auto_detect: bool,
+) -> AppResult<bool> {
+    let connection = cfg
+        .connections
+        .iter_mut()
+        .find(|connection| connection.id == connection_id)
+        .ok_or_else(|| {
+            AppError::SessionNotFound(format!("Connection '{}' not found", connection_id))
+        })?;
+
+    let normalized_icon = icon.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    let next_auto_detect = Some(icon_auto_detect);
+
+    if connection.icon == normalized_icon && connection.icon_auto_detect == next_auto_detect {
+        return Ok(false);
+    }
+
+    connection.icon = normalized_icon;
+    connection.icon_auto_detect = next_auto_detect;
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn update_connection_icon(
+    app: tauri::AppHandle,
+    connection_id: String,
+    icon: Option<String>,
+    icon_auto_detect: bool,
+) -> AppResult<()> {
+    let mut cfg = config::load_config(&app)?;
+    let changed =
+        update_connection_icon_in_config(&mut cfg, &connection_id, icon, icon_auto_detect)?;
+
+    if !changed {
+        return Ok(());
+    }
+
+    config::save_config(&app, &cfg)?;
+    let _ = app.emit("connections-changed", ());
+    schedule_cloud_sync_notify(app.clone());
+    Ok(())
+}
+
 fn validate_ssh_algorithm_config(connection: &SavedConnection) -> AppResult<()> {
     if !matches!(connection.config, config::ConnectionType::Ssh { .. }) {
         return Ok(());
@@ -223,7 +277,8 @@ fn find_connection_for_proxy_jump<'a>(
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_group_from_config, validate_local_terminal_config, validate_proxy_jump_config,
+        delete_group_from_config, update_connection_icon_in_config, validate_local_terminal_config,
+        validate_proxy_jump_config,
     };
     use crate::config::{
         AiExecutionProfile, ConnectionNetwork, ConnectionType, Group, SavedConnection,
@@ -247,6 +302,7 @@ mod tests {
             description: None,
             sort_order: 0,
             icon: None,
+            icon_auto_detect: None,
             auth: None,
             network: proxy_jump_id.map(|jump_id| ConnectionNetwork {
                 proxy_id: None,
@@ -282,6 +338,7 @@ mod tests {
             description: None,
             sort_order: 0,
             icon: None,
+            icon_auto_detect: None,
             auth: None,
             network: proxy_jump_id.map(|jump_id| ConnectionNetwork {
                 proxy_id: None,
@@ -310,6 +367,7 @@ mod tests {
             description: None,
             sort_order: 0,
             icon: None,
+            icon_auto_detect: None,
             auth: None,
             network: None,
             post_login: None,
@@ -482,6 +540,28 @@ mod tests {
             connection_ids,
             vec!["sibling-connection", "ungrouped-connection"]
         );
+    }
+
+    #[test]
+    fn update_connection_icon_changes_only_icon_fields() {
+        let mut config = SessionsConfig {
+            groups: vec![],
+            connections: vec![ssh_connection("target", None)],
+        };
+
+        let changed =
+            update_connection_icon_in_config(&mut config, "target", Some(" ubuntu ".into()), true)
+                .unwrap();
+
+        assert!(changed);
+        assert_eq!(config.connections[0].icon.as_deref(), Some("ubuntu"));
+        assert_eq!(config.connections[0].icon_auto_detect, Some(true));
+
+        let unchanged =
+            update_connection_icon_in_config(&mut config, "target", Some("ubuntu".into()), true)
+                .unwrap();
+
+        assert!(!unchanged);
     }
 }
 

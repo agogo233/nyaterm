@@ -244,6 +244,7 @@ export interface SavedConnection {
   description?: string;
   sort_order?: number;
   icon?: string;
+  icon_auto_detect?: boolean;
   auth?: ConnectionAuth;
   network?: ConnectionNetwork;
   post_login?: ConnectionPostLogin;

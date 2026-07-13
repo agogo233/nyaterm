@@ -185,6 +185,7 @@ pub fn run() {
             cmd::connection::get_saved_connections,
             cmd::connection::get_supported_ssh_algorithms,
             cmd::connection::save_connection,
+            cmd::connection::update_connection_icon,
             cmd::connection::delete_connection,
             cmd::connection::get_connection_password_value,
             cmd::connection::reorder_items,

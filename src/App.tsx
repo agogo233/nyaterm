@@ -8,11 +8,12 @@ import AppPanelContent from "./components/app/AppPanelContent";
 import type { HostKeyVerifyRequest } from "./components/dialog/connections/HostKeyVerifyDialog";
 import type { OtpRequest } from "./components/dialog/connections/OtpDialog";
 import type { SshAuthRequest } from "./components/dialog/connections/SshAuthDialog";
-import type { DockerSudoPasswordRequest } from "./components/dialog/docker/DockerSudoPasswordDialog";
 import TemporarySshLinkDialog from "./components/dialog/connections/TemporarySshLinkDialog";
+import type { DockerSudoPasswordRequest } from "./components/dialog/docker/DockerSudoPasswordDialog";
 import SessionQuickSwitcher, {
   type QuickSwitcherSession,
 } from "./components/dialog/terminal/SessionQuickSwitcherDialog";
+import { inferConnectionIconKeyFromRemoteSystem } from "./components/icons";
 import { useApp } from "./context/AppContext";
 import { TransferProvider } from "./context/TransferContext";
 import { useActivityBarController } from "./hooks/useActivityBarController";
@@ -20,6 +21,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useIdleLock } from "./hooks/useIdleLock";
 import { useMacSelectionGuard } from "./hooks/useMacSelectionGuard";
 import { useModalChildWindows } from "./hooks/useModalChildWindows";
+import { useRemoteStats } from "./hooks/useRemoteStats";
 import { resolveDisplayKeys } from "./hooks/useShortcutMap";
 import { useTerminalZoom } from "./hooks/useTerminalZoom";
 import { useUnreadTabs } from "./hooks/useUnreadTabs";
@@ -117,6 +119,10 @@ function getConnectionSessionType(
   connection: Pick<SavedConnection, "type"> | null | undefined,
 ): SessionType {
   return connection ? CONNECTION_SESSION_TYPES[connection.type] : "SSH";
+}
+
+function isConnectionIconAutoDetectEnabled(connection: SavedConnection): boolean {
+  return connection.icon_auto_detect ?? !connection.icon;
 }
 
 function isSessionCreationCancelled(error: unknown) {
@@ -1512,10 +1518,12 @@ function App() {
     import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
         allowProgrammaticWindowCloseRef.current = true;
-        return getCurrentWindow().close().catch((error) => {
-          allowProgrammaticWindowCloseRef.current = false;
-          throw error;
-        });
+        return getCurrentWindow()
+          .close()
+          .catch((error) => {
+            allowProgrammaticWindowCloseRef.current = false;
+            throw error;
+          });
       })
       .catch(() => {})
       .finally(() => {
@@ -2435,6 +2443,13 @@ function App() {
     activeSshSessionId && (liveSessionIds === null || liveSessionIds.has(activeSshSessionId))
       ? activeSshSessionId
       : null;
+  const remoteStatsEnabled = uiConfig.show_remote_stats ?? true;
+  const remoteStats = useRemoteStats(
+    activeLiveSshSessionId,
+    remoteStatsEnabled,
+    uiConfig.remote_stats_interval ?? 3,
+  );
+  const pendingAutoIconUpdatesRef = useRef<Map<string, string>>(new Map());
   const activeSerialSessionId =
     activePane && !activePane.connecting && !activePane.connectError && activePane.type === "Serial"
       ? activePane.sessionId
@@ -2478,6 +2493,42 @@ function App() {
     visit(terminalWindows);
     return targets;
   }, [tabsById, terminalWindows]);
+
+  useEffect(() => {
+    const stats = remoteStats.stats;
+    if (!remoteStatsEnabled || !stats || !activeConnection) return;
+    if (activeConnection.type !== "ssh") return;
+    if (!isConnectionIconAutoDetectEnabled(activeConnection)) return;
+
+    const iconKey = inferConnectionIconKeyFromRemoteSystem(stats.system);
+    if (!iconKey || iconKey === activeConnection.icon) return;
+
+    const pendingKey = `${iconKey}:auto`;
+    const pendingUpdates = pendingAutoIconUpdatesRef.current;
+    if (pendingUpdates.get(activeConnection.id) === pendingKey) return;
+
+    pendingUpdates.set(activeConnection.id, pendingKey);
+    invoke("update_connection_icon", {
+      connectionId: activeConnection.id,
+      icon: iconKey,
+      iconAutoDetect: true,
+    })
+      .catch((error) => {
+        logger.error({
+          domain: "ui.error",
+          event: "connection.auto_icon_update_failed",
+          message: "Failed to update auto-detected connection icon",
+          ids: { connection_id: activeConnection.id },
+          error,
+        });
+      })
+      .finally(() => {
+        if (pendingUpdates.get(activeConnection.id) === pendingKey) {
+          pendingUpdates.delete(activeConnection.id);
+        }
+      });
+  }, [activeConnection, remoteStats.stats, remoteStatsEnabled]);
+
   const activeBottomPanel = uiConfig.show_serial_send_panel
     ? "serialSend"
     : uiConfig.show_quick_cmd_bar
@@ -2672,6 +2723,8 @@ function App() {
         activeConnection={activeConnection}
         activeSessionId={activeSessionId}
         activeSshSessionId={activeLiveSshSessionId}
+        remoteStatsEnabled={remoteStatsEnabled}
+        remoteStats={remoteStats}
         recordingSessions={recordingSessions}
         aiIntent={aiIntent}
         transferHeight={uiConfig.transfer_height || 180}
@@ -2695,6 +2748,8 @@ function App() {
       activeSessionId,
       aiIntent,
       canReconnectSessionById,
+      remoteStats,
+      remoteStatsEnabled,
       handleSaveSessionTranscript,
       handleDisconnectSessionById,
       handleEditConnection,
