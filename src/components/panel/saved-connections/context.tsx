@@ -51,7 +51,7 @@ export interface SavedConnectionsContextValue {
 
   // Dialog triggers
   onNewConnection: (parentGroupId?: string) => void;
-  setDeleteTarget: (conn: SavedConnection | null) => void;
+  requestDeleteConnection: (conn: SavedConnection) => void;
   setRenamingConn: (conn: SavedConnection | null) => void;
   setRenameValue: (v: string) => void;
   setDeleteFolderTarget: (g: Group | null) => void;

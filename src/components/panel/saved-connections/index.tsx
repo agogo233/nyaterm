@@ -5,6 +5,7 @@ import {
   MdAdd,
   MdClose,
   MdCreateNewFolder,
+  MdDelete,
   MdDeleteSweep,
   MdLink,
   MdMoreVert,
@@ -138,7 +139,7 @@ export default function SavedConnections({
   const sortMode = (appSettings.ui.saved_connections_sort_mode || "default") as SortMode;
 
   // ── Dialog state ──────────────────────────────────────────────────────────
-  const [deleteTarget, setDeleteTarget] = useState<SavedConnection | null>(null);
+  const [deleteTargets, setDeleteTargets] = useState<SavedConnection[]>([]);
   const [renamingConn, setRenamingConn] = useState<SavedConnection | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteFolderTarget, setDeleteFolderTarget] = useState<Group | null>(null);
@@ -378,6 +379,23 @@ export default function SavedConnections({
 
     return [...orderedVisible, ...hiddenSelected];
   }, [connectionById, selectedConnectionIds, visibleConnectionIdSet, visibleConnectionIds]);
+
+  const requestDeleteConnection = useCallback(
+    (conn: SavedConnection) => {
+      if (selectedConnectionIds.has(conn.id) && selectedConnections.length > 1) {
+        setDeleteTargets(selectedConnections);
+        return;
+      }
+
+      setDeleteTargets([conn]);
+    },
+    [selectedConnectionIds, selectedConnections],
+  );
+
+  const requestDeleteSelectedConnections = useCallback(() => {
+    if (selectedConnections.length === 0) return;
+    setDeleteTargets(selectedConnections);
+  }, [selectedConnections]);
 
   useEffect(() => {
     const validIds = new Set(savedConnections.map((connection) => connection.id));
@@ -628,14 +646,28 @@ export default function SavedConnections({
   }, [appSettings.keybindings, handleCopyConnections, selectedConnections]);
 
   const handleDeleteConfirm = async () => {
-    if (!deleteTarget) return;
+    if (deleteTargets.length === 0) return;
+    const targetIds = new Set(deleteTargets.map((connection) => connection.id));
+
     try {
-      await invoke("delete_connection", { id: deleteTarget.id });
+      await Promise.all(
+        deleteTargets.map((connection) => invoke("delete_connection", { id: connection.id })),
+      );
+      setSelectedConnectionIds((prev) => {
+        const next = new Set(Array.from(prev).filter((id) => !targetIds.has(id)));
+        return next.size === prev.size ? prev : next;
+      });
+      if (
+        lastSelectedConnectionIdRef.current &&
+        targetIds.has(lastSelectedConnectionIdRef.current)
+      ) {
+        lastSelectedConnectionIdRef.current = null;
+      }
       refreshConnections();
     } catch (e) {
       toast.error(t("savedConnections.deleteFailed", { error: e }));
     } finally {
-      setDeleteTarget(null);
+      setDeleteTargets([]);
     }
   };
 
@@ -1261,7 +1293,7 @@ export default function SavedConnections({
     handleConnectionContextMenu,
     onEditConnection,
     onNewConnection,
-    setDeleteTarget,
+    requestDeleteConnection,
     setRenamingConn,
     setRenameValue,
     setDeleteFolderTarget,
@@ -1401,6 +1433,20 @@ export default function SavedConnections({
                   <BiImport className="text-sm text-[var(--df-text-muted)]" />
                   {t("settings.importConfig")}
                 </DropdownMenuItem>
+                {selectedConnections.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={requestDeleteSelectedConnections}
+                      className="cursor-pointer gap-2 py-1.5 focus:bg-[var(--df-bg-hover)] text-red-500 focus:text-red-500"
+                    >
+                      <MdDelete className="text-sm" />
+                      {selectedConnections.length > 1
+                        ? t("savedConnections.deleteSelected")
+                        : t("savedConnections.delete")}
+                    </DropdownMenuItem>
+                  </>
+                )}
                 {savedConnections.length > 0 && (
                   <>
                     <DropdownMenuSeparator />
@@ -1476,6 +1522,14 @@ export default function SavedConnections({
                   : t("savedConnections.connect")}
               </ContextMenuItem>
             )}
+            {selectedConnections.length > 0 && (
+              <ContextMenuItem className="text-red-400" onClick={requestDeleteSelectedConnections}>
+                <MdDelete className="text-[0.875rem] mr-2" />
+                {selectedConnections.length > 1
+                  ? t("savedConnections.deleteSelected")
+                  : t("savedConnections.delete")}
+              </ContextMenuItem>
+            )}
             {selectedConnections.length > 0 && <ContextMenuSeparator />}
             <ContextMenuItem onClick={() => onNewConnection()}>
               <MdAdd className="text-[0.875rem] text-muted-foreground mr-2" />
@@ -1495,10 +1549,11 @@ export default function SavedConnections({
 
         {/* Dialogs */}
         <DeleteConnectionDialog
-          open={!!deleteTarget}
-          connectionName={deleteTarget?.name}
+          open={deleteTargets.length > 0}
+          connectionName={deleteTargets.length === 1 ? deleteTargets[0]?.name : undefined}
+          count={deleteTargets.length}
           onConfirm={handleDeleteConfirm}
-          onCancel={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTargets([])}
         />
         <DeleteFolderDialog
           open={!!deleteFolderTarget}

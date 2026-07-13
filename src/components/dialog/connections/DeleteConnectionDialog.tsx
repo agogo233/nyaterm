@@ -12,6 +12,7 @@ import {
 interface DeleteConnectionDialogProps {
   open: boolean;
   connectionName?: string;
+  count?: number;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -19,18 +20,24 @@ interface DeleteConnectionDialogProps {
 export default function DeleteConnectionDialog({
   open,
   connectionName,
+  count = 1,
   onConfirm,
   onCancel,
 }: DeleteConnectionDialogProps) {
   const { t } = useTranslation();
+  const isMultiDelete = count > 1;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onCancel()}>
       <DialogContent showCloseButton={false} className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{t("savedConnections.delete")}</DialogTitle>
+          <DialogTitle>
+            {isMultiDelete ? t("savedConnections.deleteSelected") : t("savedConnections.delete")}
+          </DialogTitle>
           <DialogDescription>
-            {t("savedConnections.deleteConfirm", { name: connectionName })}
+            {isMultiDelete
+              ? t("savedConnections.deleteSelectedConfirm", { count })
+              : t("savedConnections.deleteConfirm", { name: connectionName })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

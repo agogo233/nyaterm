@@ -227,7 +227,7 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
     handleConnectionSelectionStart,
     handleConnectionContextMenu,
     onEditConnection,
-    setDeleteTarget,
+    requestDeleteConnection,
     setRenamingConn,
     setRenameValue,
     handleDragStart,
@@ -492,11 +492,13 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
           className="text-red-400"
           onClick={() => {
             closeAndSuppressDetails();
-            setDeleteTarget(conn);
+            requestDeleteConnection(conn);
           }}
         >
           <MdDelete className="text-[0.875rem] mr-2" />
-          {t("savedConnections.delete")}
+          {isSelected && selectedConnectionIds.size > 1
+            ? t("savedConnections.deleteSelected")
+            : t("savedConnections.delete")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
