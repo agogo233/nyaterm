@@ -43,7 +43,6 @@ import {
 import { getErrorMessage, shouldPromptConnectionEditOnFailure } from "./lib/errors";
 import { invoke } from "./lib/invoke";
 import { logger } from "./lib/logger";
-import { isMacOS } from "./lib/platform";
 import {
   listenOpenSendCommandPanel,
   type SendCommandPanelDraft,
@@ -1470,11 +1469,6 @@ function App() {
 
           event.preventDefault();
 
-          if (isMacOS) {
-            handleCloseActiveTab();
-            return;
-          }
-
           try {
             await persistWorkspaceLayoutNow();
           } catch (error) {
@@ -1508,12 +1502,7 @@ function App() {
     return () => {
       unlistenCloseRequested?.();
     };
-  }, [
-    appSettings.general.minimize_to_tray,
-    handleCloseActiveTab,
-    persistWorkspaceLayoutNow,
-    settingsLoaded,
-  ]);
+  }, [appSettings.general.minimize_to_tray, persistWorkspaceLayoutNow, settingsLoaded]);
 
   const handleRequestQuit = useCallback(() => {
     if (tabs.length > 0 && appSettings.general.confirm_on_close !== false) {
