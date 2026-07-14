@@ -754,6 +754,15 @@
     "unknownGpu": "Unknown GPU",
     "uuid": "UUID"
   },
+  "headerStatus": {
+    "host": "Host overview",
+    "resources": "Resources",
+    "select": "Choose header status",
+    "session": "Session",
+    "uptimeDays": "{{count}}d",
+    "uptimeHours": "{{count}}h",
+    "uptimeMinutes": "{{count}}m"
+  },
   "lockScreen": {
     "message": "Locked due to inactivity",
     "passwordPlaceholder": "Unlock password",

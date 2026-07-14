@@ -754,6 +754,15 @@
     "unknownGpu": "未知显卡",
     "uuid": "UUID"
   },
+  "headerStatus": {
+    "host": "主机概览",
+    "resources": "资源监控",
+    "select": "选择顶部显示信息",
+    "session": "会话信息",
+    "uptimeDays": "{{count}}天",
+    "uptimeHours": "{{count}}小时",
+    "uptimeMinutes": "{{count}}分钟"
+  },
   "lockScreen": {
     "message": "由于长时间无操作，应用程序已自动锁定",
     "passwordPlaceholder": "请输入解锁密码",
