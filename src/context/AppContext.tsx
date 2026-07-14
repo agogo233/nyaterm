@@ -12,6 +12,7 @@ import {
 import { useAppLockState } from "@/hooks/useAppLockState";
 import { DEFAULT_AI_SETTINGS } from "@/lib/aiSettings";
 import { DEFAULT_CLOUD_SYNC_SETTINGS } from "@/lib/cloudSync";
+import { updateConnectionAutoIconAfterSessionStart } from "@/lib/connectionAutoIcon";
 import { DEFAULT_TERMINAL_FONT_FAMILY, getDefaultUiFontFamily } from "@/lib/defaultFonts";
 import { getErrorMessage } from "@/lib/errors";
 import {
@@ -1072,12 +1073,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const handleRestoredSessionCreated = useCallback(
-    async (tabId: string, paneId: string, sessionId: string) => {
+    async (tabId: string, paneId: string, sessionId: string, connectionId?: string) => {
       if (!hasPane(tabId, paneId)) {
         await closeStaleCreatedSession(sessionId);
         return;
       }
       updatePaneSession(tabId, paneId, sessionId);
+      if (connectionId) {
+        void updateConnectionAutoIconAfterSessionStart({
+          connectionId,
+          sessionId,
+          remoteStatsEnabled: appSettingsRef.current.ui.show_remote_stats ?? true,
+        });
+      }
     },
     [closeStaleCreatedSession, hasPane, updatePaneSession],
   );
@@ -1151,7 +1159,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 connectionId: cid,
                 createRequestId: pane.createRequestId,
               })
-                .then((sessionId) => handleRestoredSessionCreated(tab.id, pane.id, sessionId))
+                .then((sessionId) =>
+                  handleRestoredSessionCreated(tab.id, pane.id, sessionId, cid),
+                )
                 .catch((e) =>
                   handleRestoredSessionFailed(tab.id, pane.id, "SSH", pane.connectionId, e),
                 );

@@ -13,7 +13,6 @@ import type { DockerSudoPasswordRequest } from "./components/dialog/docker/Docke
 import SessionQuickSwitcher, {
   type QuickSwitcherSession,
 } from "./components/dialog/terminal/SessionQuickSwitcherDialog";
-import { inferConnectionIconKeyFromRemoteSystem } from "./components/icons";
 import { useApp } from "./context/AppContext";
 import { TransferProvider } from "./context/TransferContext";
 import { useActivityBarController } from "./hooks/useActivityBarController";
@@ -40,6 +39,7 @@ import {
   NON_PANEL_IDS,
   type TrayAction,
 } from "./lib/appWorkspace";
+import { updateConnectionAutoIconAfterSessionStart } from "./lib/connectionAutoIcon";
 import { getErrorMessage, shouldPromptConnectionEditOnFailure } from "./lib/errors";
 import { invoke } from "./lib/invoke";
 import { logger } from "./lib/logger";
@@ -118,10 +118,6 @@ function getConnectionSessionType(
   connection: Pick<SavedConnection, "type"> | null | undefined,
 ): SessionType {
   return connection ? CONNECTION_SESSION_TYPES[connection.type] : "SSH";
-}
-
-function isConnectionIconAutoDetectEnabled(connection: SavedConnection): boolean {
-  return connection.icon_auto_detect ?? !connection.icon;
 }
 
 function isSessionCreationCancelled(error: unknown) {
@@ -271,6 +267,17 @@ function App() {
     runtimeInfoLoaded,
   } = useApp();
   const uiConfig = appSettings.ui;
+  const remoteStatsEnabled = uiConfig.show_remote_stats ?? true;
+  const updateAutoIconForSessionStart = useCallback(
+    (connectionId: string | null | undefined, sessionId: string) => {
+      void updateConnectionAutoIconAfterSessionStart({
+        connectionId,
+        sessionId,
+        remoteStatsEnabled,
+      });
+    },
+    [remoteStatsEnabled],
+  );
   const multiPanelOpen = appSettings.appearance.panel_multi_open;
   const { t, i18n } = useTranslation();
 
@@ -634,6 +641,7 @@ function App() {
             }
             focusTerminalSession(sessionId);
             recordRecentConnection(connectionId);
+            updateAutoIconForSessionStart(connectionId, sessionId);
           } catch (error) {
             if (
               isSessionCreationCancelled(error) ||
@@ -676,6 +684,7 @@ function App() {
     recordRecentConnection,
     setActivePane,
     setActiveTabId,
+    updateAutoIconForSessionStart,
     updatePaneSession,
     updateTabSession,
     replaceAppSettings,
@@ -946,6 +955,7 @@ function App() {
         }
         updateTabSession(tabId, sessionId);
         recordRecentConnection(connection.id);
+        updateAutoIconForSessionStart(connection.id, sessionId);
       } catch (error) {
         if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
           return;
@@ -972,6 +982,7 @@ function App() {
       recordRecentConnection,
       t,
       terminalWindows,
+      updateAutoIconForSessionStart,
       updateTabSession,
     ],
   );
@@ -1291,9 +1302,10 @@ function App() {
       const pane = tab ? findPaneBySessionId(tab, oldSessionId) : null;
       if (tab && pane) {
         updatePaneSession(tab.id, pane.id, newSessionId);
+        updateAutoIconForSessionStart(pane.connectionId, newSessionId);
       }
     },
-    [tabs, updatePaneSession],
+    [tabs, updateAutoIconForSessionStart, updatePaneSession],
   );
 
   const handleConnectionError = useCallback(
@@ -1626,6 +1638,7 @@ function App() {
           }
           if (pane.connectionId) {
             recordRecentConnection(pane.connectionId);
+            updateAutoIconForSessionStart(pane.connectionId, sessionId);
           }
         } catch (error) {
           if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
@@ -1661,6 +1674,7 @@ function App() {
       maybePromptConnectionEdit,
       recordRecentConnection,
       t,
+      updateAutoIconForSessionStart,
       updateTabSession,
     ],
   );
@@ -1696,6 +1710,7 @@ function App() {
         updateTabSession(tabId, sessionId);
         if (pane.connectionId) {
           recordRecentConnection(pane.connectionId);
+          updateAutoIconForSessionStart(pane.connectionId, sessionId);
         }
       } catch (error) {
         if ((tabId && !hasTab(tabId)) || isSessionCreationCancelled(error)) {
@@ -1717,7 +1732,15 @@ function App() {
         toast.error(t("tabCtx.multiplexSshFailed"));
       }
     },
-    [addPendingTab, hasTab, markTabConnectionFailed, recordRecentConnection, t, updateTabSession],
+    [
+      addPendingTab,
+      hasTab,
+      markTabConnectionFailed,
+      recordRecentConnection,
+      t,
+      updateAutoIconForSessionStart,
+      updateTabSession,
+    ],
   );
 
   const handleDuplicateSessionWithCommand = useCallback(
@@ -1790,6 +1813,7 @@ function App() {
         updatePaneSession(tab.id, pane.id, newSessionId);
         if (pane.connectionId) {
           recordRecentConnection(pane.connectionId);
+          updateAutoIconForSessionStart(pane.connectionId, newSessionId);
         }
         toast.success(t("tabCtx.reconnectSuccess"));
       } catch (error) {
@@ -1818,6 +1842,7 @@ function App() {
       maybePromptConnectionEdit,
       recordRecentConnection,
       t,
+      updateAutoIconForSessionStart,
       updatePaneSession,
     ],
   );
@@ -1862,6 +1887,7 @@ function App() {
         updatePaneSession(tab.id, pane.id, newSessionId);
         if (pane.connectionId) {
           recordRecentConnection(pane.connectionId);
+          updateAutoIconForSessionStart(pane.connectionId, newSessionId);
         }
         toast.success(t("tabCtx.reconnectSuccess"));
       } catch (error) {
@@ -1891,6 +1917,7 @@ function App() {
       recordRecentConnection,
       t,
       tabs,
+      updateAutoIconForSessionStart,
       updatePaneSession,
     ],
   );
@@ -1938,6 +1965,7 @@ function App() {
         }
         if (pane.connectionId) {
           recordRecentConnection(pane.connectionId);
+          updateAutoIconForSessionStart(pane.connectionId, sessionId);
         }
         window.dispatchEvent(new CustomEvent("nyaterm:refresh-terminals"));
       } catch (error) {
@@ -1973,6 +2001,7 @@ function App() {
       setActiveTabId,
       t,
       terminalWindows,
+      updateAutoIconForSessionStart,
       updateTabSession,
     ],
   );
@@ -2015,6 +2044,7 @@ function App() {
         updatePaneSession(tabId, paneId, newSessionId);
         if (pane.connectionId) {
           recordRecentConnection(pane.connectionId);
+          updateAutoIconForSessionStart(pane.connectionId, newSessionId);
         }
       } catch (error) {
         if (isSessionCreationCancelled(error) || !hasPane(tabId, paneId)) {
@@ -2045,6 +2075,7 @@ function App() {
       maybePromptConnectionEdit,
       recordRecentConnection,
       tabs,
+      updateAutoIconForSessionStart,
       updatePaneSession,
     ],
   );
@@ -2476,13 +2507,11 @@ function App() {
     activeSshSessionId && (liveSessionIds === null || liveSessionIds.has(activeSshSessionId))
       ? activeSshSessionId
       : null;
-  const remoteStatsEnabled = uiConfig.show_remote_stats ?? true;
   const remoteStats = useRemoteStats(
     activeLiveSshSessionId,
     remoteStatsEnabled,
     uiConfig.remote_stats_interval ?? 3,
   );
-  const pendingAutoIconUpdatesRef = useRef<Map<string, string>>(new Map());
   const activeSerialSessionId =
     activePane && !activePane.connecting && !activePane.connectError && activePane.type === "Serial"
       ? activePane.sessionId
@@ -2526,41 +2555,6 @@ function App() {
     visit(terminalWindows);
     return targets;
   }, [tabsById, terminalWindows]);
-
-  useEffect(() => {
-    const stats = remoteStats.stats;
-    if (!remoteStatsEnabled || !stats || !activeConnection) return;
-    if (activeConnection.type !== "ssh") return;
-    if (!isConnectionIconAutoDetectEnabled(activeConnection)) return;
-
-    const iconKey = inferConnectionIconKeyFromRemoteSystem(stats.system);
-    if (!iconKey || iconKey === activeConnection.icon) return;
-
-    const pendingKey = `${iconKey}:auto`;
-    const pendingUpdates = pendingAutoIconUpdatesRef.current;
-    if (pendingUpdates.get(activeConnection.id) === pendingKey) return;
-
-    pendingUpdates.set(activeConnection.id, pendingKey);
-    invoke("update_connection_icon", {
-      connectionId: activeConnection.id,
-      icon: iconKey,
-      iconAutoDetect: true,
-    })
-      .catch((error) => {
-        logger.error({
-          domain: "ui.error",
-          event: "connection.auto_icon_update_failed",
-          message: "Failed to update auto-detected connection icon",
-          ids: { connection_id: activeConnection.id },
-          error,
-        });
-      })
-      .finally(() => {
-        if (pendingUpdates.get(activeConnection.id) === pendingKey) {
-          pendingUpdates.delete(activeConnection.id);
-        }
-      });
-  }, [activeConnection, remoteStats.stats, remoteStatsEnabled]);
 
   const activeBottomPanel = uiConfig.show_serial_send_panel
     ? "serialSend"
@@ -2628,6 +2622,7 @@ function App() {
         updateTabSession(tabId, sessionId);
         focusTerminalSession(sessionId);
         recordRecentConnection(connection.id);
+        updateAutoIconForSessionStart(connection.id, sessionId);
       } catch (error) {
         if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
           return;
@@ -2652,6 +2647,7 @@ function App() {
       maybePromptConnectionEdit,
       recordRecentConnection,
       t,
+      updateAutoIconForSessionStart,
       updateTabSession,
     ],
   );

@@ -42,6 +42,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useApp } from "@/context/AppContext";
 import { useConfigTransfer } from "@/hooks/useConfigTransfer";
 import { resolveShortcutKeys } from "@/hooks/useShortcutMap";
+import { updateConnectionAutoIconAfterSessionStart } from "@/lib/connectionAutoIcon";
 import { getErrorMessage, shouldPromptConnectionEditOnFailure } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
 import { logger } from "@/lib/logger";
@@ -137,6 +138,7 @@ export default function SavedConnections({
   const restoredLastOpenedConnectionIdRef = useRef<string | null>(null);
   const lastSelectedConnectionIdRef = useRef<string | null>(null);
   const sortMode = (appSettings.ui.saved_connections_sort_mode || "default") as SortMode;
+  const remoteStatsEnabled = appSettings.ui.show_remote_stats ?? true;
 
   // ── Dialog state ──────────────────────────────────────────────────────────
   const [deleteTargets, setDeleteTargets] = useState<SavedConnection[]>([]);
@@ -540,6 +542,11 @@ export default function SavedConnections({
       updateTabSession(tabId, sessionId);
       recordRecentConnection(conn.id);
       updateUi({ saved_connections_last_opened_connection_id: conn.id });
+      void updateConnectionAutoIconAfterSessionStart({
+        connectionId: conn.id,
+        sessionId,
+        remoteStatsEnabled,
+      });
     } catch (e) {
       const errorMessage = getErrorMessage(e);
       if (errorMessage.toLowerCase().includes("session creation cancelled") || !hasTab(tabId)) {
