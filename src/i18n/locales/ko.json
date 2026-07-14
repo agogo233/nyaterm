@@ -220,6 +220,10 @@
     "weeks": "주",
     "years": "년"
   },
+  "connection": {
+    "encoding": "인코딩",
+    "encodingFollowGlobal": "전역 설정 따르기"
+  },
   "credentialAutofill": {
     "dismiss": "닫기",
     "fill": "채우기",

@@ -8,6 +8,7 @@ fn serial_session_thread(
     rt_handle: tokio::runtime::Handle,
     config: SerialConfig,
     connection_id: Option<String>,
+    encoding: String,
     port: Box<dyn SerialPort>,
     mut reader_port: Box<dyn SerialPort>,
 ) {
@@ -39,6 +40,7 @@ fn serial_session_thread(
     let port_writer_reader = port_writer.clone();
     let output_reader = output.clone();
     let recording_mgr_reader = recording_mgr.clone();
+    let encoding_reader = encoding.clone();
 
     let reader_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let reader_flag = reader_running.clone();
@@ -96,7 +98,7 @@ fn serial_session_thread(
                             initial_bytes,
                         } => {
                             if !passthrough.is_empty() {
-                                let pre = String::from_utf8_lossy(&passthrough).to_string();
+                                let pre = super::decode_terminal_output(&passthrough, &encoding_reader);
                                 if !pre.is_empty() {
                                     if let Some(ref recorder) = recording_mgr_reader {
                                         recorder.write_output(&sid_reader, &pre);
@@ -138,7 +140,7 @@ fn serial_session_thread(
                         }
                     };
 
-                    let mut text = String::from_utf8_lossy(&process_raw).to_string();
+                    let mut text = super::decode_terminal_output(&process_raw, &encoding_reader);
                     if let Ok(mut proc) = capture_for_reader.lock() {
                         if proc.has_active() {
                             text = proc.process(&text);

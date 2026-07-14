@@ -167,6 +167,9 @@ export default function NewSessionPage() {
   const [telnetSendNaws, setTelnetSendNaws] = useState(true);
   const [telnetSendSga, setTelnetSendSga] = useState(true);
 
+  // Per-connection encoding ("global" = follow global setting)
+  const [encoding, setEncoding] = useState("global");
+
   useEffect(() => {
     invoke<Group[]>("get_groups")
       .then(setGroups)
@@ -204,6 +207,7 @@ export default function NewSessionPage() {
           serial: "serial",
         };
         setCurrentTab(tabMap[found.type] || "ssh");
+        setEncoding(found.encoding || "global");
 
         if (found.type === "ssh") {
           setHost(found.host || "");
@@ -324,6 +328,7 @@ export default function NewSessionPage() {
     setTelnetForceCharacterAtATime(false);
     setTelnetSendNaws(true);
     setTelnetSendSga(true);
+    setEncoding("global");
     setShowIconPicker(false);
     setError("");
     setConnecting(false);
@@ -650,6 +655,7 @@ export default function NewSessionPage() {
         sort_order: sortOrder,
         icon: iconKey || undefined,
         icon_auto_detect: currentTab === "ssh" ? iconAutoDetect : false,
+        encoding: encoding === "global" ? undefined : encoding,
         ...(currentTab === "ssh"
           ? {
               host: normalizedHost,
@@ -1050,6 +1056,8 @@ export default function NewSessionPage() {
               sftpSettings={sftpSettings}
               setSftpSettings={setSftpSettings}
               connectionId={initialData?.id || editId}
+              encoding={encoding}
+              setEncoding={setEncoding}
             />
           </TabsContent>
 
@@ -1061,6 +1069,8 @@ export default function NewSessionPage() {
               setShellArgs={setShellArgs}
               workingDir={workingDir}
               setWorkingDir={setWorkingDir}
+              encoding={encoding}
+              setEncoding={setEncoding}
             />
           </TabsContent>
 
@@ -1097,6 +1107,8 @@ export default function NewSessionPage() {
               sendSga={telnetSendSga}
               setSendSga={setTelnetSendSga}
               connectionId={initialData?.id || editId}
+              encoding={encoding}
+              setEncoding={setEncoding}
             />
           </TabsContent>
 
@@ -1120,6 +1132,8 @@ export default function NewSessionPage() {
               setStopBits={setStopBits}
               backspaceMode={serialBackspaceMode}
               setBackspaceMode={setSerialBackspaceMode}
+              encoding={encoding}
+              setEncoding={setEncoding}
             />
           </TabsContent>
 

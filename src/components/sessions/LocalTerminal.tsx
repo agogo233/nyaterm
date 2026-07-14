@@ -19,6 +19,8 @@ interface LocalTerminalProps {
   setShellArgs: (v: string) => void;
   workingDir: string;
   setWorkingDir: (v: string) => void;
+  encoding: string;
+  setEncoding: (v: string) => void;
 }
 
 const BUILTIN_SHELL_PATHS = ["powershell.exe", "cmd.exe", "bash", "wsl.exe", "wt.exe"] as const;
@@ -30,6 +32,8 @@ export function LocalTerminal({
   setShellArgs,
   workingDir,
   setWorkingDir,
+  encoding,
+  setEncoding,
 }: LocalTerminalProps) {
   const { t } = useTranslation();
 
@@ -138,6 +142,21 @@ export function LocalTerminal({
           value={workingDir}
           onChange={(e) => setWorkingDir(e.target.value)}
         />
+      </div>
+      <div>
+        <Label className="text-[0.6875rem] text-muted-foreground">
+          {t("connection.encoding")}
+        </Label>
+        <Select value={encoding} onValueChange={setEncoding}>
+          <SelectTrigger className="mt-1 h-8 w-full text-xs">
+            <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
+            <SelectItem value="UTF-8">UTF-8</SelectItem>
+            <SelectItem value="GBK">GBK</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );

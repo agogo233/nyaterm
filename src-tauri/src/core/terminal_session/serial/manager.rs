@@ -72,6 +72,13 @@ pub async fn create_serial_session(
     let sid = session_id.clone();
     let mgr = manager.clone();
     let rt_handle = tokio::runtime::Handle::current();
+    let encoding = if !config.encoding.is_empty() {
+        config.encoding.clone()
+    } else {
+        crate::config::load_app_settings(&app)
+            .map(|settings| settings.interaction.default_encoding)
+            .unwrap_or_else(|_| "UTF-8".to_string())
+    };
 
     std::thread::spawn(move || {
         serial_session_thread(
@@ -84,6 +91,7 @@ pub async fn create_serial_session(
             rt_handle,
             config,
             connection_id,
+            encoding,
             port,
             reader_port,
         );

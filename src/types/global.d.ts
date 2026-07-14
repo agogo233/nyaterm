@@ -108,6 +108,7 @@ export interface SshConfig {
   post_login?: { command: string; delay_ms: number } | null;
   ssh_algorithms?: SshAlgorithmPreferences | null;
   sftp?: SftpSettings;
+  encoding?: string;
 }
 
 /** SSH authentication: none, password, or private key (PEM content). */
@@ -299,6 +300,8 @@ export interface SavedConnection {
   auto_login?: TelnetAutoLoginConfig;
   /** SSH-only: enables X11 forwarding for remote graphical applications. */
   x11_forwarding?: boolean;
+  /** Per-connection encoding override. Empty string means follow global setting. */
+  encoding?: string;
 }
 
 /** Stored OTP entry for two-factor authentication. */

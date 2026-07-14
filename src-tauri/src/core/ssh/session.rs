@@ -278,6 +278,7 @@ async fn create_ssh_session_inner(
     let post_login = config.post_login.clone();
     let startup_command = startup_command.clone();
     let backspace_mode = config.backspace_mode.clone();
+    let encoding = config.encoding.clone();
     tokio::spawn(async move {
         ssh_io_loop(
             app,
@@ -296,6 +297,7 @@ async fn create_ssh_session_inner(
             startup_command,
             backspace_mode,
             initial_notice,
+            encoding,
         )
         .await;
     });
@@ -418,6 +420,7 @@ pub async fn create_multiplexed_ssh_session(
     let post_login = config.post_login.clone();
     let startup_command = startup_command.clone();
     let backspace_mode = config.backspace_mode.clone();
+    let encoding = config.encoding.clone();
     tokio::spawn(async move {
         ssh_io_loop(
             app,
@@ -436,6 +439,7 @@ pub async fn create_multiplexed_ssh_session(
             startup_command,
             backspace_mode,
             initial_notice,
+            encoding,
         )
         .await;
     });

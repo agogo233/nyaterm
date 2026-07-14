@@ -76,7 +76,10 @@ pub async fn create_temporary_ssh_session(
     config: ssh::SshConfig,
     create_request_id: Option<String>,
 ) -> AppResult<String> {
-    let ssh_config = normalize_temporary_ssh_config(config);
+    let encoding = crate::config::load_app_settings(&app)
+        .map(|settings| settings.interaction.default_encoding)
+        .unwrap_or_else(|_| "UTF-8".to_string());
+    let ssh_config = normalize_temporary_ssh_config(config, &encoding);
     let pending_creation = state.begin_session_creation(create_request_id).await;
     let (guard, cancel_rx) = match pending_creation {
         Some((guard, cancel_rx)) => (Some(guard), Some(cancel_rx)),
@@ -104,7 +107,7 @@ pub async fn create_temporary_ssh_session(
     Ok(session_id)
 }
 
-fn normalize_temporary_ssh_config(mut config: ssh::SshConfig) -> ssh::SshConfig {
+fn normalize_temporary_ssh_config(mut config: ssh::SshConfig, encoding: &str) -> ssh::SshConfig {
     config.connection_id = None;
     config.owner_window_label = None;
     config.backspace_mode = if config.backspace_mode.trim().is_empty() {
@@ -118,6 +121,10 @@ fn normalize_temporary_ssh_config(mut config: ssh::SshConfig) -> ssh::SshConfig 
     config.proxy_jump = None;
     config.post_login = None;
     config.ssh_algorithms = None;
+    // Inherit encoding from global settings if not explicitly set.
+    if config.encoding.trim().is_empty() || config.encoding == "UTF-8" {
+        config.encoding = encoding.to_string();
+    }
     config
 }
 
@@ -165,6 +172,7 @@ pub async fn create_local_session(
     };
     let config = if let Some(ref cid) = connection_id {
         let conn = config::load_connection_by_id(&app, cid)?;
+        let encoding = config::resolve_connection_encoding(&app, &conn);
         match conn.config {
             config::ConnectionType::LocalTerminal {
                 shell_path,
@@ -176,6 +184,7 @@ pub async fn create_local_session(
                 shell_args,
                 working_dir,
                 name: conn.name,
+                encoding,
             }),
             _ => None,
         }
@@ -226,6 +235,7 @@ pub async fn create_telnet_session(
     let cfg = if let Some(ref cid) = connection_id {
         let conn = config::load_connection_by_id(&app, cid)?;
         let telnet_password = resolve_telnet_connection_password(&app, conn.auth.as_ref())?;
+        let encoding = config::resolve_connection_encoding(&app, &conn);
         match conn.config {
             config::ConnectionType::Telnet {
                 host: ref ch,
@@ -256,6 +266,7 @@ pub async fn create_telnet_session(
                 send_naws,
                 send_sga,
                 auto_login: core::TelnetAutoLoginConfig::from(auto_login),
+                encoding,
             },
             _ => {
                 return Err(AppError::Config(
@@ -352,6 +363,7 @@ pub async fn create_serial_session(
     };
     let cfg = if let Some(ref cid) = connection_id {
         let conn = config::load_connection_by_id(&app, cid)?;
+        let encoding = config::resolve_connection_encoding(&app, &conn);
         match conn.config {
             config::ConnectionType::Serial {
                 port_name,
@@ -369,6 +381,7 @@ pub async fn create_serial_session(
                 stop_bits,
                 name: conn.name,
                 backspace_mode,
+                encoding,
             },
             _ => {
                 return Err(AppError::Config(
@@ -377,6 +390,9 @@ pub async fn create_serial_session(
             }
         }
     } else {
+        let encoding = crate::config::load_app_settings(&app)
+            .map(|s| s.interaction.default_encoding)
+            .unwrap_or_else(|_| "UTF-8".to_string());
         core::SerialConfig {
             port_name: port_name
                 .ok_or_else(|| AppError::Config("port_name is required".to_string()))?,
@@ -386,6 +402,7 @@ pub async fn create_serial_session(
             stop_bits: stop_bits.unwrap_or_else(|| "1".to_string()),
             name: name.unwrap_or_else(|| "Serial".to_string()),
             backspace_mode: "ctrl_h".to_string(),
+            encoding,
         }
     };
     let marked_connection_id = connection_id.clone();
@@ -578,7 +595,7 @@ mod tests {
         }))
         .expect("temporary ssh config");
 
-        let normalized = normalize_temporary_ssh_config(config);
+        let normalized = normalize_temporary_ssh_config(config, "UTF-8");
 
         assert!(normalized.connection_id.is_none());
         assert!(normalized.owner_window_label.is_none());

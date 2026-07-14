@@ -40,6 +40,7 @@ async fn telnet_session_task(
     output_control_tx: mpsc::UnboundedSender<SessionCommand>,
     config: TelnetSessionConfig,
     connection_id: Option<String>,
+    encoding: String,
     startup_command: Option<TelnetStartupCommand>,
 ) {
     let backspace_as_bs = config.backspace_mode == "ctrl_h";
@@ -121,6 +122,7 @@ async fn telnet_session_task(
     let (reader_done_tx, mut reader_done_rx) = mpsc::unbounded_channel::<()>();
 
     let reader_config = config.clone();
+    let encoding_reader = encoding.clone();
     let reader_handle = tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         let mut zmodem_detector = ZmodemDetector::new();
@@ -218,7 +220,7 @@ async fn telnet_session_task(
                             initial_bytes,
                         } => {
                             if !passthrough.is_empty() {
-                                let pre = String::from_utf8_lossy(&passthrough).to_string();
+                                let pre = super::decode_terminal_output(&passthrough, &encoding_reader);
                                 if !pre.is_empty() {
                                     if let Some(ref recorder) = recording_mgr_reader {
                                         recorder.write_output(&sid_reader, &pre);
@@ -256,7 +258,7 @@ async fn telnet_session_task(
                         }
                     };
 
-                    let mut text = String::from_utf8_lossy(&process_visible).to_string();
+                    let mut text = super::decode_terminal_output(&process_visible, &encoding_reader);
                     let mut proc = capture_for_reader.lock().await;
                     if proc.has_active() {
                         text = proc.process(&text);

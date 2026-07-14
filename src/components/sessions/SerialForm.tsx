@@ -43,6 +43,8 @@ interface SerialFormProps {
   setStopBits: (v: string) => void;
   backspaceMode: string;
   setBackspaceMode: (v: string) => void;
+  encoding: string;
+  setEncoding: (v: string) => void;
 }
 
 function RequiredMark() {
@@ -202,6 +204,8 @@ export function SerialForm({
   setStopBits,
   backspaceMode,
   setBackspaceMode,
+  encoding,
+  setEncoding,
 }: SerialFormProps) {
   const { t } = useTranslation();
 
@@ -328,6 +332,21 @@ export function SerialForm({
             </SelectContent>
           </Select>
         </div>
+      </div>
+      <div className="max-w-xs">
+        <Label className="text-xs font-medium text-foreground/80">
+          {t("connection.encoding")}
+        </Label>
+        <Select value={encoding} onValueChange={setEncoding}>
+          <SelectTrigger className="mt-1 h-8 w-full text-xs">
+            <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
+            <SelectItem value="UTF-8">UTF-8</SelectItem>
+            <SelectItem value="GBK">GBK</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );

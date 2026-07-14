@@ -52,6 +52,13 @@ pub async fn create_telnet_session(
 
     let sid = session_id.clone();
     let mgr = manager.clone();
+    let encoding = if !config.encoding.is_empty() {
+        config.encoding.clone()
+    } else {
+        crate::config::load_app_settings(&app)
+            .map(|settings| settings.interaction.default_encoding)
+            .unwrap_or_else(|_| "UTF-8".to_string())
+    };
 
     tokio::spawn(async move {
         telnet_session_task(
@@ -62,6 +69,7 @@ pub async fn create_telnet_session(
             output_control_tx,
             config,
             connection_id,
+            encoding,
             startup_command,
         )
         .await;

@@ -6,4 +6,5 @@ pub struct SerialConfig {
     pub stop_bits: String,
     pub name: String,
     pub backspace_mode: String,
+    pub encoding: String,
 }

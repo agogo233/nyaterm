@@ -8,6 +8,8 @@ use crate::protocol::FileType;
 pub struct DirEntry {
     parent: Arc<str>,
     file: String,
+    /// Raw bytes of the file name, preserving original encoding.
+    file_bytes: Vec<u8>,
     metadata: Metadata,
 }
 
@@ -15,6 +17,11 @@ impl DirEntry {
     /// Returns the file name for the file that this entry points at.
     pub fn file_name(&self) -> String {
         self.file.to_owned()
+    }
+
+    /// Returns the raw bytes of the file name.
+    pub fn file_name_bytes(&self) -> &[u8] {
+        &self.file_bytes
     }
 
     /// Returns the file type for the file that this entry points at.
@@ -44,12 +51,28 @@ impl DirEntry {
             format!("{}/{}", self.parent, self.file)
         }
     }
+
+    /// Returns the full path as raw bytes.
+    pub fn path_bytes(&self) -> Vec<u8> {
+        if self.parent.is_empty() {
+            self.file_bytes.clone()
+        } else if self.parent.ends_with('/') {
+            let mut path = self.parent.as_bytes().to_vec();
+            path.extend_from_slice(&self.file_bytes);
+            path
+        } else {
+            let mut path = self.parent.as_bytes().to_vec();
+            path.push(b'/');
+            path.extend_from_slice(&self.file_bytes);
+            path
+        }
+    }
 }
 
 /// Iterator over the entries in a remote directory.
 pub struct ReadDir {
     pub(crate) parent: Arc<str>,
-    pub(crate) entries: VecDeque<(String, Metadata)>,
+    pub(crate) entries: VecDeque<(Vec<u8>, String, Metadata)>,
 }
 
 impl Iterator for ReadDir {
@@ -58,11 +81,12 @@ impl Iterator for ReadDir {
     fn next(&mut self) -> Option<Self::Item> {
         match self.entries.pop_front() {
             None => None,
-            Some(entry) if entry.0 == "." || entry.0 == ".." => self.next(),
-            Some(entry) => Some(DirEntry {
+            Some((_file_bytes, file, _metadata)) if file == "." || file == ".." => self.next(),
+            Some((file_bytes, file, metadata)) => Some(DirEntry {
                 parent: self.parent.clone(),
-                file: entry.0,
-                metadata: entry.1,
+                file,
+                file_bytes,
+                metadata,
             }),
         }
     }

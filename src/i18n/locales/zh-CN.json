@@ -220,6 +220,10 @@
     "weeks": "周",
     "years": "年"
   },
+  "connection": {
+    "encoding": "终端编码",
+    "encodingFollowGlobal": "跟随全局设置"
+  },
   "credentialAutofill": {
     "dismiss": "关闭",
     "fill": "填充",

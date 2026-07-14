@@ -109,6 +109,8 @@ interface SshFormProps {
   sftpSettings: SftpSettings;
   setSftpSettings: (v: SftpSettings) => void;
   connectionId?: string;
+  encoding: string;
+  setEncoding: (v: string) => void;
 }
 
 function RequiredMark() {
@@ -426,6 +428,8 @@ export function SshForm({
   sftpSettings,
   setSftpSettings,
   connectionId,
+  encoding,
+  setEncoding,
 }: SshFormProps) {
   const { t } = useTranslation();
   const [sshKeys, setSshKeys] = useState<SshKey[]>([]);
@@ -903,6 +907,22 @@ export function SshForm({
             </Popover>
           </TabsContent>
         </Tabs>
+      </div>
+
+      <div>
+        <Label className="text-xs font-medium text-foreground/80">
+          {t("connection.encoding")}
+        </Label>
+        <Select value={encoding} onValueChange={setEncoding}>
+          <SelectTrigger className="mt-1 h-8 w-full text-xs">
+            <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
+            <SelectItem value="UTF-8">UTF-8</SelectItem>
+            <SelectItem value="GBK">GBK</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>

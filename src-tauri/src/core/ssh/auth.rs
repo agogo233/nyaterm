@@ -366,6 +366,8 @@ fn resolve_saved_ssh_config(
         .map(|settings| settings.terminal.x11_display)
         .unwrap_or_default();
 
+    let encoding = crate::config::resolve_connection_encoding(app, conn);
+
     Ok(SshConfig {
         connection_id,
         owner_window_label: None,
@@ -382,6 +384,7 @@ fn resolve_saved_ssh_config(
         post_login,
         ssh_algorithms: conn.ssh_algorithms.clone(),
         sftp: conn.sftp.clone(),
+        encoding,
     })
 }
 

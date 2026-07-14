@@ -220,6 +220,10 @@
     "weeks": "weeks",
     "years": "years"
   },
+  "connection": {
+    "encoding": "Terminal Encoding",
+    "encodingFollowGlobal": "Follow Global Settings"
+  },
   "credentialAutofill": {
     "dismiss": "Dismiss",
     "fill": "Fill",

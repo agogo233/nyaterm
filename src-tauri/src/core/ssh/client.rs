@@ -42,6 +42,13 @@ pub struct SshConfig {
     pub ssh_algorithms: Option<SshAlgorithmPreferences>,
     #[serde(default)]
     pub sftp: SftpSettings,
+    /// Character encoding for terminal I/O (e.g. "UTF-8", "GBK").
+    #[serde(default = "default_encoding")]
+    pub encoding: String,
+}
+
+fn default_encoding() -> String {
+    "UTF-8".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

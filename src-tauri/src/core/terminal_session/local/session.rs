@@ -51,6 +51,14 @@ pub async fn create_local_session(
     let sid = session_id.clone();
     let mgr = manager.clone();
     let rt_handle = tokio::runtime::Handle::current();
+    let encoding = config
+        .as_ref()
+        .map(|c| c.encoding.clone())
+        .unwrap_or_else(|| {
+            crate::config::load_app_settings(&app)
+                .map(|settings| settings.interaction.default_encoding)
+                .unwrap_or_else(|_| "UTF-8".to_string())
+        });
 
     std::thread::spawn(move || {
         pty_session_thread(
@@ -64,6 +72,7 @@ pub async fn create_local_session(
             config,
             startup_script.script,
             ready_marker,
+            encoding,
         );
     });
 
@@ -81,6 +90,7 @@ fn pty_session_thread(
     config: Option<LocalSessionConfig>,
     startup_script: Option<String>,
     ready_marker: String,
+    encoding: String,
 ) {
     let pty_system = native_pty_system();
     let pair = match pty_system.openpty(PtySize {
@@ -229,6 +239,7 @@ fn pty_session_thread(
     let output_reader = output.clone();
     let manager_reader = manager.clone();
     let suppress_startup_output = startup_script.is_some();
+    let encoding_for_reader = encoding.clone();
     let (reader_done_tx, reader_done_rx) = std_mpsc::channel::<()>();
     std::thread::spawn(move || {
         let mut raw_buf = [0u8; 4096];
@@ -280,7 +291,7 @@ fn pty_session_thread(
                                 initial_bytes,
                             } => {
                                 if !passthrough.is_empty() {
-                                    let pre = String::from_utf8_lossy(&passthrough).to_string();
+                                    let pre = super::decode_terminal_output(&passthrough, &encoding_for_reader);
                                     if !pre.is_empty() {
                                         output_reader.push_owned(pre);
                                     }
@@ -325,7 +336,7 @@ fn pty_session_thread(
                         raw.to_vec()
                     };
 
-                    let text = String::from_utf8_lossy(&process_raw).to_string();
+                    let text = super::decode_terminal_output(&process_raw, &encoding_for_reader);
                     let mut result = stripper.push(&text);
 
                     for path in &result.cwd_paths {

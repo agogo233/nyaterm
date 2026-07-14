@@ -1071,6 +1071,7 @@ fn prepare_termius_connections(
                 username,
                 backspace_mode: "del".to_string(),
                 x11_forwarding: false,
+                encoding: String::new(),
             },
             group_path,
             description: Some("Imported from Termius".to_string()),

@@ -37,6 +37,7 @@ pub struct TelnetSessionConfig {
     pub send_naws: bool,
     pub send_sga: bool,
     pub auto_login: TelnetAutoLoginConfig,
+    pub encoding: String,
 }
 
 impl Default for TelnetSessionConfig {
@@ -56,6 +57,7 @@ impl Default for TelnetSessionConfig {
             send_naws: true,
             send_sga: true,
             auto_login: TelnetAutoLoginConfig::default(),
+            encoding: String::new(),
         }
     }
 }

@@ -54,6 +54,7 @@ pub(crate) struct AutoRemoteFs {
     inner: RwLock<Option<Box<dyn RemoteFs>>>,
     ssh_handle: Arc<SshConnectionHandles>,
     cache_key: String,
+    encoding: String,
 }
 
 impl AutoRemoteFs {
@@ -62,11 +63,13 @@ impl AutoRemoteFs {
         host: &str,
         port: u16,
         username: &str,
+        encoding: &str,
     ) -> Self {
         Self {
             inner: RwLock::new(None),
             ssh_handle,
             cache_key: cache_key(host, port, username),
+            encoding: encoding.to_string(),
         }
     }
 
@@ -108,7 +111,7 @@ impl AutoRemoteFs {
         match SftpBackend::probe(&self.ssh_handle).await {
             Ok(()) => {
                 save_cached_backend(&self.cache_key, "sftp", false, None);
-                return Ok(Box::new(SftpBackend::new(self.ssh_handle.clone())));
+                return Ok(Box::new(SftpBackend::new(self.ssh_handle.clone(), &self.encoding)));
             }
             Err(e) => {
                 let reason = e.to_string();
@@ -152,7 +155,7 @@ impl AutoRemoteFs {
                     .await
                     .ok()
                     .map(|()| -> Box<dyn RemoteFs> {
-                        Box::new(SftpBackend::new(self.ssh_handle.clone()))
+                        Box::new(SftpBackend::new(self.ssh_handle.clone(), &self.encoding))
                     })
             }
             "scp_enhanced" => ScpEnhancedBackend::probe(&self.ssh_handle).await.ok().map(
@@ -184,7 +187,7 @@ impl AutoRemoteFs {
 async fn get_ssh_info(
     manager: &SessionManager,
     session_id: &str,
-) -> AppResult<(Arc<SshConnectionHandles>, String, u16, String)> {
+) -> AppResult<(Arc<SshConnectionHandles>, String, u16, String, String)> {
     let sessions = manager.sessions.lock().await;
     let session = sessions
         .get(session_id)
@@ -198,17 +201,17 @@ async fn get_ssh_info(
         .downcast::<SshConnectionHandles>()
         .map_err(|_| AppError::Config("Failed to get SSH handle".to_string()))?;
 
-    let (host, port, username) = if let Some(ref cfg_any) = session.ssh_config {
+    let (host, port, username, encoding) = if let Some(ref cfg_any) = session.ssh_config {
         if let Some(cfg) = cfg_any.downcast_ref::<crate::core::ssh::SshConfig>() {
-            (cfg.host.clone(), cfg.port, cfg.username.clone())
+            (cfg.host.clone(), cfg.port, cfg.username.clone(), cfg.encoding.clone())
         } else {
-            ("unknown".to_string(), 22, "unknown".to_string())
+            ("unknown".to_string(), 22, "unknown".to_string(), "UTF-8".to_string())
         }
     } else {
-        ("unknown".to_string(), 22, "unknown".to_string())
+        ("unknown".to_string(), 22, "unknown".to_string(), "UTF-8".to_string())
     };
 
-    Ok((ssh_handle, host, port, username))
+    Ok((ssh_handle, host, port, username, encoding))
 }
 
 async fn get_or_create_auto_fs(
@@ -230,8 +233,8 @@ async fn get_or_create_auto_fs(
         }
     }
 
-    let (ssh_handle, host, port, username) = get_ssh_info(manager, session_id).await?;
-    let auto_fs = Arc::new(AutoRemoteFs::new(ssh_handle, &host, port, &username));
+    let (ssh_handle, host, port, username, encoding) = get_ssh_info(manager, session_id).await?;
+    let auto_fs = Arc::new(AutoRemoteFs::new(ssh_handle, &host, port, &username, &encoding));
 
     {
         let mut sessions = manager.sessions.lock().await;

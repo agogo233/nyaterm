@@ -92,6 +92,7 @@ fn import_legacy_sessions(
                 username: sess.username,
                 backspace_mode: "del".to_string(),
                 x11_forwarding: false,
+                encoding: String::new(),
             },
             group_id,
             description: sess.description,

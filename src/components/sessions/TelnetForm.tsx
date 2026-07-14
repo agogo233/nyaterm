@@ -66,6 +66,8 @@ interface TelnetFormProps {
   sendSga: boolean;
   setSendSga: (v: boolean) => void;
   connectionId?: string;
+  encoding: string;
+  setEncoding: (v: string) => void;
 }
 
 function RequiredMark() {
@@ -104,6 +106,8 @@ export function TelnetForm({
   sendSga,
   setSendSga,
   connectionId,
+  encoding,
+  setEncoding,
 }: TelnetFormProps) {
   const { t } = useTranslation();
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -551,6 +555,22 @@ export function TelnetForm({
           </div>
         </DialogContent>
       </Dialog>
+
+      <div>
+        <Label className="text-xs font-medium text-foreground/80">
+          {t("connection.encoding")}
+        </Label>
+        <Select value={encoding} onValueChange={setEncoding}>
+          <SelectTrigger className="mt-1 h-8 w-full text-xs">
+            <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
+            <SelectItem value="UTF-8">UTF-8</SelectItem>
+            <SelectItem value="GBK">GBK</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   );
 }
