@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod app;
+pub mod ascend_npu;
 pub mod backup;
 pub mod clipboard;
 pub mod cloud_sync;

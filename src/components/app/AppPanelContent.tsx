@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import ResizeHandle from "@/components/layout/ResizeHandle";
 import ActiveSessions from "@/components/panel/ActiveSessions";
+import AscendNpuMonitor from "@/components/panel/AscendNpuMonitor";
 import AIAssistantPanel from "@/components/panel/ai/AIAssistantPanel";
 import CommandHistory from "@/components/panel/CommandHistory";
 import DockerManager from "@/components/panel/DockerManager";
@@ -139,6 +140,8 @@ export default function AppPanelContent({
         );
       case "gpuMonitor":
         return <GpuMonitor activeSessionId={activeSshSessionId} />;
+      case "ascendNpuMonitor":
+        return <AscendNpuMonitor activeSessionId={activeSshSessionId} />;
       case "processManager":
         return <ProcessManager activeSessionId={activeSshSessionId} />;
       case "dockerManager":

@@ -262,6 +262,29 @@ export function TerminalTab() {
         )}
 
         <SettingRow
+          label={t("settings.showAscendNpuMonitor")}
+          desc={t("settings.showAscendNpuMonitorDesc")}
+        >
+          <SettingSwitch
+            checked={appSettings.ui.show_ascend_npu_monitor ?? false}
+            onChange={(v) => updateUi({ show_ascend_npu_monitor: v })}
+          />
+        </SettingRow>
+
+        {(appSettings.ui.show_ascend_npu_monitor ?? false) && (
+          <SettingNumberInput
+            label={t("settings.ascendNpuMonitorInterval")}
+            desc={t("settings.ascendNpuMonitorIntervalDesc")}
+            min={3}
+            max={120}
+            step={1}
+            value={appSettings.ui.ascend_npu_monitor_interval ?? 3}
+            controlClassName="max-w-sm"
+            onChange={(v) => updateUi({ ascend_npu_monitor_interval: v || 3 })}
+          />
+        )}
+
+        <SettingRow
           label={t("settings.showProcessManager")}
           desc={t("settings.showProcessManagerDesc")}
         >

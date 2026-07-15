@@ -55,6 +55,19 @@ function insertBeforeOrPush(ids: string[], anchorId: string, itemId: string) {
   return next;
 }
 
+function AscendIcon() {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block h-[1em] w-[1em] bg-current"
+      style={{
+        WebkitMask: "url('/icons/brands/ascend.svg') center / contain no-repeat",
+        mask: "url('/icons/brands/ascend.svg') center / contain no-repeat",
+      }}
+    />
+  );
+}
+
 function mergeVisibleReorder(
   currentIds: string[],
   orderedVisibleIds: string[],
@@ -123,8 +136,12 @@ function normalizeActivityBarState(uiConfig: UiConfig): Partial<UiConfig> | null
     layout.right_top = insertAfter(layout.right_top, "resourceMonitor", "gpuMonitor");
     seen.add("gpuMonitor");
   }
+  if (!seen.has("ascendNpuMonitor")) {
+    layout.right_top = insertAfter(layout.right_top, "gpuMonitor", "ascendNpuMonitor");
+    seen.add("ascendNpuMonitor");
+  }
   if (!seen.has("processManager")) {
-    layout.right_top = insertAfter(layout.right_top, "gpuMonitor", "processManager");
+    layout.right_top = insertAfter(layout.right_top, "ascendNpuMonitor", "processManager");
     seen.add("processManager");
   }
   if (!seen.has("dockerManager")) {
@@ -218,6 +235,7 @@ export function useActivityBarController({
       commandHistory: { icon: <MdHistory />, tooltip: t("panel.commandHistory") },
       resourceMonitor: { icon: <MdOutlineMonitorHeart />, tooltip: t("panel.resourceMonitor") },
       gpuMonitor: { icon: <SiNvidia />, tooltip: t("panel.gpuMonitor") },
+      ascendNpuMonitor: { icon: <AscendIcon />, tooltip: t("panel.ascendNpuMonitor") },
       processManager: { icon: <MdListAlt />, tooltip: t("panel.processManager") },
       dockerManager: { icon: <SiDocker />, tooltip: t("panel.dockerManager") },
       quickCmdBar: { icon: <MdBolt />, tooltip: t("panel.quickCommands") },

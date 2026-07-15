@@ -189,6 +189,32 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
             .chain(&settings.ui.activity_bar_layout.right_bottom)
             .map(|s| s.as_str())
             .collect();
+        if !all_ids.contains(&"ascendNpuMonitor") {
+            let right_top = &mut settings.ui.activity_bar_layout.right_top;
+            if let Some(gpu_index) = right_top.iter().position(|id| id == "gpuMonitor") {
+                right_top.insert(gpu_index + 1, "ascendNpuMonitor".to_string());
+            } else if let Some(resource_index) =
+                right_top.iter().position(|id| id == "resourceMonitor")
+            {
+                right_top.insert(resource_index + 1, "ascendNpuMonitor".to_string());
+            } else {
+                right_top.push("ascendNpuMonitor".to_string());
+            }
+            migrated = true;
+        }
+    }
+
+    {
+        let all_ids: Vec<&str> = settings
+            .ui
+            .activity_bar_layout
+            .left_top
+            .iter()
+            .chain(&settings.ui.activity_bar_layout.left_bottom)
+            .chain(&settings.ui.activity_bar_layout.right_top)
+            .chain(&settings.ui.activity_bar_layout.right_bottom)
+            .map(|s| s.as_str())
+            .collect();
         if !all_ids.contains(&"gpuMonitor") {
             let right_top = &mut settings.ui.activity_bar_layout.right_top;
             if let Some(resource_index) = right_top.iter().position(|id| id == "resourceMonitor") {
@@ -287,7 +313,9 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
             .collect();
         if !all_ids.contains(&"processManager") {
             let right_top = &mut settings.ui.activity_bar_layout.right_top;
-            if let Some(gpu_index) = right_top.iter().position(|id| id == "gpuMonitor") {
+            if let Some(ascend_index) = right_top.iter().position(|id| id == "ascendNpuMonitor") {
+                right_top.insert(ascend_index + 1, "processManager".to_string());
+            } else if let Some(gpu_index) = right_top.iter().position(|id| id == "gpuMonitor") {
                 right_top.insert(gpu_index + 1, "processManager".to_string());
             } else if let Some(resource_index) =
                 right_top.iter().position(|id| id == "resourceMonitor")
