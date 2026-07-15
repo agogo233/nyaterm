@@ -686,6 +686,7 @@ impl RemoteFs for ScpEnhancedBackend {
                     owner,
                     group,
                     mtime,
+                    raw_path_token: None,
                 });
             }
 

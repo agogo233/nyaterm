@@ -2,6 +2,7 @@
 //! formatting, and common type definitions.
 
 use crate::error::{AppError, AppResult};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const SFTP_FILE_TYPE_MASK: u32 = 0o170000;
@@ -18,6 +19,45 @@ pub struct FileEntry {
     pub owner: String,
     pub group: String,
     pub mtime: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_path_token: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RemotePathRef {
+    display_path: String,
+    raw_path: Option<Vec<u8>>,
+}
+
+impl RemotePathRef {
+    pub(crate) fn new(display_path: &str, raw_path_token: Option<&str>) -> AppResult<Self> {
+        let raw_path = raw_path_token
+            .filter(|token| !token.trim().is_empty())
+            .map(decode_raw_path_token)
+            .transpose()?;
+        Ok(Self {
+            display_path: display_path.to_string(),
+            raw_path,
+        })
+    }
+
+    pub(crate) fn display_path(&self) -> &str {
+        &self.display_path
+    }
+
+    pub(crate) fn raw_path(&self) -> Option<&[u8]> {
+        self.raw_path.as_deref()
+    }
+}
+
+pub(crate) fn raw_path_token(raw_path: &[u8]) -> String {
+    URL_SAFE_NO_PAD.encode(raw_path)
+}
+
+pub(crate) fn decode_raw_path_token(token: &str) -> AppResult<Vec<u8>> {
+    URL_SAFE_NO_PAD
+        .decode(token)
+        .map_err(|error| AppError::Config(format!("Invalid remote path token: {error}")))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -266,7 +306,27 @@ fn is_windows_reserved_device_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_download_file_name_for_platform;
+    use super::{
+        RemotePathRef, decode_raw_path_token, raw_path_token,
+        sanitize_download_file_name_for_platform,
+    };
+
+    #[test]
+    fn raw_path_token_round_trips_non_utf8_bytes() {
+        let raw_path = b"/home/user/\xce\xc4\xbc\xfe.txt";
+        let token = raw_path_token(raw_path);
+        assert_eq!(decode_raw_path_token(&token).unwrap(), raw_path);
+    }
+
+    #[test]
+    fn remote_path_ref_prefers_token_bytes() {
+        let raw_path = b"/remote/\x80name";
+        let token = raw_path_token(raw_path);
+        let path_ref = RemotePathRef::new("/remote/display-name", Some(&token)).unwrap();
+
+        assert_eq!(path_ref.display_path(), "/remote/display-name");
+        assert_eq!(path_ref.raw_path().unwrap(), raw_path);
+    }
 
     #[test]
     fn percent_encodes_windows_invalid_characters() {

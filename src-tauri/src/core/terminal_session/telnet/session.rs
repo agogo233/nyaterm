@@ -126,6 +126,7 @@ async fn telnet_session_task(
     let reader_handle = tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         let mut zmodem_detector = ZmodemDetector::new();
+        let mut output_decoder = TerminalOutputDecoder::new(&encoding_reader);
         'reader: loop {
             while *pause_rx.borrow() {
                 if pause_rx.changed().await.is_err() {
@@ -220,7 +221,7 @@ async fn telnet_session_task(
                             initial_bytes,
                         } => {
                             if !passthrough.is_empty() {
-                                let pre = super::decode_terminal_output(&passthrough, &encoding_reader);
+                                let pre = output_decoder.decode(&passthrough);
                                 if !pre.is_empty() {
                                     if let Some(ref recorder) = recording_mgr_reader {
                                         recorder.write_output(&sid_reader, &pre);
@@ -258,7 +259,7 @@ async fn telnet_session_task(
                         }
                     };
 
-                    let mut text = super::decode_terminal_output(&process_visible, &encoding_reader);
+                    let mut text = output_decoder.decode(&process_visible);
                     let mut proc = capture_for_reader.lock().await;
                     if proc.has_active() {
                         text = proc.process(&text);
@@ -348,7 +349,8 @@ async fn telnet_session_task(
             Some(action) = auto_login_rx.recv() => {
                 match action {
                     TelnetAutoLoginAction::Send(data) => {
-                        let _ = writer.write_all(&data).await;
+                        let send_data = encode_terminal_input(&data, &encoding);
+                        let _ = writer.write_all(&send_data).await;
                     }
                     TelnetAutoLoginAction::Complete => {
                         arm_telnet_startup_timer(&pending_startup, &mut startup_deadline);
@@ -369,7 +371,8 @@ async fn telnet_session_task(
                     if let Some(ref recorder) = recording_mgr {
                         recorder.write_input(&session_id, &pending.input);
                     }
-                    if let Err(e) = writer.write_all(&pending.input).await {
+                    let send_input = encode_terminal_input(&pending.input, &encoding);
+                    if let Err(e) = writer.write_all(&send_input).await {
                         log_rate_limited(StructuredLog {
                             level: StructuredLogLevel::Warn,
                             domain: "session.lifecycle".to_string(),
@@ -431,7 +434,8 @@ async fn telnet_session_task(
                                 if let Some(ref recorder) = recording_mgr {
                                     recorder.write_input(&session_id, &data);
                                 }
-                                if let Err(e) = writer.write_all(&data).await {
+                                let send_data = encode_terminal_input(&data, &encoding);
+                                if let Err(e) = writer.write_all(&send_data).await {
                                     write_failed = Some(e);
                                     break;
                                 }
@@ -447,10 +451,11 @@ async fn telnet_session_task(
                                     output.push_owned(echoed);
                                 }
                             }
+                            let send_data = encode_terminal_input(&data, &encoding);
                             if let Some(ref recorder) = recording_mgr {
                                 recorder.write_input(&session_id, &data);
                             }
-                            for chunk in split_write_chunks(&data, config.force_character_at_a_time) {
+                            for chunk in split_write_chunks(&send_data, config.force_character_at_a_time) {
                                 if let Err(e) = writer.write_all(&chunk).await {
                                     write_failed = Some(e);
                                     break;
@@ -479,7 +484,8 @@ async fn telnet_session_task(
                     }
                     Some(SessionCommand::CaptureExec { marker_id, wrapped_command, result_tx }) => {
                         capture_processor.lock().await.register(marker_id, result_tx);
-                        if let Err(e) = writer.write_all(&wrapped_command).await {
+                        let send_command = encode_terminal_input(&wrapped_command, &encoding);
+                        if let Err(e) = writer.write_all(&send_command).await {
                             tracing::warn!(
                                 session_id = %session_id,
                                 error = %e,

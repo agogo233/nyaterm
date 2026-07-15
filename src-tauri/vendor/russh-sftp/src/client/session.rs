@@ -182,6 +182,14 @@ impl SftpSession {
             .map(|_| ())
     }
 
+    /// Creates a new empty directory using raw bytes for the path.
+    pub async fn create_dir_bytes(&self, path_bytes: Vec<u8>) -> SftpResult<()> {
+        self.session
+            .mkdir_bytes(path_bytes, FileAttributes::empty())
+            .await
+            .map(|_| ())
+    }
+
     /// Reads the contents of a file located at the specified path to the end.
     pub async fn read<P: Into<String>>(&self, path: P) -> SftpResult<Vec<u8>> {
         let mut file = self.open(path).await?;
@@ -300,6 +308,11 @@ impl SftpSession {
         self.session.rmdir(path).await.map(|_| ())
     }
 
+    /// Removes the specified folder using raw bytes for the path.
+    pub async fn remove_dir_bytes(&self, path_bytes: Vec<u8>) -> SftpResult<()> {
+        self.session.rmdir_bytes(path_bytes).await.map(|_| ())
+    }
+
     /// Removes the specified file.
     pub async fn remove_file<T: Into<String>>(&self, filename: T) -> SftpResult<()> {
         self.session.remove(filename).await.map(|_| ())
@@ -317,6 +330,18 @@ impl SftpSession {
         N: Into<String>,
     {
         self.session.rename(oldpath, newpath).await.map(|_| ())
+    }
+
+    /// Rename a file or directory using raw bytes for both paths.
+    pub async fn rename_bytes(
+        &self,
+        oldpath_bytes: Vec<u8>,
+        newpath_bytes: Vec<u8>,
+    ) -> SftpResult<()> {
+        self.session
+            .rename_bytes(oldpath_bytes, newpath_bytes)
+            .await
+            .map(|_| ())
     }
 
     /// Creates a symlink of the specified target.
@@ -362,8 +387,24 @@ impl SftpSession {
         self.session.setstat(path, metadata).await.map(|_| ())
     }
 
+    /// Sets metadata for a remote file using raw bytes for the path.
+    pub async fn set_metadata_bytes(
+        &self,
+        path_bytes: Vec<u8>,
+        metadata: Metadata,
+    ) -> Result<(), Error> {
+        self.session
+            .setstat_bytes(path_bytes, metadata)
+            .await
+            .map(|_| ())
+    }
+
     pub async fn symlink_metadata<P: Into<String>>(&self, path: P) -> SftpResult<Metadata> {
         Ok(self.session.lstat(path).await?.attrs)
+    }
+
+    pub async fn symlink_metadata_bytes(&self, path_bytes: Vec<u8>) -> SftpResult<Metadata> {
+        Ok(self.session.lstat_bytes(path_bytes).await?.attrs)
     }
 
     pub async fn hardlink<O, N>(&self, oldpath: O, newpath: N) -> SftpResult<bool>

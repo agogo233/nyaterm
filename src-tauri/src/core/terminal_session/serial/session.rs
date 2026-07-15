@@ -48,6 +48,7 @@ fn serial_session_thread(
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
         let mut zmodem_detector = ZmodemDetector::new();
+        let mut output_decoder = TerminalOutputDecoder::new(&encoding_reader);
         while reader_flag.load(std::sync::atomic::Ordering::Relaxed) {
             {
                 let (lock, cvar) = &*output_pause_reader;
@@ -98,7 +99,7 @@ fn serial_session_thread(
                             initial_bytes,
                         } => {
                             if !passthrough.is_empty() {
-                                let pre = super::decode_terminal_output(&passthrough, &encoding_reader);
+                                let pre = output_decoder.decode(&passthrough);
                                 if !pre.is_empty() {
                                     if let Some(ref recorder) = recording_mgr_reader {
                                         recorder.write_output(&sid_reader, &pre);
@@ -140,7 +141,7 @@ fn serial_session_thread(
                         }
                     };
 
-                    let mut text = super::decode_terminal_output(&process_raw, &encoding_reader);
+                    let mut text = output_decoder.decode(&process_raw);
                     if let Ok(mut proc) = capture_for_reader.lock() {
                         if proc.has_active() {
                             text = proc.process(&text);
@@ -194,11 +195,12 @@ fn serial_session_thread(
                 if backspace_as_bs {
                     remap_del_to_bs(&mut data);
                 }
+                let send_data = encode_terminal_input(&data, &encoding);
                 if let Some(ref recorder) = recording_mgr {
                     recorder.write_input(&session_id, &data);
                 }
                 let mut p = port_writer.lock().unwrap();
-                let _ = p.write_all(&data);
+                let _ = p.write_all(&send_data);
                 let _ = p.flush();
             }
             SessionCommand::CaptureExec {
@@ -209,8 +211,9 @@ fn serial_session_thread(
                 if let Ok(mut proc) = capture_processor.lock() {
                     proc.register(marker_id, result_tx);
                 }
+                let send_command = encode_terminal_input(&wrapped_command, &encoding);
                 let mut p = port_writer.lock().unwrap();
-                let _ = p.write_all(&wrapped_command);
+                let _ = p.write_all(&send_command);
                 let _ = p.flush();
             }
             SessionCommand::CancelCapture { marker_id } => {

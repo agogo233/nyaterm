@@ -415,9 +415,12 @@ export function TelnetForm({
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-3">
           <Tabs defaultValue="input" className="w-full">
-            <TabsList className="grid h-8 w-full grid-cols-2 pointer-events-auto">
+            <TabsList className="grid h-8 w-full grid-cols-3 pointer-events-auto">
               <TabsTrigger value="input" className="text-xs">
                 {t("dialog.telnetInputSettings", "Input")}
+              </TabsTrigger>
+              <TabsTrigger value="terminal" className="text-xs">
+                {t("dialog.encodingSettings")}
               </TabsTrigger>
               <TabsTrigger value="telnet" className="text-xs">
                 {t("dialog.telnetCompatibility", "Compatibility")}
@@ -468,6 +471,28 @@ export function TelnetForm({
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="terminal" className="mt-3 border-0 outline-none">
+              <div className="rounded-lg border bg-accent/25 p-3">
+                <div className="max-w-md">
+                  <Label className="text-xs font-medium text-foreground/80">
+                    {t("connection.encoding")}
+                  </Label>
+                  <Select value={encoding} onValueChange={setEncoding}>
+                    <SelectTrigger className="mt-1 h-8 w-full text-xs">
+                      <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
+                      <SelectItem value="UTF-8">UTF-8</SelectItem>
+                      <SelectItem value="GBK">GBK</SelectItem>
+                      <SelectItem value="GB2312">GB2312</SelectItem>
+                      <SelectItem value="GB18030">GB18030</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </TabsContent>
@@ -555,22 +580,6 @@ export function TelnetForm({
           </div>
         </DialogContent>
       </Dialog>
-
-      <div>
-        <Label className="text-xs font-medium text-foreground/80">
-          {t("connection.encoding")}
-        </Label>
-        <Select value={encoding} onValueChange={setEncoding}>
-          <SelectTrigger className="mt-1 h-8 w-full text-xs">
-            <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
-            <SelectItem value="UTF-8">UTF-8</SelectItem>
-            <SelectItem value="GBK">GBK</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
     </div>
   );
 }

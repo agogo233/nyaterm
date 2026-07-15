@@ -22,6 +22,7 @@ export interface DeleteDialogData {
 export interface DeleteDialogItem {
   path: string;
   name: string;
+  rawPathToken?: string;
 }
 
 interface DeleteDialogProps {
@@ -45,6 +46,7 @@ export default function DeleteDialog({ data, onClose, onSuccess }: DeleteDialogP
           invoke("delete_remote_file", {
             sessionId: data.sessionId,
             path: item.path,
+            rawPathToken: item.rawPathToken,
           }),
         ),
       );

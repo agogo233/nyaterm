@@ -24,11 +24,13 @@ export type FileExplorerSessionCache = {
 export type LoadDirectoryOptions = {
   history?: "push" | "preserve";
   selectEntryName?: string;
+  rawPathToken?: string;
 };
 
 export type InlineRenameState = {
   entryName: string;
   oldPath: string;
+  oldRawPathToken?: string;
   initialName: string;
   value: string;
   isSubmitting: boolean;

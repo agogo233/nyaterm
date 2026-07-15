@@ -334,9 +334,7 @@ export function SerialForm({
         </div>
       </div>
       <div className="max-w-xs">
-        <Label className="text-xs font-medium text-foreground/80">
-          {t("connection.encoding")}
-        </Label>
+        <Label className="text-xs font-medium text-foreground/80">{t("connection.encoding")}</Label>
         <Select value={encoding} onValueChange={setEncoding}>
           <SelectTrigger className="mt-1 h-8 w-full text-xs">
             <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
@@ -345,6 +343,8 @@ export function SerialForm({
             <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
             <SelectItem value="UTF-8">UTF-8</SelectItem>
             <SelectItem value="GBK">GBK</SelectItem>
+            <SelectItem value="GB2312">GB2312</SelectItem>
+            <SelectItem value="GB18030">GB18030</SelectItem>
           </SelectContent>
         </Select>
       </div>

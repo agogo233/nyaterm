@@ -222,6 +222,7 @@ export type SftpCwdFollowMode = "off" | "shell_integration" | "rc_file";
 export interface SftpSettings {
   enabled: boolean;
   cwd_follow_mode: SftpCwdFollowMode;
+  filename_encoding?: string;
 }
 
 export type AlgorithmRisk = "modern" | "legacy" | "insecure";
@@ -1180,6 +1181,7 @@ export interface FileEntry {
   owner: string;
   group: string;
   mtime: number;
+  raw_path_token?: string;
 }
 
 export interface FileProperties {

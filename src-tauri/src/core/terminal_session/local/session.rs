@@ -246,6 +246,7 @@ fn pty_session_thread(
         let mut stripper = OscStripper::new(&ready_marker);
         let mut suppress_visible = suppress_startup_output;
         let mut zmodem_detector = ZmodemDetector::new();
+        let mut output_decoder = TerminalOutputDecoder::new(&encoding_for_reader);
         loop {
             {
                 let (lock, cvar) = &*output_pause_reader;
@@ -291,7 +292,7 @@ fn pty_session_thread(
                                 initial_bytes,
                             } => {
                                 if !passthrough.is_empty() {
-                                    let pre = super::decode_terminal_output(&passthrough, &encoding_for_reader);
+                                    let pre = output_decoder.decode(&passthrough);
                                     if !pre.is_empty() {
                                         output_reader.push_owned(pre);
                                     }
@@ -336,7 +337,7 @@ fn pty_session_thread(
                         raw.to_vec()
                     };
 
-                    let text = super::decode_terminal_output(&process_raw, &encoding_for_reader);
+                    let text = output_decoder.decode(&process_raw);
                     let mut result = stripper.push(&text);
 
                     for path in &result.cwd_paths {
@@ -433,10 +434,11 @@ fn pty_session_thread(
                 if zmodem_state.lock().unwrap().is_some() {
                     continue;
                 }
+                let send_data = encode_terminal_input(&data, &encoding);
                 if let Some(ref rec) = recording_mgr {
                     rec.write_input(&session_id, &data);
                 }
-                if let Err(error) = write_to_pty(&mut *writer, &data) {
+                if let Err(error) = write_to_pty(&mut *writer, &send_data) {
                     tracing::warn!(
                         session_id = %session_id,
                         error = %error,
@@ -452,7 +454,8 @@ fn pty_session_thread(
                 if let Ok(mut proc) = capture_processor.lock() {
                     proc.register(marker_id, result_tx);
                 }
-                if let Err(error) = write_to_pty(&mut *writer, &wrapped_command) {
+                let send_command = encode_terminal_input(&wrapped_command, &encoding);
+                if let Err(error) = write_to_pty(&mut *writer, &send_command) {
                     tracing::warn!(
                         session_id = %session_id,
                         error = %error,

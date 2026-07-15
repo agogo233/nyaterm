@@ -10,6 +10,7 @@ use crate::core::session::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
 use crate::core::ssh::osc::{OscStripper, build_ready_marker};
+use crate::core::terminal_session::{TerminalOutputDecoder, encode_terminal_input};
 use crate::core::update_cwd_if_changed;
 use crate::core::zmodem::{
     ZmodemAction, ZmodemDetectResult, ZmodemDetector, ZmodemDirection, ZmodemEvent, ZmodemTransfer,

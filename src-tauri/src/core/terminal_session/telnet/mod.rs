@@ -6,6 +6,7 @@ use crate::core::input::remap_del_to_bs;
 use crate::core::session::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
+use crate::core::terminal_session::{TerminalOutputDecoder, encode_terminal_input};
 use crate::core::zmodem::{
     ZmodemAction, ZmodemDetectResult, ZmodemDetector, ZmodemDirection, ZmodemDownloadOoDrain,
     ZmodemEvent, ZmodemTransfer, ZmodemUploadDrain, start_zmodem_transfer,

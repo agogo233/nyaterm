@@ -162,6 +162,7 @@ function FileExplorer({
   const activeSessionIdRef = useRef<string | null>(null);
   const canBrowseFilesRef = useRef(canBrowseFiles);
   const currentPathRef = useRef("");
+  const currentPathRawTokenRef = useRef<string | undefined>(undefined);
   const homeDirRef = useRef("");
   const listContainerRef = useRef<HTMLDivElement | null>(null);
   const fileSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -453,6 +454,11 @@ function FileExplorer({
       const normalizedPath = normalizeDirectoryPath(path);
       if (!normalizedPath) return false;
       const historyMode = options?.history ?? "push";
+      const rawPathToken =
+        options?.rawPathToken ??
+        (normalizeDirectoryPath(currentPathRef.current) === normalizedPath
+          ? currentPathRawTokenRef.current
+          : undefined);
       setDirectoryLoading(true);
       setError(null);
 
@@ -460,6 +466,7 @@ function FileExplorer({
         const entries = await invoke<FileEntry[]>("list_remote_dir", {
           sessionId: activeSessionId,
           path: normalizedPath,
+          rawPathToken,
         });
 
         const pathChanged = normalizeDirectoryPath(currentPathRef.current) !== normalizedPath;
@@ -474,6 +481,7 @@ function FileExplorer({
         startTransition(() => {
           setFiles(entries);
           setCurrentPath(normalizedPath);
+          currentPathRawTokenRef.current = rawPathToken;
           setVisitedHistory(nextVisitedHistory);
           setSelectedFiles((prev) => {
             if (pathChanged) {
@@ -1032,7 +1040,7 @@ function FileExplorer({
 
     if (entry.is_dir) {
       const newPath = currentPath === "/" ? `/${entry.name}` : `${currentPath}/${entry.name}`;
-      loadDirectory(newPath);
+      loadDirectory(newPath, { rawPathToken: entry.raw_path_token });
     } else {
       setSelectedFiles(new Set([entry.name]));
       lastSelectedRef.current = entry.name;
@@ -1068,6 +1076,7 @@ function FileExplorer({
     setPropertiesDialogData({
       sessionId: activeSessionId,
       fullPath: currentPath,
+      rawPathToken: currentPathRawTokenRef.current,
       name,
       is_dir: true,
     });
@@ -1352,6 +1361,7 @@ function FileExplorer({
       setInlineRenameState({
         entryName: entry.name,
         oldPath: currentPath === "/" ? `/${entry.name}` : `${currentPath}/${entry.name}`,
+        oldRawPathToken: entry.raw_path_token,
         initialName: entry.name,
         value: entry.name,
         isSubmitting: false,
@@ -1386,6 +1396,7 @@ function FileExplorer({
         sessionId: activeSessionId,
         oldPath: inlineRenameState.oldPath,
         newPath,
+        oldRawPathToken: inlineRenameState.oldRawPathToken,
       });
       await loadDirectory(currentPathRef.current, {
         history: "preserve",
@@ -1457,6 +1468,7 @@ function FileExplorer({
     return entries.map((entry) => ({
       path: getEntryFullPath(entry),
       name: entry.name,
+      rawPathToken: entry.raw_path_token,
     }));
   };
 
@@ -2035,6 +2047,7 @@ function FileExplorer({
                               setMoveDialogData({
                                 sessionId: activeSessionId,
                                 oldPath: getEntryFullPath(entry),
+                                oldRawPathToken: entry.raw_path_token,
                                 name: entry.name,
                               });
                           }}
@@ -2047,6 +2060,7 @@ function FileExplorer({
                               setPropertiesDialogData({
                                 sessionId: activeSessionId,
                                 fullPath: getEntryFullPath(entry),
+                                rawPathToken: entry.raw_path_token,
                                 name: entry.name,
                                 is_dir: entry.is_dir,
                               });

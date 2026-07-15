@@ -3,7 +3,7 @@ use crate::config::SftpCwdFollowMode;
 use crate::core::capture::OutputCaptureProcessor;
 use crate::core::input::remap_del_to_bs;
 use crate::core::ssh::osc::{self, OscStripper, ShellKind};
-use crate::core::terminal_session::decode_terminal_output;
+use crate::core::terminal_session::{TerminalOutputDecoder, encode_terminal_input};
 use crate::core::zmodem::{
     ZmodemAction, ZmodemDetectResult, ZmodemDetector, ZmodemDirection, ZmodemDownloadOoDrain,
     ZmodemEvent, ZmodemTransfer, ZmodemUploadDrain, start_zmodem_transfer,
@@ -566,6 +566,7 @@ pub(super) async fn ssh_io_loop(
         .map(|state| state.inner().clone());
     let output =
         SessionOutputCoalescer::for_app(app.clone(), output_event.clone(), output_control_tx);
+    let mut output_decoder = TerminalOutputDecoder::new(&encoding);
     if let Some(notice) = initial_notice {
         output.push_owned(notice);
     }
@@ -635,50 +636,7 @@ pub(super) async fn ssh_io_loop(
                         if let Some(ref recorder) = recording_mgr {
                             recorder.write_input(&session_id, &data);
                         }
-                        // Convert UTF-8 input to target encoding if needed
-                        let send_data = if encoding.to_uppercase() == "GBK"
-                            || encoding.to_uppercase() == "GB2312"
-                            || encoding.to_uppercase() == "GB18030"
-                        {
-                            // Convert UTF-8 bytes to GBK bytes
-                            // For GBK encoding, always remap DEL (0x7F) to BS (0x08)
-                            // because most GBK servers expect BS as the erase character
-                            let mut result = Vec::with_capacity(data.len());
-                            let mut utf8_buffer = Vec::new();
-
-                            for &byte in &data {
-                                let effective_byte = if byte == 0x7F { 0x08 } else { byte };
-
-                                if effective_byte < 0x20 {
-                                    // ASCII control character - flush buffered UTF-8 first
-                                    if !utf8_buffer.is_empty() {
-                                        let text = String::from_utf8_lossy(&utf8_buffer);
-                                        let (gbk_bytes, _, _) = encoding_rs::GBK.encode(&text);
-                                        result.extend_from_slice(&gbk_bytes);
-                                        utf8_buffer.clear();
-                                    }
-                                    result.push(effective_byte);
-                                } else {
-                                    utf8_buffer.push(byte);
-                                }
-                            }
-
-                            // Flush remaining buffered UTF-8
-                            if !utf8_buffer.is_empty() {
-                                let text = String::from_utf8_lossy(&utf8_buffer);
-                                let (gbk_bytes, _, _) = encoding_rs::GBK.encode(&text);
-                                result.extend_from_slice(&gbk_bytes);
-                            }
-
-                            result
-                        } else {
-                            // For UTF-8 mode, use the configured backspace mode
-                            let mut data = data;
-                            if backspace_as_bs {
-                                remap_del_to_bs(&mut data);
-                            }
-                            data
-                        };
+                        let send_data = encode_terminal_input(&data, &encoding);
                         let _ = channel.data(&send_data[..]).await;
                     }
                     Some(SessionCommand::Resize { cols, rows }) => {
@@ -695,7 +653,8 @@ pub(super) async fn ssh_io_loop(
                     }
                     Some(SessionCommand::CaptureExec { marker_id, wrapped_command, result_tx }) => {
                         capture_processor.register(marker_id, result_tx);
-                        let _ = channel.data(&wrapped_command[..]).await;
+                        let send_command = encode_terminal_input(&wrapped_command, &encoding);
+                        let _ = channel.data(&send_command[..]).await;
                     }
                     Some(SessionCommand::CancelCapture { marker_id }) => {
                         capture_processor.cancel(&marker_id);
@@ -778,7 +737,7 @@ pub(super) async fn ssh_io_loop(
                                 ZmodemDetectResult::Detected { direction, passthrough, initial_bytes } => {
                                     // Forward any pre-header bytes to the terminal.
                                     if !passthrough.is_empty() {
-                                        let pre = decode_terminal_output(&passthrough, &encoding);
+                                        let pre = output_decoder.decode(&passthrough);
                                         if !pre.is_empty() {
                                             output.push_owned(pre);
                                         }
@@ -810,7 +769,7 @@ pub(super) async fn ssh_io_loop(
                                     continue;
                                 }
                                 ZmodemDetectResult::NoMatch { passthrough } => {
-                                    let text = decode_terminal_output(&passthrough, &encoding);
+                                    let text = output_decoder.decode(&passthrough);
                                     let mut result = stripper.push(&text);
 
                                     if capture_processor.has_active() {
@@ -843,7 +802,7 @@ pub(super) async fn ssh_io_loop(
                             }
                     }
                     Some(ChannelMsg::ExtendedData { ref data, .. }) => {
-                        let text = decode_terminal_output(data, &encoding);
+                        let text = output_decoder.decode(data);
                         if let Some(ref recorder) = recording_mgr {
                             recorder.write_output(&session_id, &text);
                         }

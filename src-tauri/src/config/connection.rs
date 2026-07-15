@@ -60,6 +60,8 @@ pub struct SftpSettings {
     pub enabled: bool,
     #[serde(default)]
     pub cwd_follow_mode: SftpCwdFollowMode,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub filename_encoding: String,
 }
 
 impl Default for SftpSettings {
@@ -67,6 +69,7 @@ impl Default for SftpSettings {
         Self {
             enabled: true,
             cwd_follow_mode: SftpCwdFollowMode::ShellIntegration,
+            filename_encoding: String::new(),
         }
     }
 }

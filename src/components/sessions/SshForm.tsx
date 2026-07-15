@@ -53,10 +53,10 @@ import type {
   OtpEntry,
   ProxyConfig,
   SavedPassword,
+  SftpSettings,
   SshAlgorithmDefaults,
   SshAlgorithmPreferences,
   SshKey,
-  SftpSettings,
   SupportedSshAlgorithms,
 } from "@/types/global";
 
@@ -522,9 +522,6 @@ export function SshForm({
 
   const selectedKeyName = sshKeys.find((k) => k.id === keyId)?.name;
   const selectedPasswordName = savedPasswords.find((p) => p.id === passwordId)?.name;
-  const selectedProxy = proxies.find((proxy) => proxy.id === proxyId);
-  const selectedJumpHost = jumpHostOptions.find((option) => option.connection.id === jumpHostId);
-  const selectedOtpEntry = otpEntries.find((entry) => entry.id === otpId);
   const proxyOptions = proxies.map((proxy) => ({
     id: proxy.id,
     label: proxy.name,
@@ -909,22 +906,6 @@ export function SshForm({
         </Tabs>
       </div>
 
-      <div>
-        <Label className="text-xs font-medium text-foreground/80">
-          {t("connection.encoding")}
-        </Label>
-        <Select value={encoding} onValueChange={setEncoding}>
-          <SelectTrigger className="mt-1 h-8 w-full text-xs">
-            <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
-            <SelectItem value="UTF-8">UTF-8</SelectItem>
-            <SelectItem value="GBK">GBK</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
         <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
           <MdChevronRight
@@ -948,15 +929,7 @@ export function SshForm({
 
             <TabsContent value="proxy" className="mt-3 border-0 outline-none">
               <div className="rounded-lg border bg-accent/25 p-3">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-medium">{t("dialog.proxySelect")}</div>
-                  <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                    {proxyId
-                      ? (selectedProxy?.name ?? t("dialog.proxySelect"))
-                      : t("dialog.noProxy")}
-                  </p>
-                </div>
-                <div className="mt-3">
+                <div>
                   <Label className="text-xs font-medium text-foreground/80">
                     {t("dialog.proxySelect")}
                   </Label>
@@ -978,17 +951,7 @@ export function SshForm({
 
             <TabsContent value="jump-host" className="mt-3 border-0 outline-none">
               <div className="rounded-lg border bg-accent/25 p-3">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-medium">{t("dialog.proxyJump")}</div>
-                  <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                    {jumpHostId
-                      ? (selectedJumpHost?.subtitle ??
-                        selectedJumpHost?.connection.name ??
-                        t("dialog.selectProxyJump"))
-                      : t("dialog.noProxyJump")}
-                  </p>
-                </div>
-                <div className="mt-3">
+                <div>
                   <Label className="text-xs font-medium text-foreground/80">
                     {t("dialog.selectProxyJump")}
                   </Label>
@@ -1010,15 +973,7 @@ export function SshForm({
 
             <TabsContent value="two-factor" className="mt-3 border-0 outline-none">
               <div className="rounded-lg border bg-accent/25 p-3">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-medium">{t("dialog.twoFactorAuth")}</div>
-                  <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                    {otpId && selectedOtpEntry
-                      ? formatOtpLabel(selectedOtpEntry)
-                      : t("dialog.noOtp")}
-                  </p>
-                </div>
-                <div className="mt-3 space-y-3">
+                <div className="space-y-3">
                   <div>
                     <Label className="text-xs font-medium text-foreground/80">
                       {t("dialog.selectOtp")}
@@ -1060,9 +1015,12 @@ export function SshForm({
             </TabsContent>
           </Tabs>
           <Tabs defaultValue="post-login" className="w-full">
-            <TabsList className="grid h-8 w-full grid-cols-4 pointer-events-auto">
+            <TabsList className="grid h-8 w-full grid-cols-5 pointer-events-auto">
               <TabsTrigger value="post-login" className="text-xs">
                 {t("dialog.commandExecution")}
+              </TabsTrigger>
+              <TabsTrigger value="terminal" className="text-xs">
+                {t("dialog.encodingSettings")}
               </TabsTrigger>
               <TabsTrigger value="sftp" className="text-xs">
                 SFTP
@@ -1132,6 +1090,28 @@ export function SshForm({
               </div>
             </TabsContent>
 
+            <TabsContent value="terminal" className="mt-3 border-0 outline-none">
+              <div className="rounded-lg border bg-accent/25 p-3">
+                <div className="max-w-md">
+                  <Label className="text-xs font-medium text-foreground/80">
+                    {t("connection.encoding")}
+                  </Label>
+                  <Select value={encoding} onValueChange={setEncoding}>
+                    <SelectTrigger className="mt-1 h-8 w-full text-xs">
+                      <SelectValue placeholder={t("connection.encodingFollowGlobal")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="global">{t("connection.encodingFollowGlobal")}</SelectItem>
+                      <SelectItem value="UTF-8">UTF-8</SelectItem>
+                      <SelectItem value="GBK">GBK</SelectItem>
+                      <SelectItem value="GB2312">GB2312</SelectItem>
+                      <SelectItem value="GB18030">GB18030</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </TabsContent>
+
             <TabsContent value="sftp" className="mt-3 border-0 outline-none">
               <div className="rounded-lg border bg-accent/25 p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -1187,6 +1167,37 @@ export function SshForm({
                       : sftpSettings.cwd_follow_mode === "rc_file"
                         ? t("dialog.sftpCwdFollowRcFileDesc")
                         : t("dialog.sftpCwdFollowShellIntegrationDesc")}
+                  </p>
+                </div>
+                <div className="mt-3 max-w-md">
+                  <Label className="text-xs font-medium text-foreground/80">
+                    {t("dialog.sftpFilenameEncoding")}
+                  </Label>
+                  <Select
+                    value={sftpSettings.filename_encoding || "terminal"}
+                    onValueChange={(filename_encoding) =>
+                      setSftpSettings({
+                        ...sftpSettings,
+                        filename_encoding:
+                          filename_encoding === "terminal" ? "" : filename_encoding,
+                      })
+                    }
+                  >
+                    <SelectTrigger className="mt-1 h-8 text-xs font-normal">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="terminal">
+                        {t("dialog.sftpFilenameEncodingFollowTerminal")}
+                      </SelectItem>
+                      <SelectItem value="UTF-8">UTF-8</SelectItem>
+                      <SelectItem value="GBK">GBK</SelectItem>
+                      <SelectItem value="GB2312">GB2312</SelectItem>
+                      <SelectItem value="GB18030">GB18030</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-2 text-[0.6875rem] leading-relaxed text-muted-foreground">
+                    {t("dialog.sftpFilenameEncodingDesc")}
                   </p>
                 </div>
               </div>

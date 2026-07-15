@@ -446,6 +446,25 @@ impl RawSftpSession {
                 Lstat {
                     id,
                     path: path.into(),
+                    path_bytes: None,
+                }
+                .into(),
+            )
+            .await?;
+
+        into_with_status!(result, Attrs)
+    }
+
+    pub async fn lstat_bytes(&self, path_bytes: Vec<u8>) -> SftpResult<Attrs> {
+        let id = self.use_next_id();
+        let path = String::from_utf8_lossy(&path_bytes).into_owned();
+        let result = self
+            .request(
+                Some(id),
+                Lstat {
+                    id,
+                    path,
+                    path_bytes: Some(path_bytes),
                 }
                 .into(),
             )
@@ -482,6 +501,30 @@ impl RawSftpSession {
                 SetStat {
                     id,
                     path: path.into(),
+                    path_bytes: None,
+                    attrs,
+                }
+                .into(),
+            )
+            .await?;
+
+        into_status!(result)
+    }
+
+    pub async fn setstat_bytes(
+        &self,
+        path_bytes: Vec<u8>,
+        attrs: FileAttributes,
+    ) -> SftpResult<Status> {
+        let id = self.use_next_id();
+        let path = String::from_utf8_lossy(&path_bytes).into_owned();
+        let result = self
+            .request(
+                Some(id),
+                SetStat {
+                    id,
+                    path,
+                    path_bytes: Some(path_bytes),
                     attrs,
                 }
                 .into(),
@@ -636,6 +679,30 @@ impl RawSftpSession {
                 MkDir {
                     id,
                     path: path.into(),
+                    path_bytes: None,
+                    attrs,
+                }
+                .into(),
+            )
+            .await?;
+
+        into_status!(result)
+    }
+
+    pub async fn mkdir_bytes(
+        &self,
+        path_bytes: Vec<u8>,
+        attrs: FileAttributes,
+    ) -> SftpResult<Status> {
+        let id = self.use_next_id();
+        let path = String::from_utf8_lossy(&path_bytes).into_owned();
+        let result = self
+            .request(
+                Some(id),
+                MkDir {
+                    id,
+                    path,
+                    path_bytes: Some(path_bytes),
                     attrs,
                 }
                 .into(),
@@ -653,6 +720,25 @@ impl RawSftpSession {
                 RmDir {
                     id,
                     path: path.into(),
+                    path_bytes: None,
+                }
+                .into(),
+            )
+            .await?;
+
+        into_status!(result)
+    }
+
+    pub async fn rmdir_bytes(&self, path_bytes: Vec<u8>) -> SftpResult<Status> {
+        let id = self.use_next_id();
+        let path = String::from_utf8_lossy(&path_bytes).into_owned();
+        let result = self
+            .request(
+                Some(id),
+                RmDir {
+                    id,
+                    path,
+                    path_bytes: Some(path_bytes),
                 }
                 .into(),
             )
@@ -726,6 +812,33 @@ impl RawSftpSession {
                     id,
                     oldpath: oldpath.into(),
                     newpath: newpath.into(),
+                    oldpath_bytes: None,
+                    newpath_bytes: None,
+                }
+                .into(),
+            )
+            .await?;
+
+        into_status!(result)
+    }
+
+    pub async fn rename_bytes(
+        &self,
+        oldpath_bytes: Vec<u8>,
+        newpath_bytes: Vec<u8>,
+    ) -> SftpResult<Status> {
+        let id = self.use_next_id();
+        let oldpath = String::from_utf8_lossy(&oldpath_bytes).into_owned();
+        let newpath = String::from_utf8_lossy(&newpath_bytes).into_owned();
+        let result = self
+            .request(
+                Some(id),
+                Rename {
+                    id,
+                    oldpath,
+                    newpath,
+                    oldpath_bytes: Some(oldpath_bytes),
+                    newpath_bytes: Some(newpath_bytes),
                 }
                 .into(),
             )

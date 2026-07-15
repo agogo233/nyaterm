@@ -30,6 +30,7 @@ use tokio::sync::RwLock;
 pub(crate) use duplicate::TransferDuplicateManager;
 pub(crate) use transfer::{active_transfer_count, transfer_target_directory};
 pub use transfer::{cancel_transfer, pause_transfer, resume_transfer};
+pub(crate) use util::RemotePathRef;
 pub(crate) use util::sanitize_download_file_name;
 pub use util::{
     FileEntry, FileProperties, RemoteFileAttributeUpdate, RemoteTextFile, WriteRemoteTextResult,
@@ -54,7 +55,7 @@ pub(crate) struct AutoRemoteFs {
     inner: RwLock<Option<Box<dyn RemoteFs>>>,
     ssh_handle: Arc<SshConnectionHandles>,
     cache_key: String,
-    encoding: String,
+    sftp_encoding: String,
 }
 
 impl AutoRemoteFs {
@@ -63,13 +64,13 @@ impl AutoRemoteFs {
         host: &str,
         port: u16,
         username: &str,
-        encoding: &str,
+        sftp_encoding: &str,
     ) -> Self {
         Self {
             inner: RwLock::new(None),
             ssh_handle,
             cache_key: cache_key(host, port, username),
-            encoding: encoding.to_string(),
+            sftp_encoding: sftp_encoding.to_string(),
         }
     }
 
@@ -111,7 +112,10 @@ impl AutoRemoteFs {
         match SftpBackend::probe(&self.ssh_handle).await {
             Ok(()) => {
                 save_cached_backend(&self.cache_key, "sftp", false, None);
-                return Ok(Box::new(SftpBackend::new(self.ssh_handle.clone(), &self.encoding)));
+                return Ok(Box::new(SftpBackend::new(
+                    self.ssh_handle.clone(),
+                    &self.sftp_encoding,
+                )));
             }
             Err(e) => {
                 let reason = e.to_string();
@@ -155,7 +159,10 @@ impl AutoRemoteFs {
                     .await
                     .ok()
                     .map(|()| -> Box<dyn RemoteFs> {
-                        Box::new(SftpBackend::new(self.ssh_handle.clone(), &self.encoding))
+                        Box::new(SftpBackend::new(
+                            self.ssh_handle.clone(),
+                            &self.sftp_encoding,
+                        ))
                     })
             }
             "scp_enhanced" => ScpEnhancedBackend::probe(&self.ssh_handle).await.ok().map(
@@ -187,7 +194,14 @@ impl AutoRemoteFs {
 async fn get_ssh_info(
     manager: &SessionManager,
     session_id: &str,
-) -> AppResult<(Arc<SshConnectionHandles>, String, u16, String, String)> {
+) -> AppResult<(
+    Arc<SshConnectionHandles>,
+    String,
+    u16,
+    String,
+    String,
+    String,
+)> {
     let sessions = manager.sessions.lock().await;
     let session = sessions
         .get(session_id)
@@ -201,17 +215,41 @@ async fn get_ssh_info(
         .downcast::<SshConnectionHandles>()
         .map_err(|_| AppError::Config("Failed to get SSH handle".to_string()))?;
 
-    let (host, port, username, encoding) = if let Some(ref cfg_any) = session.ssh_config {
-        if let Some(cfg) = cfg_any.downcast_ref::<crate::core::ssh::SshConfig>() {
-            (cfg.host.clone(), cfg.port, cfg.username.clone(), cfg.encoding.clone())
+    let (host, port, username, encoding, sftp_encoding) =
+        if let Some(ref cfg_any) = session.ssh_config {
+            if let Some(cfg) = cfg_any.downcast_ref::<crate::core::ssh::SshConfig>() {
+                let sftp_encoding = if cfg.sftp.filename_encoding.trim().is_empty() {
+                    cfg.encoding.clone()
+                } else {
+                    cfg.sftp.filename_encoding.clone()
+                };
+                (
+                    cfg.host.clone(),
+                    cfg.port,
+                    cfg.username.clone(),
+                    cfg.encoding.clone(),
+                    sftp_encoding,
+                )
+            } else {
+                (
+                    "unknown".to_string(),
+                    22,
+                    "unknown".to_string(),
+                    "UTF-8".to_string(),
+                    "UTF-8".to_string(),
+                )
+            }
         } else {
-            ("unknown".to_string(), 22, "unknown".to_string(), "UTF-8".to_string())
-        }
-    } else {
-        ("unknown".to_string(), 22, "unknown".to_string(), "UTF-8".to_string())
-    };
+            (
+                "unknown".to_string(),
+                22,
+                "unknown".to_string(),
+                "UTF-8".to_string(),
+                "UTF-8".to_string(),
+            )
+        };
 
-    Ok((ssh_handle, host, port, username, encoding))
+    Ok((ssh_handle, host, port, username, encoding, sftp_encoding))
 }
 
 async fn get_or_create_auto_fs(
@@ -233,8 +271,15 @@ async fn get_or_create_auto_fs(
         }
     }
 
-    let (ssh_handle, host, port, username, encoding) = get_ssh_info(manager, session_id).await?;
-    let auto_fs = Arc::new(AutoRemoteFs::new(ssh_handle, &host, port, &username, &encoding));
+    let (ssh_handle, host, port, username, _encoding, sftp_encoding) =
+        get_ssh_info(manager, session_id).await?;
+    let auto_fs = Arc::new(AutoRemoteFs::new(
+        ssh_handle,
+        &host,
+        port,
+        &username,
+        &sftp_encoding,
+    ));
 
     {
         let mut sessions = manager.sessions.lock().await;
@@ -269,11 +314,13 @@ pub async fn list_remote_dir(
     manager: Arc<SessionManager>,
     session_id: &str,
     path: &str,
+    raw_path_token: Option<&str>,
 ) -> AppResult<Vec<FileEntry>> {
     let auto_fs = get_or_create_auto_fs(&manager, session_id).await?;
     let guard = auto_fs.backend().await?;
     let fs = guard.as_ref().unwrap();
-    let entries = fs.list_dir(path).await?;
+    let path_ref = RemotePathRef::new(path, raw_path_token)?;
+    let entries = fs.list_dir_ref(&path_ref).await?;
 
     tracing::debug!(
         target: "user_action",
@@ -292,11 +339,13 @@ pub async fn delete_remote_file(
     manager: Arc<SessionManager>,
     session_id: &str,
     path: &str,
+    raw_path_token: Option<&str>,
 ) -> AppResult<()> {
     let auto_fs = get_or_create_auto_fs(&manager, session_id).await?;
     let guard = auto_fs.backend().await?;
     let fs = guard.as_ref().unwrap();
-    match fs.remove_file(path).await {
+    let path_ref = RemotePathRef::new(path, raw_path_token)?;
+    match fs.remove_file_ref(&path_ref).await {
         Ok(()) => {}
         Err(error) if is_remote_delete_not_found(&error) => {
             tracing::debug!(
@@ -328,11 +377,15 @@ pub async fn rename_remote_file(
     session_id: &str,
     old_path: &str,
     new_path: &str,
+    old_raw_path_token: Option<&str>,
+    new_raw_path_token: Option<&str>,
 ) -> AppResult<()> {
     let auto_fs = get_or_create_auto_fs(&manager, session_id).await?;
     let guard = auto_fs.backend().await?;
     let fs = guard.as_ref().unwrap();
-    fs.rename(old_path, new_path).await?;
+    let old_path_ref = RemotePathRef::new(old_path, old_raw_path_token)?;
+    let new_path_ref = RemotePathRef::new(new_path, new_raw_path_token)?;
+    fs.rename_ref(&old_path_ref, &new_path_ref).await?;
 
     tracing::debug!(
         target: "user_action",
@@ -405,11 +458,13 @@ pub async fn get_file_properties(
     manager: Arc<SessionManager>,
     session_id: &str,
     path: &str,
+    raw_path_token: Option<&str>,
 ) -> AppResult<FileProperties> {
     let auto_fs = get_or_create_auto_fs(&manager, session_id).await?;
     let guard = auto_fs.backend().await?;
     let fs = guard.as_ref().unwrap();
-    let props = fs.stat(path).await?;
+    let path_ref = RemotePathRef::new(path, raw_path_token)?;
+    let props = fs.stat_ref(&path_ref).await?;
 
     tracing::debug!(
         target: "user_action",
@@ -533,6 +588,7 @@ pub async fn chmod_remote_file(
         manager,
         session_id,
         path,
+        None,
         RemoteFileAttributeUpdate {
             mode: Some(mode.to_string()),
             owner: None,
@@ -547,12 +603,14 @@ pub async fn update_remote_file_attributes(
     manager: Arc<SessionManager>,
     session_id: &str,
     path: &str,
+    raw_path_token: Option<&str>,
     update: RemoteFileAttributeUpdate,
 ) -> AppResult<()> {
     let auto_fs = get_or_create_auto_fs(&manager, session_id).await?;
     let guard = auto_fs.backend().await?;
     let fs = guard.as_ref().unwrap();
-    fs.update_attrs(path, &update).await?;
+    let path_ref = RemotePathRef::new(path, raw_path_token)?;
+    fs.update_attrs_ref(&path_ref, &update).await?;
 
     tracing::debug!(
         target: "user_action",

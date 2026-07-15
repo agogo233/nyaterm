@@ -19,6 +19,7 @@ import type { FileProperties } from "@/types/global";
 export interface PropertiesDialogData {
   sessionId: string;
   fullPath: string;
+  rawPathToken?: string;
   name: string;
   is_dir: boolean;
 }
@@ -105,6 +106,7 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
     invoke<FileProperties>("get_file_properties", {
       sessionId: data.sessionId,
       path: data.fullPath,
+      rawPathToken: data.rawPathToken,
     })
       .then((props) => {
         if (isMounted) {
@@ -124,7 +126,7 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
     return () => {
       isMounted = false;
     };
-  }, [data.sessionId, data.fullPath]);
+  }, [data.sessionId, data.fullPath, data.rawPathToken]);
 
   const handleSave = async () => {
     if (!properties) return;
@@ -153,6 +155,7 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
       await invoke("update_remote_file_attributes", {
         sessionId: data.sessionId,
         path: data.fullPath,
+        rawPathToken: data.rawPathToken,
         update,
       });
       toast.success(t("fileExplorer.propertiesSaved"));

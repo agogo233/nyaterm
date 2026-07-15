@@ -56,6 +56,7 @@ const DEFAULT_SSH_ALGORITHMS: SshAlgorithmPreferences = {
 const DEFAULT_SFTP_SETTINGS: SftpSettings = {
   enabled: true,
   cwd_follow_mode: "shell_integration",
+  filename_encoding: "",
 };
 
 function normalizeSshAlgorithms(
@@ -78,6 +79,7 @@ function normalizeSftpSettings(value: SavedConnection["sftp"] | undefined): Sftp
   return {
     enabled: value?.enabled ?? true,
     cwd_follow_mode: value?.cwd_follow_mode || "shell_integration",
+    filename_encoding: value?.filename_encoding || "",
   };
 }
 

@@ -17,6 +17,7 @@ import { invoke } from "@/lib/invoke";
 export interface MoveDialogData {
   sessionId: string;
   oldPath: string;
+  oldRawPathToken?: string;
   name: string;
 }
 
@@ -47,6 +48,7 @@ export default function MoveDialog({ data, onClose, onSuccess }: MoveDialogProps
         sessionId: data.sessionId,
         oldPath: data.oldPath,
         newPath: dialogInput,
+        oldRawPathToken: data.oldRawPathToken,
       });
       onSuccess();
       onClose();

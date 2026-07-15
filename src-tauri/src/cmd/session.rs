@@ -121,8 +121,8 @@ fn normalize_temporary_ssh_config(mut config: ssh::SshConfig, encoding: &str) ->
     config.proxy_jump = None;
     config.post_login = None;
     config.ssh_algorithms = None;
-    // Inherit encoding from global settings if not explicitly set.
-    if config.encoding.trim().is_empty() || config.encoding == "UTF-8" {
+    // Inherit encoding from global settings only when no explicit value was provided.
+    if config.encoding.trim().is_empty() {
         config.encoding = encoding.to_string();
     }
     config

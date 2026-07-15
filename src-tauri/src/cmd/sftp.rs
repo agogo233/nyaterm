@@ -17,8 +17,15 @@ pub async fn list_remote_dir(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
     path: String,
+    raw_path_token: Option<String>,
 ) -> AppResult<Vec<sftp::FileEntry>> {
-    sftp::list_remote_dir(state.inner().clone(), &session_id, &path).await
+    sftp::list_remote_dir(
+        state.inner().clone(),
+        &session_id,
+        &path,
+        raw_path_token.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -26,8 +33,15 @@ pub async fn delete_remote_file(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
     path: String,
+    raw_path_token: Option<String>,
 ) -> AppResult<()> {
-    sftp::delete_remote_file(state.inner().clone(), &session_id, &path).await
+    sftp::delete_remote_file(
+        state.inner().clone(),
+        &session_id,
+        &path,
+        raw_path_token.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -36,8 +50,18 @@ pub async fn rename_remote_file(
     session_id: String,
     old_path: String,
     new_path: String,
+    old_raw_path_token: Option<String>,
+    new_raw_path_token: Option<String>,
 ) -> AppResult<()> {
-    sftp::rename_remote_file(state.inner().clone(), &session_id, &old_path, &new_path).await
+    sftp::rename_remote_file(
+        state.inner().clone(),
+        &session_id,
+        &old_path,
+        &new_path,
+        old_raw_path_token.as_deref(),
+        new_raw_path_token.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -92,8 +116,15 @@ pub async fn get_file_properties(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
     path: String,
+    raw_path_token: Option<String>,
 ) -> AppResult<sftp::FileProperties> {
-    sftp::get_file_properties(state.inner().clone(), &session_id, &path).await
+    sftp::get_file_properties(
+        state.inner().clone(),
+        &session_id,
+        &path,
+        raw_path_token.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -173,9 +204,17 @@ pub async fn update_remote_file_attributes(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
     path: String,
+    raw_path_token: Option<String>,
     update: sftp::RemoteFileAttributeUpdate,
 ) -> AppResult<()> {
-    sftp::update_remote_file_attributes(state.inner().clone(), &session_id, &path, update).await
+    sftp::update_remote_file_attributes(
+        state.inner().clone(),
+        &session_id,
+        &path,
+        raw_path_token.as_deref(),
+        update,
+    )
+    .await
 }
 
 #[tauri::command]

@@ -352,6 +352,7 @@ fn parse_ls_line(line: &str) -> Option<FileEntry> {
         owner,
         group,
         mtime: 0,
+        raw_path_token: None,
     })
 }
 
