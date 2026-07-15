@@ -10,6 +10,7 @@ export const EXCLUSIVE_PANEL_IDS = new Set(["aiAssistant"]);
 const MONITOR_PANEL_VISIBILITY: Record<string, (ui: UiConfig) => boolean> = {
   resourceMonitor: (ui) => ui.show_remote_stats ?? true,
   gpuMonitor: (ui) => ui.show_gpu_monitor ?? false,
+  ascendNpuMonitor: (ui) => ui.show_ascend_npu_monitor ?? false,
   processManager: (ui) => ui.show_process_manager ?? false,
   dockerManager: (ui) => ui.show_docker_manager ?? false,
 };

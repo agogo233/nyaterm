@@ -130,6 +130,10 @@ pub struct PortableUiSettings {
     #[serde(default = "default_portable_gpu_monitor_interval")]
     pub gpu_monitor_interval: u32,
     #[serde(default)]
+    pub show_ascend_npu_monitor: bool,
+    #[serde(default = "default_portable_ascend_npu_monitor_interval")]
+    pub ascend_npu_monitor_interval: u32,
+    #[serde(default)]
     pub show_process_manager: bool,
     #[serde(default = "default_portable_process_manager_interval")]
     pub process_manager_interval: u32,
@@ -142,6 +146,10 @@ pub struct PortableUiSettings {
 }
 
 fn default_portable_gpu_monitor_interval() -> u32 {
+    3
+}
+
+fn default_portable_ascend_npu_monitor_interval() -> u32 {
     3
 }
 
@@ -192,6 +200,8 @@ impl PortableAppSettings {
                 remote_stats_interval: settings.ui.remote_stats_interval,
                 show_gpu_monitor: settings.ui.show_gpu_monitor,
                 gpu_monitor_interval: settings.ui.gpu_monitor_interval,
+                show_ascend_npu_monitor: settings.ui.show_ascend_npu_monitor,
+                ascend_npu_monitor_interval: settings.ui.ascend_npu_monitor_interval,
                 show_process_manager: settings.ui.show_process_manager,
                 process_manager_interval: settings.ui.process_manager_interval,
                 show_docker_manager: settings.ui.show_docker_manager,
@@ -224,6 +234,8 @@ impl PortableAppSettings {
         current.ui.remote_stats_interval = self.ui.remote_stats_interval;
         current.ui.show_gpu_monitor = self.ui.show_gpu_monitor;
         current.ui.gpu_monitor_interval = self.ui.gpu_monitor_interval;
+        current.ui.show_ascend_npu_monitor = self.ui.show_ascend_npu_monitor;
+        current.ui.ascend_npu_monitor_interval = self.ui.ascend_npu_monitor_interval;
         current.ui.show_process_manager = self.ui.show_process_manager;
         current.ui.process_manager_interval = self.ui.process_manager_interval;
         current.ui.show_docker_manager = self.ui.show_docker_manager;

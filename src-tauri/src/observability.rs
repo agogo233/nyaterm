@@ -500,6 +500,7 @@ fn build_runtime_snapshot(
             "show_serial_send_panel": settings.ui.show_serial_send_panel,
             "show_remote_stats": settings.ui.show_remote_stats,
             "show_gpu_monitor": settings.ui.show_gpu_monitor,
+            "show_ascend_npu_monitor": settings.ui.show_ascend_npu_monitor,
             "open_tab_count": settings.ui.open_tabs.len(),
         },
         "session_summary": session_summary,

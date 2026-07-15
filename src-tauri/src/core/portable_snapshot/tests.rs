@@ -63,6 +63,8 @@ mod tests {
                 remote_stats_interval: 3,
                 show_gpu_monitor: false,
                 gpu_monitor_interval: 3,
+                show_ascend_npu_monitor: false,
+                ascend_npu_monitor_interval: 3,
                 show_process_manager: false,
                 process_manager_interval: 5,
                 show_docker_manager: false,
