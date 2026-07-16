@@ -4,7 +4,7 @@ pub(crate) mod local;
 pub(crate) mod serial;
 pub(crate) mod telnet;
 
-use encoding_rs::{Decoder, Encoding, UTF_8};
+use encoding_rs::{CoderResult, Decoder, Encoding, UTF_8};
 
 pub(crate) fn terminal_encoding(label: &str) -> &'static Encoding {
     let trimmed = label.trim();
@@ -26,8 +26,29 @@ impl TerminalOutputDecoder {
     }
 
     pub(crate) fn decode(&mut self, data: &[u8]) -> String {
-        let mut output = String::with_capacity(data.len());
-        let _ = self.decoder.decode_to_string(data, &mut output, false);
+        let capacity = self
+            .decoder
+            .max_utf8_buffer_length(data.len())
+            .unwrap_or_else(|| data.len().saturating_mul(4));
+        let mut output = String::with_capacity(capacity);
+        let mut total_read = 0;
+        while total_read < data.len() {
+            let (result, read, _) =
+                self.decoder
+                    .decode_to_string(&data[total_read..], &mut output, false);
+            total_read += read;
+            match result {
+                CoderResult::InputEmpty => break,
+                CoderResult::OutputFull => {
+                    output.reserve(
+                        self.decoder
+                            .max_utf8_buffer_length(data.len() - total_read)
+                            .unwrap_or_else(|| (data.len() - total_read).saturating_mul(4))
+                            .max(4),
+                    );
+                }
+            }
+        }
         output
     }
 }
@@ -104,6 +125,20 @@ mod tests {
         let mut decoder = TerminalOutputDecoder::new("GB18030");
         assert_eq!(decoder.decode(&[0xB2]), "");
         assert_eq!(decoder.decode(&[0xE2]), "测");
+    }
+
+    #[test]
+    fn gbk_decoder_handles_utf8_output_expansion() {
+        let mut decoder = TerminalOutputDecoder::new("GBK");
+        let mut input = Vec::new();
+        for _ in 0..1024 {
+            input.extend_from_slice(&[0xB2, 0xE2]);
+        }
+
+        let output = decoder.decode(&input);
+
+        assert_eq!(output.chars().count(), 1024);
+        assert!(output.chars().all(|ch| ch == '测'));
     }
 
     #[test]
