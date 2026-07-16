@@ -1597,14 +1597,14 @@ impl RemoteFs for SftpBackend {
     async fn list_dir_ref(&self, path: &RemotePathRef) -> AppResult<Vec<FileEntry>> {
         let sftp = self.open_sftp().await?;
 
-        let path_bytes = self.remote_path_bytes(path);
+        let path_bytes = normalize_remote_dir_path_bytes(&self.remote_path_bytes(path));
         if path.raw_path().is_some() {
             self.path_cache
                 .write()
                 .await
                 .insert(path.display_path().to_string(), path_bytes.clone());
         }
-        let dir = sftp.read_dir_bytes(path_bytes).await?;
+        let dir = sftp.read_dir_bytes(path_bytes.clone()).await?;
 
         let mut pending = Vec::new();
         let mut uid_set = HashSet::new();
@@ -1625,11 +1625,7 @@ impl RemoteFs for SftpBackend {
 
             let full_path = join_remote_child(&normalized_path, &name);
 
-            let mut full_path_bytes = self.encode_path_for_sftp(&normalized_path);
-            if !full_path_bytes.ends_with(b"/") {
-                full_path_bytes.push(b'/');
-            }
-            full_path_bytes.extend_from_slice(&name_bytes);
+            let full_path_bytes = join_remote_child_bytes(&path_bytes, &name_bytes);
             let raw_path_token = raw_path_token(&full_path_bytes);
             self.path_cache
                 .write()
@@ -3544,5 +3540,16 @@ mod tests {
         assert!(is_safe_recursive_remove_target("/tmp/uploads"));
         assert!(is_safe_recursive_remove_target("relative/uploads"));
         assert!(is_safe_recursive_remove_target("/home/user/data/"));
+    }
+
+    #[test]
+    fn raw_child_path_is_joined_from_parent_bytes() {
+        let parent = b"/remote/\x80parent".to_vec();
+        let child = b"\x81child".to_vec();
+
+        assert_eq!(
+            join_remote_child_bytes(&parent, &child),
+            b"/remote/\x80parent/\x81child"
+        );
     }
 }
