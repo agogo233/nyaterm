@@ -1137,6 +1137,21 @@ export interface TunnelConfig {
   group_id?: string;
 }
 
+export type TunnelRuntimeStatus =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "reconnecting"
+  | "disconnected"
+  | "error";
+
+export interface TunnelRuntimeState {
+  tunnelId: string;
+  status: TunnelRuntimeStatus;
+  error?: string | null;
+  updatedAt?: number | null;
+}
+
 export interface InteractionSettings {
   copy_on_select: boolean;
   allow_osc52_clipboard_write: boolean;

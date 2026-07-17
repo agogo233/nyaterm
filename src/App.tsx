@@ -1808,6 +1808,11 @@ function App() {
       toast.info(t("tabCtx.reconnecting"));
 
       try {
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_reconnecting_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         const reconnectContent = capturePaneReconnectContent(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
@@ -1831,6 +1836,11 @@ function App() {
           return;
         }
         const errorMessage = getErrorMessage(error);
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_disconnected_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         logger.error({
           domain: "session.lifecycle",
           event: "session.reconnect_failed",
@@ -1882,6 +1892,11 @@ function App() {
       toast.info(t("tabCtx.reconnecting"));
 
       try {
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_reconnecting_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         const reconnectContent = capturePaneReconnectContent(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
@@ -1905,6 +1920,11 @@ function App() {
           return;
         }
         const errorMessage = getErrorMessage(error);
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_disconnected_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         logger.error({
           domain: "session.lifecycle",
           event: "session.reconnect_failed",
@@ -2039,6 +2059,11 @@ function App() {
       if (!pane || pane.connecting || !canCreateSessionFromPane(pane)) return;
 
       try {
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_reconnecting_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         const reconnectContent = capturePaneReconnectContent(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
@@ -2061,6 +2086,11 @@ function App() {
           return;
         }
         const errorMessage = getErrorMessage(error);
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_disconnected_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         logger.error({
           domain: "session.lifecycle",
           event: "session.reconnect_failed",

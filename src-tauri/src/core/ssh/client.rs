@@ -117,6 +117,14 @@ pub enum SshAuth {
 
 pub(crate) type SshRawHandle = Arc<Mutex<client::Handle<SshHandler>>>;
 
+pub struct RemoteForwardOpen {
+    pub channel: russh::Channel<client::Msg>,
+    pub connected_address: String,
+    pub connected_port: u32,
+    pub originator_address: String,
+    pub originator_port: u32,
+}
+
 const DEFAULT_SFTP_CHANNEL_LIMIT: usize = 6;
 
 #[derive(Clone)]
@@ -227,6 +235,8 @@ pub struct SshHandler {
     port: u16,
     owner_window_label: Option<String>,
     x11_tx: Option<mpsc::UnboundedSender<super::x11_forwarding::X11ChannelOpen>>,
+    disconnect_tx: Option<mpsc::UnboundedSender<String>>,
+    remote_forward_tx: Option<mpsc::UnboundedSender<RemoteForwardOpen>>,
 }
 
 impl SshHandler {
@@ -242,6 +252,8 @@ impl SshHandler {
             port,
             owner_window_label,
             x11_tx: None,
+            disconnect_tx: None,
+            remote_forward_tx: None,
         }
     }
 
@@ -250,6 +262,19 @@ impl SshHandler {
         x11_tx: mpsc::UnboundedSender<super::x11_forwarding::X11ChannelOpen>,
     ) -> Self {
         self.x11_tx = Some(x11_tx);
+        self
+    }
+
+    pub fn with_disconnect_sender(mut self, disconnect_tx: mpsc::UnboundedSender<String>) -> Self {
+        self.disconnect_tx = Some(disconnect_tx);
+        self
+    }
+
+    pub fn with_remote_forward_sender(
+        mut self,
+        remote_forward_tx: mpsc::UnboundedSender<RemoteForwardOpen>,
+    ) -> Self {
+        self.remote_forward_tx = Some(remote_forward_tx);
         self
     }
 
@@ -770,6 +795,9 @@ impl client::Handler for SshHandler {
     ) -> Result<(), Self::Error> {
         match reason {
             client::DisconnectReason::ReceivedDisconnect(info) => {
+                if let Some(tx) = &self.disconnect_tx {
+                    let _ = tx.send(format!("SSH server disconnected: {}", info.message));
+                }
                 tracing::warn!(
                     host = %self.host,
                     port = self.port,
@@ -781,6 +809,9 @@ impl client::Handler for SshHandler {
                 Ok(())
             }
             client::DisconnectReason::Error(error) => {
+                if let Some(tx) = &self.disconnect_tx {
+                    let _ = tx.send(format!("SSH connection error: {error}"));
+                }
                 tracing::error!(
                     host = %self.host,
                     port = self.port,
@@ -790,6 +821,42 @@ impl client::Handler for SshHandler {
                 Err(error)
             }
         }
+    }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<client::Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        if let Some(tx) = &self.remote_forward_tx {
+            match tx.send(RemoteForwardOpen {
+                channel,
+                connected_address: connected_address.to_string(),
+                connected_port,
+                originator_address: originator_address.to_string(),
+                originator_port,
+            }) {
+                Ok(()) => {
+                    reply.accept().await;
+                }
+                Err(error) => {
+                    reply
+                        .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                        .await;
+                    let _ = error.0.channel.close().await;
+                }
+            }
+        } else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+        }
+        Ok(())
     }
 
     async fn server_channel_open_x11(

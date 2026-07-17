@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { ChevronDownIcon, FolderPlusIcon, MoreHorizontalIcon } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,7 +9,6 @@ import {
   buildGroupPath,
   type ConnectionOption,
   EmptyState,
-  StatusBadge,
   sortLabel,
 } from "@/components/dialog/network/shared";
 import { TunnelDialog } from "@/components/dialog/network/TunnelDialog";
@@ -46,10 +46,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApp } from "@/context/AppContext";
 import { invoke } from "@/lib/invoke";
 import { cn } from "@/lib/utils";
-import type { NetworkGroup, ProxyConfig, TunnelConfig } from "@/types/global";
+import type {
+  NetworkGroup,
+  ProxyConfig,
+  TunnelConfig,
+  TunnelRuntimeState,
+  TunnelRuntimeStatus,
+} from "@/types/global";
 
 type NetworkTab = "proxy" | "tunnel";
 type GroupDialogState = { tab: NetworkTab; group: NetworkGroup | null } | null;
@@ -211,6 +218,7 @@ function ProxyRow({
 
 function TunnelRow({
   tunnel,
+  runtimeState,
   groups,
   connectionOption,
   onEdit,
@@ -219,6 +227,7 @@ function TunnelRow({
   onMoveGroup,
 }: {
   tunnel: TunnelConfig;
+  runtimeState?: TunnelRuntimeState;
   groups: NetworkGroup[];
   connectionOption?: ConnectionOption;
   onEdit: (tunnel: TunnelConfig) => void;
@@ -246,11 +255,7 @@ function TunnelRow({
           <div className="truncate text-sm font-medium" style={{ color: "var(--df-text)" }}>
             {tunnel.name || endpoint}
           </div>
-          <StatusBadge
-            active={tunnel.is_open}
-            activeLabel={t("network.tunnelOpen")}
-            inactiveLabel={t("network.tunnelClosed")}
-          />
+          <TunnelRuntimeBadge state={runtimeState} enabled={tunnel.is_open} />
         </div>
         <div className="mt-0.5 truncate text-xs" style={{ color: "var(--df-text-dimmed)" }}>
           {connectionOption?.connection.name ?? t("network.connectionMissing")} · {typeLabel}
@@ -292,6 +297,48 @@ function TunnelRow({
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  );
+}
+
+function getTunnelRuntimeStatus(enabled: boolean, state?: TunnelRuntimeState): TunnelRuntimeStatus {
+  if (state?.status) return state.status;
+  return enabled ? "disconnected" : "stopped";
+}
+
+function TunnelRuntimeBadge({ state, enabled }: { state?: TunnelRuntimeState; enabled: boolean }) {
+  const { t } = useTranslation();
+  const status = getTunnelRuntimeStatus(enabled, state);
+  const label =
+    {
+      stopped: t("network.tunnelStatusStopped"),
+      starting: t("network.tunnelStatusStarting"),
+      running: t("network.tunnelStatusRunning"),
+      reconnecting: t("network.tunnelStatusReconnecting"),
+      disconnected: t("network.tunnelStatusDisconnected"),
+      error: t("network.tunnelStatusError"),
+    }[status] ?? status;
+  const className =
+    {
+      stopped: "bg-muted text-muted-foreground",
+      starting: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+      running: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+      reconnecting: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+      disconnected: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      error: "bg-destructive/10 text-destructive",
+    }[status] ?? "bg-muted text-muted-foreground";
+  const badge = (
+    <span className={cn("rounded-full px-2 py-0.5 text-[0.625rem] font-medium", className)}>
+      {label}
+    </span>
+  );
+
+  if (status !== "error" || !state?.error) return badge;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipContent className="max-w-72 break-words">{state.error}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -492,6 +539,9 @@ export default function NetworkPanel() {
   const [proxySaving, setProxySaving] = useState(false);
 
   const [tunnels, setTunnels] = useState<TunnelConfig[]>([]);
+  const [tunnelRuntimeStates, setTunnelRuntimeStates] = useState<
+    Record<string, TunnelRuntimeState>
+  >({});
   const [tunnelGroups, setTunnelGroups] = useState<NetworkGroup[]>([]);
   const [tunnelDialog, setTunnelDialog] = useState<TunnelConfig | "new" | null>(null);
   const [tunnelSaving, setTunnelSaving] = useState(false);
@@ -589,6 +639,15 @@ export default function NetworkPanel() {
     }
   }, []);
 
+  const loadTunnelRuntimeStates = useCallback(async () => {
+    try {
+      const next = await invoke<TunnelRuntimeState[]>("get_tunnel_runtime_states");
+      setTunnelRuntimeStates(Object.fromEntries(next.map((state) => [state.tunnelId, state])));
+    } catch (error) {
+      toast.error(String(error));
+    }
+  }, []);
+
   useEffect(() => {
     void loadProxies();
     void loadProxyGroups();
@@ -596,8 +655,22 @@ export default function NetworkPanel() {
 
   useEffect(() => {
     void loadTunnels();
+    void loadTunnelRuntimeStates();
     void loadTunnelGroups();
-  }, [loadTunnels, loadTunnelGroups]);
+  }, [loadTunnels, loadTunnelGroups, loadTunnelRuntimeStates]);
+
+  useEffect(() => {
+    const unlistenPromise = listen<TunnelRuntimeState>("tunnel-runtime-state-changed", (event) => {
+      setTunnelRuntimeStates((prev) => ({
+        ...prev,
+        [event.payload.tunnelId]: event.payload,
+      }));
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   const handleSaveProxy = useCallback(
     async (proxy: ProxyConfig) => {
@@ -622,7 +695,7 @@ export default function NetworkPanel() {
       try {
         const payload = tunnel.id ? tunnel : { ...tunnel, id: crypto.randomUUID() };
         await invoke("save_tunnel", { tunnel: payload });
-        await loadTunnels();
+        await Promise.all([loadTunnels(), loadTunnelRuntimeStates()]);
         setTunnelDialog(null);
       } catch (error) {
         toast.error(String(error));
@@ -630,7 +703,7 @@ export default function NetworkPanel() {
         setTunnelSaving(false);
       }
     },
-    [loadTunnels],
+    [loadTunnelRuntimeStates, loadTunnels],
   );
 
   const handleDeleteProxy = useCallback(
@@ -649,12 +722,12 @@ export default function NetworkPanel() {
     async (tunnelId: string) => {
       try {
         await invoke("delete_tunnel", { tunnelId });
-        await loadTunnels();
+        await Promise.all([loadTunnels(), loadTunnelRuntimeStates()]);
       } catch (error) {
         toast.error(String(error));
       }
     },
-    [loadTunnels],
+    [loadTunnelRuntimeStates, loadTunnels],
   );
 
   const handleMoveProxyGroup = useCallback(
@@ -673,24 +746,25 @@ export default function NetworkPanel() {
     async (tunnel: TunnelConfig, groupId: string | undefined) => {
       try {
         await invoke("set_tunnel_group", { tunnelId: tunnel.id, groupId });
-        await loadTunnels();
+        await Promise.all([loadTunnels(), loadTunnelRuntimeStates()]);
       } catch (error) {
         toast.error(String(error));
       }
     },
-    [loadTunnels],
+    [loadTunnelRuntimeStates, loadTunnels],
   );
 
   const handleToggleTunnel = useCallback(
     async (tunnelId: string, open: boolean) => {
       try {
         await invoke(open ? "open_tunnel" : "close_tunnel", { tunnelId });
-        await loadTunnels();
       } catch (error) {
         toast.error(String(error));
+      } finally {
+        await Promise.all([loadTunnels(), loadTunnelRuntimeStates()]);
       }
     },
-    [loadTunnels],
+    [loadTunnelRuntimeStates, loadTunnels],
   );
 
   const handleSaveGroup = useCallback(
@@ -729,13 +803,20 @@ export default function NetworkPanel() {
       if (deleteGroupState.tab === "proxy") {
         await Promise.all([loadProxyGroups(), loadProxies()]);
       } else {
-        await Promise.all([loadTunnelGroups(), loadTunnels()]);
+        await Promise.all([loadTunnelGroups(), loadTunnels(), loadTunnelRuntimeStates()]);
       }
       setDeleteGroupState(null);
     } catch (error) {
       toast.error(String(error));
     }
-  }, [deleteGroupState, loadProxies, loadProxyGroups, loadTunnels, loadTunnelGroups]);
+  }, [
+    deleteGroupState,
+    loadProxies,
+    loadProxyGroups,
+    loadTunnelRuntimeStates,
+    loadTunnels,
+    loadTunnelGroups,
+  ]);
 
   return (
     <aside
@@ -833,6 +914,7 @@ export default function NetworkPanel() {
                         >
                           <TunnelRow
                             tunnel={tunnel}
+                            runtimeState={tunnelRuntimeStates[tunnel.id]}
                             groups={tunnelGroups}
                             connectionOption={
                               tunnel.connection_id
