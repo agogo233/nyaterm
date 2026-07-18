@@ -79,34 +79,28 @@ struct TargetedTrayActionPayload {
     target_window_label: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayLanguage {
     En,
-    ZhCn,
-    ZhTw,
+    ZhHans,
+    ZhHant,
 }
 
 impl TrayLanguage {
     fn from_settings(settings: &AppSettings) -> Self {
         let language = settings.ui.language.as_deref().unwrap_or("en");
-        let normalized = language.replace('_', "-").to_ascii_lowercase();
-        if normalized == "zh-tw"
-            || normalized == "zh-hant"
-            || normalized.starts_with("zh-hant-")
-            || normalized == "zh-hk"
-            || normalized == "zh-mo"
-        {
-            Self::ZhTw
-        } else if normalized == "zh-cn"
-            || normalized == "zh"
-            || normalized == "zh-hans"
-            || normalized.starts_with("zh-hans-")
-            || normalized.starts_with("zh-")
-        {
-            Self::ZhCn
-        } else {
-            Self::En
-        }
+        tray_language_from_code(language)
+    }
+}
+
+fn tray_language_from_code(language: &str) -> TrayLanguage {
+    let normalized = language.trim().replace('_', "-").to_ascii_lowercase();
+    match normalized.as_str() {
+        "zh-tw" | "zh-hant" | "zh-hk" | "zh-mo" => TrayLanguage::ZhHant,
+        "zh" | "zh-cn" | "zh-sg" | "zh-hans" => TrayLanguage::ZhHans,
+        code if code.starts_with("zh-hant-") => TrayLanguage::ZhHant,
+        code if code.starts_with("zh-hans-") => TrayLanguage::ZhHans,
+        _ => TrayLanguage::En,
     }
 }
 
@@ -143,7 +137,7 @@ struct TrayStrings {
 impl TrayStrings {
     fn for_language(language: TrayLanguage) -> Self {
         match language {
-            TrayLanguage::ZhCn => Self {
+            TrayLanguage::ZhHans => Self {
                 show_main_window: "显示主窗口",
                 hide_to_tray: "隐藏到托盘",
                 new_session: "新建连接…",
@@ -172,7 +166,7 @@ impl TrayStrings {
                 session_type_telnet: "Telnet",
                 session_type_serial: "串口",
             },
-            TrayLanguage::ZhTw => Self {
+            TrayLanguage::ZhHant => Self {
                 show_main_window: "顯示主視窗",
                 hide_to_tray: "隱藏到系統匣",
                 new_session: "新增連線…",
@@ -235,7 +229,7 @@ impl TrayStrings {
 
     fn active_sessions_title(&self, language: TrayLanguage, count: usize) -> String {
         match language {
-            TrayLanguage::ZhCn | TrayLanguage::ZhTw => {
+            TrayLanguage::ZhHans | TrayLanguage::ZhHant => {
                 format!("{} ({count})", self.active_sessions)
             }
             TrayLanguage::En => format!("{} ({count})", self.active_sessions),
@@ -244,7 +238,7 @@ impl TrayStrings {
 
     fn cloud_sync_title(&self, language: TrayLanguage, status: &str) -> String {
         match language {
-            TrayLanguage::ZhCn | TrayLanguage::ZhTw => {
+            TrayLanguage::ZhHans | TrayLanguage::ZhHant => {
                 format!("{}（{status}）", self.cloud_sync)
             }
             TrayLanguage::En => format!("{} ({status})", self.cloud_sync),
@@ -698,4 +692,40 @@ fn session_type_sort_key(session_type: &SessionType) -> &'static str {
 
 fn escape_menu_text(text: &str) -> String {
     text.replace('&', "&&")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TrayLanguage, tray_language_from_code};
+
+    #[test]
+    fn maps_known_chinese_language_codes_to_writing_systems() {
+        let cases = [
+            ("zh", TrayLanguage::ZhHans),
+            ("zh-CN", TrayLanguage::ZhHans),
+            ("zh_CN", TrayLanguage::ZhHans),
+            ("zh-SG", TrayLanguage::ZhHans),
+            ("zh-Hans", TrayLanguage::ZhHans),
+            ("zh-Hans-CN", TrayLanguage::ZhHans),
+            ("zh-TW", TrayLanguage::ZhHant),
+            ("zh_TW", TrayLanguage::ZhHant),
+            ("zh-Hant", TrayLanguage::ZhHant),
+            ("zh-Hant-TW", TrayLanguage::ZhHant),
+            ("zh-HK", TrayLanguage::ZhHant),
+            ("zh-MO", TrayLanguage::ZhHant),
+        ];
+
+        for (code, expected) in cases {
+            assert_eq!(tray_language_from_code(code), expected, "{code}");
+        }
+    }
+
+    #[test]
+    fn falls_back_to_english_for_non_chinese_or_unknown_codes() {
+        let cases = ["en", "ko", "", "fr", "zh-unknown"];
+
+        for code in cases {
+            assert_eq!(tray_language_from_code(code), TrayLanguage::En, "{code}");
+        }
+    }
 }
