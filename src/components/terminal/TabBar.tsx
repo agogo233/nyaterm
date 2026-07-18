@@ -57,6 +57,7 @@ interface TabBarProps {
   activeTabId: string | null;
   focusedTabId?: string | null;
   unreadTabIds?: Set<string>;
+  disconnectedTabIds?: Set<string>;
   onTabChange: (tabId: string) => void;
   onTabClose: (tab: Tab) => void | Promise<void>;
   onAddTab: () => void;
@@ -241,6 +242,7 @@ function TabBar({
   activeTabId,
   focusedTabId,
   unreadTabIds,
+  disconnectedTabIds,
   onTabChange,
   onTabClose,
   onAddTab,
@@ -608,8 +610,12 @@ function TabBar({
 
   useLayoutEffect(() => {
     const listener = (event: Event) => {
-      const detail = (event as CustomEvent<{ tabId?: string; action?: "duplicate" | "multiplex" }>)
-        .detail;
+      const detail = (
+        event as CustomEvent<{
+          tabId?: string;
+          action?: "duplicate" | "multiplex";
+        }>
+      ).detail;
       if (!detail?.tabId || !detail.action) return;
       const tab = tabs.find((item) => item.id === detail.tabId);
       if (!tab) return;
@@ -910,7 +916,11 @@ function TabBar({
         <svg
           aria-hidden="true"
           className="shrink-0 animate-spin"
-          style={{ width: "0.875rem", height: "0.875rem", color: "var(--df-primary)" }}
+          style={{
+            width: "0.875rem",
+            height: "0.875rem",
+            color: "var(--df-primary)",
+          }}
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
@@ -1006,6 +1016,12 @@ function TabBar({
     const isActive = activeTabId === tab.id;
     const isFocused = focusedTabId === tab.id;
     const showUnreadIndicator = !isFocused && unreadTabIds?.has(tab.id);
+    const isDisconnected = disconnectedTabIds?.has(tab.id) ?? false;
+    const tabNameColor = isDisconnected
+      ? "var(--df-danger)"
+      : showUnreadIndicator
+        ? "var(--df-link)"
+        : undefined;
     const displayName = getTabDisplayName(tab);
     const accentColor = tab.tabColor;
     const conn = getTabConnection(tab, savedConnections);
@@ -1046,8 +1062,20 @@ function TabBar({
     );
 
     const tooltipContent =
-      tab.locked || host || sshAddress ? (
+      tab.locked || host || sshAddress || isDisconnected || showUnreadIndicator ? (
         <div className="flex max-w-[260px] min-w-0 flex-col gap-1">
+          {isDisconnected && (
+            <div className="flex min-w-0 items-center gap-2 text-[var(--df-danger)]">
+              <MdErrorOutline className="text-[12px] shrink-0" />
+              <span className="min-w-0 truncate">{t("tabCtx.disconnected")}</span>
+            </div>
+          )}
+          {showUnreadIndicator && (
+            <div className="flex min-w-0 items-center gap-2 text-[var(--df-link)]">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
+              <span className="min-w-0 truncate">{t("tabCtx.unreadOutput")}</span>
+            </div>
+          )}
           {tab.locked && (
             <div className="flex min-w-0 items-center gap-2 text-[var(--df-text-muted)]">
               <MdLock className="text-[12px] shrink-0" />
@@ -1150,13 +1178,17 @@ function TabBar({
 
         <span
           className="shrink-0 min-w-[1.25em] text-xs font-semibold tabular-nums leading-none"
-          style={{ color: isActive ? "var(--df-text-muted)" : "var(--df-text-dimmed)" }}
+          style={{
+            color: isActive ? "var(--df-text-muted)" : "var(--df-text-dimmed)",
+          }}
           aria-hidden="true"
         >
           {index + 1}
         </span>
 
-        <span className="max-w-[160px] truncate whitespace-nowrap">{displayName}</span>
+        <span className="max-w-[160px] truncate whitespace-nowrap" style={{ color: tabNameColor }}>
+          {displayName}
+        </span>
 
         <SyncIndicator tab={tab} syncGroups={syncGroups} broadcastToAll={broadcastToAll} />
 
@@ -1271,6 +1303,12 @@ function TabBar({
     const isActive = activeTabId === tab.id;
     const displayName = getTabDisplayName(tab);
     const showUnreadIndicator = !isActive && unreadTabIds?.has(tab.id);
+    const isDisconnected = disconnectedTabIds?.has(tab.id) ?? false;
+    const tabNameColor = isDisconnected
+      ? "var(--df-danger)"
+      : showUnreadIndicator
+        ? "var(--df-link)"
+        : undefined;
 
     return (
       <DropdownMenuItem
@@ -1289,7 +1327,7 @@ function TabBar({
           <span className="flex h-4 w-4 items-center justify-center text-[var(--df-text-dimmed)]">
             {renderTabIcon(tab)}
           </span>
-          <span className="min-w-0 truncate">
+          <span className="min-w-0 truncate" style={{ color: tabNameColor }}>
             <span className="mr-1.5 text-[var(--df-text-dimmed)] tabular-nums">{index + 1}</span>
             {displayName}
           </span>
@@ -1385,7 +1423,10 @@ function TabBar({
                   <button
                     type="button"
                     className="flex h-full w-8 shrink-0 items-center justify-center border-l transition-colors df-hover"
-                    style={{ color: "var(--df-text-muted)", borderColor: "var(--df-border)" }}
+                    style={{
+                      color: "var(--df-text-muted)",
+                      borderColor: "var(--df-border)",
+                    }}
                     aria-label={t("terminal.openTabs")}
                   >
                     <MdExpandMore className="text-base" />
@@ -1423,7 +1464,10 @@ function TabBar({
               <DropdownMenuTrigger asChild>
                 <button
                   className="flex h-full w-9 shrink-0 items-center justify-center border-l transition-colors df-hover"
-                  style={{ color: "var(--df-text-muted)", borderColor: "var(--df-border)" }}
+                  style={{
+                    color: "var(--df-text-muted)",
+                    borderColor: "var(--df-border)",
+                  }}
                   aria-label={t("terminal.newSession")}
                 >
                   <MdAdd className="text-base" />

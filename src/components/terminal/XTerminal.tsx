@@ -111,7 +111,9 @@ interface XTermInternalTrimSource {
       buffers?: {
         normal?: {
           lines?: {
-            onTrim?: (listener: (amount: number) => void) => { dispose: () => void };
+            onTrim?: (listener: (amount: number) => void) => {
+              dispose: () => void;
+            };
           };
         };
       };
@@ -258,8 +260,14 @@ export default function XTerminal({
     [appearance, terminalTheme.colors.terminal],
   );
   const terminalTransparencyEnabled = isTerminalTransparencyEnabled(appearance);
-  const terminalLifecycleStateRef = useRef({ sessionId, terminalTransparencyEnabled });
-  terminalLifecycleStateRef.current = { sessionId, terminalTransparencyEnabled };
+  const terminalLifecycleStateRef = useRef({
+    sessionId,
+    terminalTransparencyEnabled,
+  });
+  terminalLifecycleStateRef.current = {
+    sessionId,
+    terminalTransparencyEnabled,
+  };
   const showLineNumbers = terminalSettings.show_line_numbers;
   const showTimestamps = terminalSettings.show_timestamps;
   const showTimestampMilliseconds = terminalSettings.show_timestamp_milliseconds ?? false;
@@ -593,7 +601,9 @@ export default function XTerminal({
       webLinksAddon,
       removePopup: removeLinkPopup,
     } = createTerminalLinkHandlers(terminal, tRef);
-    const searchAddon = new SearchAddon({ highlightLimit: TERMINAL_SEARCH_VISIBLE_MATCH_LIMIT });
+    const searchAddon = new SearchAddon({
+      highlightLimit: TERMINAL_SEARCH_VISIBLE_MATCH_LIMIT,
+    });
     const unicodeGraphemesAddon = new UnicodeGraphemesAddon();
     const zmodemHandler = createZmodemEventHandler(
       terminal,
@@ -672,7 +682,9 @@ export default function XTerminal({
 
       switch (sessionTypeRef.current) {
         case "Local":
-          return invoke<string>("create_local_session", { connectionId: connectionId || null });
+          return invoke<string>("create_local_session", {
+            connectionId: connectionId || null,
+          });
         case "Telnet":
           return invoke<string>("create_telnet_session", { connectionId });
         case "Serial":
@@ -1607,7 +1619,10 @@ export default function XTerminal({
 
       return [
         { data: chunk.data.slice(0, index), bytes },
-        { data: chunk.data.slice(index), bytes: Math.max(0, chunk.bytes - bytes) },
+        {
+          data: chunk.data.slice(index),
+          bytes: Math.max(0, chunk.bytes - bytes),
+        },
       ];
     };
 
@@ -1836,7 +1851,10 @@ export default function XTerminal({
             return;
           }
 
-          queuedOutputChunksRef.current.push({ data: payload.data, bytes: payload.bytes });
+          queuedOutputChunksRef.current.push({
+            data: payload.data,
+            bytes: payload.bytes,
+          });
           queuedOutputBytesRef.current += payload.bytes;
           backendUnackedOutputBytesRef.current += payload.bytes;
 
@@ -1848,7 +1866,10 @@ export default function XTerminal({
             const now = Date.now();
             if (now - lastErrorNoticeAtRef.current > 30_000) {
               lastErrorNoticeAtRef.current = now;
-              emitAIErrorDetected({ sessionId, output: recentPayload.slice(-4000) });
+              emitAIErrorDetected({
+                sessionId,
+                output: recentPayload.slice(-4000),
+              });
             }
           }
 
@@ -1856,7 +1877,9 @@ export default function XTerminal({
 
           if (!visibleRef.current) {
             window.dispatchEvent(
-              new CustomEvent("nyaterm:session-output", { detail: { sessionId } }),
+              new CustomEvent("nyaterm:session-output", {
+                detail: { sessionId },
+              }),
             );
             return;
           }
@@ -1890,6 +1913,11 @@ export default function XTerminal({
         if (!isTerminalAlive()) return;
         const message = String(event.payload || tRef.current("terminal.connectionFailed"));
         disconnectedRef.current = true;
+        window.dispatchEvent(
+          new CustomEvent("nyaterm:session-disconnected", {
+            detail: { sessionId },
+          }),
+        );
         terminal.write(`\r\n\x1b[31m[${tRef.current("terminal.connectionFailed")}]\x1b[0m\r\n`);
         terminal.write(`\x1b[31m${message}\x1b[0m\r\n`);
         toast.error(message);
@@ -1908,6 +1936,11 @@ export default function XTerminal({
       const nextClosedUnlisten = await listen<void>(`session-closed-${sessionId}`, () => {
         if (!isTerminalAlive()) return;
         disconnectedRef.current = true;
+        window.dispatchEvent(
+          new CustomEvent("nyaterm:session-disconnected", {
+            detail: { sessionId },
+          }),
+        );
         terminal.write(`\r\n\x1b[31m[${tRef.current("terminal.sessionDisconnected")}]\x1b[0m\r\n`);
         if (canReconnectDisconnectedSession()) {
           terminal.write(`\x1b[33m[${tRef.current("terminal.pressEnterToReconnect")}]\x1b[0m\r\n`);
@@ -1989,9 +2022,15 @@ export default function XTerminal({
           createReconnectedSession()
             .then((newSessionId) => {
               preservedReconnectContentRef.current = serializeTerminalText(terminal);
+              const oldSessionId = sessionIdRef.current;
               disconnectedRef.current = false;
               reconnectingRef.current = false;
-              onReconnectedRef.current?.(sessionIdRef.current, newSessionId);
+              window.dispatchEvent(
+                new CustomEvent("nyaterm:session-reconnected", {
+                  detail: { oldSessionId, newSessionId },
+                }),
+              );
+              onReconnectedRef.current?.(oldSessionId, newSessionId);
             })
             .catch((err) => {
               reconnectingRef.current = false;
@@ -2418,7 +2457,9 @@ export default function XTerminal({
         terminalRef.current?.refresh(0, Math.max(0, terminalRef.current.rows - 1));
         if (showGutter && performanceMode !== "overloaded") {
           window.dispatchEvent(
-            new CustomEvent("nyaterm:refresh-gutter", { detail: { sessionId } }),
+            new CustomEvent("nyaterm:refresh-gutter", {
+              detail: { sessionId },
+            }),
           );
         }
       });
@@ -2611,7 +2652,10 @@ export default function XTerminal({
   return (
     <div
       className="nyaterm-wallpaper-transparent-surface h-full w-full relative flex"
-      style={{ display: visible ? "flex" : "none", backgroundColor: terminalBackground }}
+      style={{
+        display: visible ? "flex" : "none",
+        backgroundColor: terminalBackground,
+      }}
     >
       {showGutter && terminalReady && (
         <TerminalGutter

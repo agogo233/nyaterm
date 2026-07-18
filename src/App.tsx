@@ -23,7 +23,7 @@ import { useModalChildWindows } from "./hooks/useModalChildWindows";
 import { useRemoteStats } from "./hooks/useRemoteStats";
 import { resolveDisplayKeys } from "./hooks/useShortcutMap";
 import { useTerminalZoom } from "./hooks/useTerminalZoom";
-import { useUnreadTabs } from "./hooks/useUnreadTabs";
+import { useTabStatusIndicators } from "./hooks/useUnreadTabs";
 import { AI_OPEN_EVENT, type AIOpenIntent } from "./lib/aiEvents";
 import {
   buildPanelOpenUpdate,
@@ -884,7 +884,7 @@ function App() {
     return () => window.removeEventListener(AI_OPEN_EVENT, handler);
   }, [multiPanelOpen, updateUi]);
 
-  const unreadTabIds = useUnreadTabs(tabs, activeTabId);
+  const { unreadTabIds, disconnectedTabIds } = useTabStatusIndicators(tabs, activeTabId);
 
   const handleSelectLeafTab = useCallback(
     (leafId: string, tabId: string) => {
@@ -2911,6 +2911,7 @@ function App() {
           tabsById,
           focusedTabId: activeTabId,
           unreadTabIds,
+          disconnectedTabIds,
           onSelectTab: handleSelectLeafTab,
           onAddTab: handleAddTabFromLeaf,
           onConnectConnection: handleConnectConnectionFromLeaf,
