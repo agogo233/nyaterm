@@ -953,7 +953,7 @@ export interface TerminalSettings {
   show_workspace_padding: boolean;
   show_line_numbers: boolean;
   show_timestamps: boolean;
-  show_timestamp_milliseconds: boolean;
+  timestamp_format: string;
   show_multi_line_paste_dialog: boolean;
   paste_image_as_path: boolean;
 }

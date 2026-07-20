@@ -263,7 +263,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     show_workspace_padding: false,
     show_line_numbers: false,
     show_timestamps: false,
-    show_timestamp_milliseconds: false,
+    timestamp_format: "[HH:mm:ss]",
     show_multi_line_paste_dialog: true,
     paste_image_as_path: true,
   },

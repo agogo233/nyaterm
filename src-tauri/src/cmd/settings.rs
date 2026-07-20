@@ -144,6 +144,7 @@ pub async fn persist_app_settings(
 ) -> AppResult<()> {
     settings.appearance.normalize_terminal_font_family();
     settings.appearance.normalize_window_transparency();
+    settings.terminal.normalize_timestamp_format();
 
     let existing = match config::load_app_settings(app) {
         Ok(existing) => existing,

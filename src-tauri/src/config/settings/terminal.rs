@@ -2,6 +2,10 @@ use super::super::{default_false, default_true};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+pub const DEFAULT_TIMESTAMP_FORMAT: &str = "[HH:mm:ss]";
+pub const TIMESTAMP_FORMAT_WITH_MILLISECONDS: &str = "[HH:mm:ss.SSS]";
+const MAX_TIMESTAMP_FORMAT_LEN: usize = 64;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct KeywordHighlightRule {
     #[serde(default)]
@@ -77,8 +81,8 @@ pub struct TerminalSettings {
     pub show_line_numbers: bool,
     #[serde(default = "default_false")]
     pub show_timestamps: bool,
-    #[serde(default = "default_false")]
-    pub show_timestamp_milliseconds: bool,
+    #[serde(default = "default_timestamp_format")]
+    pub timestamp_format: String,
     #[serde(default = "default_true")]
     pub show_multi_line_paste_dialog: bool,
     #[serde(default = "default_true")]
@@ -93,6 +97,27 @@ fn default_keep_alive() -> u32 {
 }
 fn default_keep_alive_mode() -> String {
     "compatible".to_string()
+}
+fn default_timestamp_format() -> String {
+    DEFAULT_TIMESTAMP_FORMAT.to_string()
+}
+
+impl TerminalSettings {
+    pub fn normalize_timestamp_format(&mut self) -> bool {
+        let current = self.timestamp_format.clone();
+        let normalized = if current.trim().is_empty() {
+            DEFAULT_TIMESTAMP_FORMAT.to_string()
+        } else {
+            current.chars().take(MAX_TIMESTAMP_FORMAT_LEN).collect()
+        };
+
+        if normalized == current {
+            return false;
+        }
+
+        self.timestamp_format = normalized;
+        true
+    }
 }
 
 impl Default for TerminalSettings {
@@ -113,7 +138,7 @@ impl Default for TerminalSettings {
             show_workspace_padding: false,
             show_line_numbers: false,
             show_timestamps: false,
-            show_timestamp_milliseconds: false,
+            timestamp_format: default_timestamp_format(),
             show_multi_line_paste_dialog: true,
             paste_image_as_path: true,
         }
@@ -134,5 +159,31 @@ mod tests {
 
         assert_eq!(settings.keep_alive_mode, "compatible");
         assert_eq!(settings.keep_alive_interval, 60);
+    }
+
+    #[test]
+    fn missing_timestamp_format_defaults_to_seconds() {
+        let settings: TerminalSettings =
+            serde_json::from_value(serde_json::json!({})).expect("terminal settings deserialize");
+
+        assert_eq!(settings.timestamp_format, "[HH:mm:ss]");
+    }
+
+    #[test]
+    fn normalizes_empty_and_long_timestamp_formats() {
+        let mut empty = TerminalSettings {
+            timestamp_format: "   ".to_string(),
+            ..TerminalSettings::default()
+        };
+        assert!(empty.normalize_timestamp_format());
+        assert_eq!(empty.timestamp_format, "[HH:mm:ss]");
+
+        let long_format = "H".repeat(80);
+        let mut long = TerminalSettings {
+            timestamp_format: long_format,
+            ..TerminalSettings::default()
+        };
+        assert!(long.normalize_timestamp_format());
+        assert_eq!(long.timestamp_format.chars().count(), 64);
     }
 }
