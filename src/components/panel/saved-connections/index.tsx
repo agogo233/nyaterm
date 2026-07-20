@@ -59,6 +59,7 @@ import {
   type SortMode,
 } from "./context";
 import GroupNodeItem from "./GroupNodeItem";
+import { MoveToGroupContextMenu, MoveToGroupDropdownMenu } from "./MoveToGroupMenu";
 
 interface SavedConnectionsProps {
   onTemporarySshLink: () => void;
@@ -285,11 +286,7 @@ export default function SavedConnections({
       });
       return changed ? next : prev;
     });
-  }, [
-    appSettings.ui.saved_connections_last_opened_connection_id,
-    savedConnections,
-    savedGroups,
-  ]);
+  }, [appSettings.ui.saved_connections_last_opened_connection_id, savedConnections, savedGroups]);
 
   useEffect(() => {
     const previousKeyword = previousKeywordRef.current;
@@ -398,6 +395,81 @@ export default function SavedConnections({
     if (selectedConnections.length === 0) return;
     setDeleteTargets(selectedConnections);
   }, [selectedConnections]);
+
+  const moveConnectionsToGroup = useCallback(
+    async (connections: SavedConnection[], targetGroupId: string | null) => {
+      const uniqueConnections = Array.from(
+        new Map(connections.map((connection) => [connection.id, connection])).values(),
+      );
+      if (uniqueConnections.length === 0) return;
+
+      const movingIds = new Set(uniqueConnections.map((connection) => connection.id));
+      const targetSiblings = connectionsRef.current
+        .filter(
+          (connection) =>
+            (connection.group_id ?? null) === targetGroupId && !movingIds.has(connection.id),
+        )
+        .sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0));
+      const orderedTargetConnections = [...targetSiblings, ...uniqueConnections];
+
+      try {
+        await Promise.all(
+          uniqueConnections
+            .filter((connection) => (connection.group_id ?? null) !== targetGroupId)
+            .map((connection) =>
+              invoke("save_connection", {
+                connection: { ...connection, group_id: targetGroupId },
+              }),
+            ),
+        );
+
+        await invoke("reorder_items", {
+          connections: orderedTargetConnections.map((connection, index) => ({
+            id: connection.id,
+            sort_order: index,
+          })),
+          groups: [],
+        });
+
+        if (targetGroupId) {
+          setExpandedGroups((prev) => {
+            if (prev.has(targetGroupId)) return prev;
+            return new Set([...prev, targetGroupId]);
+          });
+        }
+
+        refreshConnections();
+      } catch (error) {
+        logger.error({
+          domain: "ui.error",
+          event: "saved_connections.move_to_group_failed",
+          message: "Move connections to group failed",
+          error,
+        });
+        toast.error(t("savedConnections.moveToGroupFailed", { error: getErrorMessage(error) }));
+      }
+    },
+    [refreshConnections, t],
+  );
+
+  const requestMoveConnectionToGroup = useCallback(
+    (conn: SavedConnection, groupId: string | null) => {
+      const targets =
+        selectedConnectionIds.has(conn.id) && selectedConnections.length > 1
+          ? selectedConnections
+          : [conn];
+      void moveConnectionsToGroup(targets, groupId);
+    },
+    [moveConnectionsToGroup, selectedConnectionIds, selectedConnections],
+  );
+
+  const requestMoveSelectedConnectionsToGroup = useCallback(
+    (groupId: string | null) => {
+      if (selectedConnections.length === 0) return;
+      void moveConnectionsToGroup(selectedConnections, groupId);
+    },
+    [moveConnectionsToGroup, selectedConnections],
+  );
 
   useEffect(() => {
     const validIds = new Set(savedConnections.map((connection) => connection.id));
@@ -1291,11 +1363,14 @@ export default function SavedConnections({
     expandedGroups,
     selectedConnectionIds,
     savedConnections,
+    savedGroups,
     toggleGroup,
     handleConnect,
     handleConnectOnly,
     handleConnectSelected,
     handleCopyConnection,
+    requestMoveConnectionToGroup,
+    requestMoveSelectedConnectionsToGroup,
     handleConnectionSelectionStart,
     handleConnectionContextMenu,
     onEditConnection,
@@ -1443,6 +1518,11 @@ export default function SavedConnections({
                 {selectedConnections.length > 0 && (
                   <>
                     <DropdownMenuSeparator />
+                    <MoveToGroupDropdownMenu
+                      groups={savedGroups}
+                      onMove={requestMoveSelectedConnectionsToGroup}
+                      t={t}
+                    />
                     <DropdownMenuItem
                       onClick={requestDeleteSelectedConnections}
                       className="cursor-pointer gap-2 py-1.5 focus:bg-[var(--df-bg-hover)] text-red-500 focus:text-red-500"
@@ -1528,6 +1608,13 @@ export default function SavedConnections({
                   ? t("savedConnections.connectSelected")
                   : t("savedConnections.connect")}
               </ContextMenuItem>
+            )}
+            {selectedConnections.length > 0 && (
+              <MoveToGroupContextMenu
+                groups={savedGroups}
+                onMove={requestMoveSelectedConnectionsToGroup}
+                t={t}
+              />
             )}
             {selectedConnections.length > 0 && (
               <ContextMenuItem className="text-red-400" onClick={requestDeleteSelectedConnections}>

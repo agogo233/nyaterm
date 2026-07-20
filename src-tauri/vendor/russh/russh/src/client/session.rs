@@ -404,8 +404,10 @@ impl Session {
     }
 
     pub fn send_keepalive(&mut self, want_reply: bool) -> Result<(), crate::Error> {
-        self.open_global_requests
-            .push_back(crate::session::GlobalRequestResponse::Keepalive);
+        if want_reply {
+            self.open_global_requests
+                .push_back(crate::session::GlobalRequestResponse::Keepalive);
+        }
         if let Some(ref mut enc) = self.common.encrypted {
             push_packet!(enc.write, {
                 msg::GLOBAL_REQUEST.encode(&mut enc.write)?;

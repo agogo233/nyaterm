@@ -5,6 +5,7 @@ import { invoke } from "@/lib/invoke";
 import {
   completePendingZmodemUpload,
   failPendingZmodemUpload,
+  getPendingZmodemUploadConflictMode,
   getPendingZmodemUploadPaths,
   hasPendingZmodemUpload,
   markPendingZmodemUploadActive,
@@ -275,6 +276,7 @@ export function createZmodemEventHandler(
       await invoke("zmodem_accept_upload", {
         sessionId,
         filePaths: pendingPaths,
+        conflictMode: getPendingZmodemUploadConflictMode(sessionId),
       });
       return;
     }
@@ -286,7 +288,7 @@ export function createZmodemEventHandler(
 
       // Probe remote directory and delete conflicting files so plain rz
       // never sees an existing file to prompt about.
-      const { paths: resolvedPaths } = await probeAndResolveRemoteConflicts(
+      const { paths: resolvedPaths, conflictMode } = await probeAndResolveRemoteConflicts(
         sessionId,
         filePaths,
         getDuplicateStrategy(),
@@ -306,6 +308,7 @@ export function createZmodemEventHandler(
       await invoke("zmodem_accept_upload", {
         sessionId,
         filePaths: resolvedPaths,
+        conflictMode,
       });
     } else {
       await invoke("zmodem_cancel", { sessionId });

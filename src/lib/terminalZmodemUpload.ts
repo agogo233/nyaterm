@@ -6,12 +6,15 @@ import { buildTerminalCommandInput, sendSessionInput } from "@/lib/sessionInput"
 import { showTransferDuplicatePrompt } from "@/lib/transferDuplicatePrompt";
 
 const ZMODEM_UPLOAD_TIMEOUT_MS = 60_000;
+const ZMODEM_ACTIVE_STALL_TIMEOUT_MS = 60_000;
 
 type PendingUploadPhase = "waiting" | "active";
+export type ZmodemUploadConflictMode = "overwrite" | "skip";
 
 type PendingUpload = {
   sessionId: string;
   filePaths: string[];
+  conflictMode: ZmodemUploadConflictMode;
   resolve: () => void;
   reject: (error: Error) => void;
   timeoutId: number | null;
@@ -44,8 +47,35 @@ export function getPendingZmodemUploadPaths(sessionId: string): string[] | null 
   return pendingUpload.filePaths;
 }
 
+export function getPendingZmodemUploadConflictMode(sessionId: string): ZmodemUploadConflictMode {
+  if (!pendingUpload || pendingUpload.sessionId !== sessionId) {
+    return "overwrite";
+  }
+  return pendingUpload.conflictMode;
+}
+
 export function hasPendingZmodemUpload(sessionId: string): boolean {
   return pendingUpload?.sessionId === sessionId;
+}
+
+function armActiveUploadTimeout(sessionId: string) {
+  if (!pendingUpload || pendingUpload.sessionId !== sessionId) {
+    return;
+  }
+  clearWaitingTimeout();
+  pendingUpload.timeoutId = window.setTimeout(() => {
+    if (
+      !pendingUpload ||
+      pendingUpload.sessionId !== sessionId ||
+      pendingUpload.phase !== "active"
+    ) {
+      return;
+    }
+    const { reject } = pendingUpload;
+    clearPendingUpload();
+    void invoke("zmodem_cancel", { sessionId }).catch(() => {});
+    reject(new Error("zmodem stalled"));
+  }, ZMODEM_ACTIVE_STALL_TIMEOUT_MS);
 }
 
 export function markPendingZmodemUploadActive(sessionId: string) {
@@ -54,6 +84,7 @@ export function markPendingZmodemUploadActive(sessionId: string) {
   }
   clearWaitingTimeout();
   pendingUpload.phase = "active";
+  armActiveUploadTimeout(sessionId);
   if (preparingUploadToastId !== null) {
     toast.dismiss(preparingUploadToastId);
     preparingUploadToastId = null;
@@ -96,6 +127,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 export interface ConflictProbeResult {
   paths: string[];
   probeSkipped: boolean;
+  conflictMode: ZmodemUploadConflictMode;
 }
 
 /**
@@ -115,24 +147,22 @@ export async function probeAndResolveRemoteConflicts(
   filePaths: string[],
   duplicateStrategy = "ask",
 ): Promise<ConflictProbeResult> {
-  if (filePaths.length === 0) return { paths: [], probeSkipped: false };
+  if (filePaths.length === 0) {
+    return { paths: [], probeSkipped: false, conflictMode: "overwrite" };
+  }
 
   // Resolve remote upload directory (terminal CWD is a shell operation, not SFTP).
   const cwd = await withTimeout(
-    invoke<string>("get_terminal_cwd", { sessionId }).catch(() => null),
+    invoke<string | null>("try_get_terminal_cwd", { sessionId }).catch(() => null),
     SFTP_PROBE_TIMEOUT_MS,
     null,
   );
 
-  // If CWD fails (non-SSH or timeout), try home dir via SFTP with timeout.
-  const home = !cwd
-    ? await withTimeout(
-        invoke<string>("get_home_dir", { sessionId }).catch(() => "/"),
-        SFTP_PROBE_TIMEOUT_MS,
-        null as string | null,
-      )
-    : null;
-  const remoteDir = (cwd || home || "/").replace(/\/+$/, "") || "/";
+  if (!cwd) {
+    return resolveUnverifiedZmodemUpload(sessionId, filePaths, duplicateStrategy);
+  }
+
+  const remoteDir = cwd.replace(/\/+$/, "") || "/";
 
   // List remote directory (SFTP, time-boxed).
   const entries = await withTimeout(
@@ -146,8 +176,7 @@ export async function probeAndResolveRemoteConflicts(
 
   // If the SFTP probe timed out, skip conflict detection entirely.
   if (entries === null) {
-    toast.message(i18n.t("zmodem.sftpProbeSkipped"));
-    return { paths: filePaths, probeSkipped: true };
+    return resolveUnverifiedZmodemUpload(sessionId, filePaths, duplicateStrategy);
   }
 
   const existingNames = new Set(entries.map((e) => e.name));
@@ -164,11 +193,13 @@ export async function probeAndResolveRemoteConflicts(
     }
   }
 
-  if (conflicts.length === 0) return { paths: filePaths, probeSkipped: false };
+  if (conflicts.length === 0) {
+    return { paths: filePaths, probeSkipped: false, conflictMode: "overwrite" };
+  }
 
   // Auto-resolve based on configured strategy.
   if (duplicateStrategy === "skip") {
-    return { paths: clean, probeSkipped: false };
+    return { paths: clean, probeSkipped: false, conflictMode: "overwrite" };
   }
 
   if (duplicateStrategy === "overwrite" || duplicateStrategy === "rename") {
@@ -181,7 +212,7 @@ export async function probeAndResolveRemoteConflicts(
         undefined,
       );
     }
-    return { paths: filePaths, probeSkipped: false };
+    return { paths: filePaths, probeSkipped: false, conflictMode: "overwrite" };
   }
 
   // "ask" — prompt the user for each conflict.
@@ -197,9 +228,10 @@ export async function probeAndResolveRemoteConflicts(
       remotePath,
       fileName: name,
       isDirectory: false,
+      allowApplyToTask: conflicts.length > 1,
     });
 
-    if (choice === "overwrite") {
+    if (choice === "overwrite" || choice === "overwriteAllForTask") {
       await withTimeout(
         invoke("delete_remote_file", { sessionId, path: remotePath }).catch(() => {}),
         SFTP_PROBE_TIMEOUT_MS,
@@ -207,10 +239,59 @@ export async function probeAndResolveRemoteConflicts(
       );
       resolved.push(fp);
     }
+    if (choice === "overwriteAllForTask") {
+      const remaining = conflicts.slice(conflicts.indexOf(fp) + 1);
+      for (const remainingPath of remaining) {
+        const remainingName = getLocalPathName(remainingPath, "file");
+        const remainingRemotePath =
+          remoteDir === "/" ? `/${remainingName}` : `${remoteDir}/${remainingName}`;
+        await withTimeout(
+          invoke("delete_remote_file", { sessionId, path: remainingRemotePath }).catch(() => {}),
+          SFTP_PROBE_TIMEOUT_MS,
+          undefined,
+        );
+        resolved.push(remainingPath);
+      }
+      break;
+    }
     // "skip" → don't add.
   }
 
-  return { paths: resolved, probeSkipped: false };
+  return { paths: resolved, probeSkipped: false, conflictMode: "overwrite" };
+}
+
+async function resolveUnverifiedZmodemUpload(
+  sessionId: string,
+  filePaths: string[],
+  duplicateStrategy: string,
+): Promise<ConflictProbeResult> {
+  if (duplicateStrategy === "skip") {
+    return { paths: [], probeSkipped: true, conflictMode: "skip" };
+  }
+
+  if (duplicateStrategy === "overwrite" || duplicateStrategy === "rename") {
+    toast.message(i18n.t("zmodem.sftpProbeUnavailable"));
+    return { paths: filePaths, probeSkipped: true, conflictMode: "overwrite" };
+  }
+
+  const fileName =
+    filePaths.length === 1
+      ? getLocalPathName(filePaths[0] ?? "", "file")
+      : i18n.t("zmodem.multipleFiles", { count: filePaths.length });
+  const choice = await showTransferDuplicatePrompt({
+    requestId: crypto.randomUUID(),
+    sessionId,
+    remotePath: "",
+    fileName,
+    isDirectory: false,
+    unverified: true,
+  });
+
+  if (choice === "overwrite" || choice === "overwriteAllForTask") {
+    return { paths: filePaths, probeSkipped: true, conflictMode: "overwrite" };
+  }
+
+  return { paths: [], probeSkipped: true, conflictMode: "skip" };
 }
 
 export async function uploadFilesViaZmodem(
@@ -249,7 +330,7 @@ export async function uploadFilesViaZmodem(
       toast.dismiss(preparingUploadToastId);
       preparingUploadToastId = null;
     }
-    throw new Error("All files were skipped or probe failed");
+    return;
   }
 
   return new Promise((resolve, reject) => {
@@ -265,6 +346,7 @@ export async function uploadFilesViaZmodem(
     pendingUpload = {
       sessionId,
       filePaths: conflict.paths,
+      conflictMode: conflict.conflictMode,
       resolve,
       reject,
       timeoutId,

@@ -25,6 +25,8 @@ pub enum Error {
     Read(String),
     #[error("out of memory")]
     OutOfMemory,
+    #[error("remote aborted transfer")]
+    RemoteAborted,
     #[error("unexpected CRC-16")]
     UnexpectedCrc16,
     #[error("unexpected CRC-32")]

@@ -44,6 +44,7 @@ interface TabWindowsWorkspaceProps {
   tabsById: Map<string, Tab>;
   focusedTabId?: string | null;
   unreadTabIds?: Set<string>;
+  disconnectedTabIds?: Set<string>;
   onSelectTab: (leafId: string, tabId: string) => void;
   onAddTab: (leafId: string) => void;
   onConnectConnection: (leafId: string, connection: SavedConnection) => void | Promise<void>;
@@ -182,7 +183,11 @@ function SplitWindow({
     >
       <div
         className="min-h-0 min-w-0"
-        style={{ flexBasis: `${split.ratio * 100}%`, flexGrow: 0, flexShrink: 0 }}
+        style={{
+          flexBasis: `${split.ratio * 100}%`,
+          flexGrow: 0,
+          flexShrink: 0,
+        }}
       >
         <WindowNodeView
           node={split.first}
@@ -207,6 +212,7 @@ function LeafWindow({
   tabsById,
   focusedTabId,
   unreadTabIds,
+  disconnectedTabIds,
   onSelectTab,
   onAddTab,
   onConnectConnection,
@@ -310,6 +316,7 @@ function LeafWindow({
         activeTabId={activeTab?.id ?? null}
         focusedTabId={focusedTabId}
         unreadTabIds={unreadTabIds}
+        disconnectedTabIds={disconnectedTabIds}
         onTabChange={(tabId) => onSelectTab(leaf.id, tabId)}
         onTabClose={onTabClose}
         onAddTab={() => onAddTab(leaf.id)}
@@ -353,6 +360,7 @@ function WindowNodeView({
   tabsById,
   focusedTabId,
   unreadTabIds,
+  disconnectedTabIds,
   onSelectTab,
   onAddTab,
   onConnectConnection,
@@ -389,6 +397,7 @@ function WindowNodeView({
         tabsById={tabsById}
         focusedTabId={focusedTabId}
         unreadTabIds={unreadTabIds}
+        disconnectedTabIds={disconnectedTabIds}
         onSelectTab={onSelectTab}
         onAddTab={onAddTab}
         onConnectConnection={onConnectConnection}
@@ -425,6 +434,7 @@ function WindowNodeView({
       tabsById={tabsById}
       focusedTabId={focusedTabId}
       unreadTabIds={unreadTabIds}
+      disconnectedTabIds={disconnectedTabIds}
       onSelectTab={onSelectTab}
       onAddTab={onAddTab}
       onConnectConnection={onConnectConnection}
@@ -597,10 +607,26 @@ function TabWindowsWorkspace({
       const horizontalThreshold = Math.min(180, Math.max(48, rect.width * 0.38));
       const verticalThreshold = Math.min(140, Math.max(40, rect.height * 0.34));
       const edgeDistances = [
-        { direction: "left" as const, distance: x, threshold: horizontalThreshold },
-        { direction: "right" as const, distance: rect.width - x, threshold: horizontalThreshold },
-        { direction: "top" as const, distance: y, threshold: verticalThreshold },
-        { direction: "bottom" as const, distance: rect.height - y, threshold: verticalThreshold },
+        {
+          direction: "left" as const,
+          distance: x,
+          threshold: horizontalThreshold,
+        },
+        {
+          direction: "right" as const,
+          distance: rect.width - x,
+          threshold: horizontalThreshold,
+        },
+        {
+          direction: "top" as const,
+          distance: y,
+          threshold: verticalThreshold,
+        },
+        {
+          direction: "bottom" as const,
+          distance: rect.height - y,
+          threshold: verticalThreshold,
+        },
       ]
         .filter((edge) => edge.distance <= edge.threshold)
         .sort((left, right) => left.distance - right.distance);

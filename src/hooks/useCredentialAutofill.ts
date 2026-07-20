@@ -372,7 +372,7 @@ export function useCredentialAutofill(
 
   const feedOutputImpl = useCallback(
     (payload: string) => {
-      if (performanceModeRef.current === "overloaded") return;
+      if (performanceModeRef.current !== "normal") return;
       if (!activeRef.current || !visibleRef.current) return;
 
       const visible = stripTerminalControlSequences(payload);

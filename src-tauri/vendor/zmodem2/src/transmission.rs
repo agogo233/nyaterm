@@ -672,8 +672,9 @@ impl Sender {
     fn queue_zfile(&mut self) -> Result<(), Error> {
         let file_size = self.file_size;
         let file_name = &self.file_name;
+        let file_options = self.file_options;
         let mut writer = BufferWriter::new(&mut self.outgoing);
-        if write_zfile(&mut writer, &mut self.buf, file_name, file_size)?.is_none() {
+        if write_zfile(&mut writer, &mut self.buf, file_name, file_size, file_options)?.is_none() {
             return Err(Error::OutOfMemory);
         }
         Ok(())
@@ -740,6 +741,8 @@ impl Sender {
         match header.frame() {
             Frame::ZRINIT => self.on_zrinit(header),
             Frame::ZRPOS | Frame::ZACK => self.on_zrpos(header.count()),
+            Frame::ZSKIP => self.on_zskip(),
+            Frame::ZFERR | Frame::ZABORT | Frame::ZCAN => Err(Error::RemoteAborted),
             Frame::ZFIN => self.on_zfin(),
             _ => {
                 if self.state == SendState::WaitReceiverInit {
@@ -828,6 +831,27 @@ impl Sender {
                 }
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn on_zskip(&mut self) -> Result<(), Error> {
+        if matches!(
+            self.state,
+            SendState::WaitFilePos
+                | SendState::NeedFileData
+                | SendState::WaitFileAck
+                | SendState::WaitFileDone
+        ) {
+            self.pending_request = None;
+            self.pending_event = Some(SenderEvent::FileComplete);
+            self.has_file = false;
+            if self.finish_requested {
+                self.queue_zfin()?;
+                self.state = SendState::WaitFinish;
+            } else {
+                self.state = SendState::ReadyForFile;
+            }
         }
         Ok(())
     }
@@ -1419,6 +1443,7 @@ fn write_zfile<P>(
     buf: &mut Buffer<SUBPACKET_MAX_SIZE>,
     name: &[u8],
     size: u32,
+    file_options: [u8; 4],
 ) -> Result<Option<()>, Error>
 where
     P: Write + ?Sized,
@@ -1430,7 +1455,7 @@ where
 
     write!(buf, "{size}\0").map_err(|_| Error::OutOfMemory)?;
 
-    if Header::new(Encoding::ZBIN32, Frame::ZFILE, &[0; 4])
+    if Header::new(Encoding::ZBIN32, Frame::ZFILE, &file_options)
         .write(port)?
         .is_none()
     {

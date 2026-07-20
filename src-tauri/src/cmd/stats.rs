@@ -44,3 +44,19 @@ pub async fn get_terminal_cwd(
         "Working directory is not available for this session. Terminal path sync is only available when the backend receives directory updates from the session.".to_string(),
     ))
 }
+
+#[tauri::command]
+pub async fn try_get_terminal_cwd(
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+) -> AppResult<Option<String>> {
+    let cwd_arc = {
+        let sessions = state.sessions.lock().await;
+        let session = sessions.get(&session_id).ok_or_else(|| {
+            AppError::SessionNotFound(format!("Session '{}' not found", session_id))
+        })?;
+        session.cwd.clone()
+    };
+
+    Ok(cwd_arc.lock().await.clone())
+}

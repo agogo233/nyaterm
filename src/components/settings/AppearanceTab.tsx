@@ -1,7 +1,8 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MdAdd, MdClose, MdDeleteOutline, MdFolderOpen, MdImage } from "react-icons/md";
+import { MdAdd, MdClose, MdDeleteOutline, MdFolderOpen, MdImage, MdPalette } from "react-icons/md";
+import { ThemeDesignerDialog } from "@/components/dialog/theme/ThemeDesignerDialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -12,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useApp } from "@/context/AppContext";
+import { useTheme } from "@/context/ThemeContext";
 import {
   BACKGROUND_IMAGE_FITS,
   clampOpacity,
@@ -32,7 +34,6 @@ import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
 } from "@/lib/terminalFontSize";
-import { themeList } from "@/lib/themes";
 import type { AppearanceSettings } from "@/types/global";
 import {
   SettingFieldGrid,
@@ -474,8 +475,10 @@ function FontStackSection({
 export function AppearanceTab() {
   const { t } = useTranslation();
   const { appSettings, updateAppSettings } = useApp();
+  const { themeNames } = useTheme();
   const appearance = appSettings.appearance;
   const mountedRef = useRef(true);
+  const [themeDesignerOpen, setThemeDesignerOpen] = useState(false);
   const [systemFontInfos, setSystemFontInfos] = useState<FontInfo[]>(
     () => cachedSystemFontInfos ?? [],
   );
@@ -536,7 +539,7 @@ export function AppearanceTab() {
           value={appearance.theme || "github-dark"}
           onValueChange={(v) => updateAppearance({ theme: v })}
         >
-          {themeList.map((tm) => (
+          {themeNames.map((tm) => (
             <SelectItem key={tm.id} value={tm.id}>
               {tm.name}
             </SelectItem>
@@ -554,12 +557,22 @@ export function AppearanceTab() {
           }
         >
           <SelectItem value="__follow__">{t("settings.followUiTheme")}</SelectItem>
-          {themeList.map((tm) => (
+          {themeNames.map((tm) => (
             <SelectItem key={tm.id} value={tm.id}>
               {tm.name}
             </SelectItem>
           ))}
         </SettingSelect>
+
+        <SettingRow
+          label={t("settings.themeDesigner")}
+          desc={t("settings.themeDesignerSettingDesc")}
+        >
+          <Button size="sm" variant="outline" onClick={() => setThemeDesignerOpen(true)}>
+            <MdPalette className="text-sm" />
+            {t("settings.themeDesignerOpen")}
+          </Button>
+        </SettingRow>
 
         <SettingSelect
           label={t("settings.minimumContrastRatio")}
@@ -724,6 +737,14 @@ export function AppearanceTab() {
           />
         </SettingRow>
       </SettingSection>
+
+      <ThemeDesignerDialog
+        open={themeDesignerOpen}
+        onClose={() => setThemeDesignerOpen(false)}
+        appearance={appearance}
+        availableThemes={themeNames}
+        updateAppearance={updateAppearance}
+      />
     </div>
   );
 }

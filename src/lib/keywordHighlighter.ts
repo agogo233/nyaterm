@@ -34,6 +34,7 @@ interface RefreshBudget {
   createdDecorations: number;
   deadlineMs: number;
   hitLimit: boolean;
+  hitTotalDecorationLimit: boolean;
 }
 
 /**
@@ -61,6 +62,8 @@ export class KeywordHighlighter implements IDisposable {
   private scannedLines = new Set<number>();
   private writeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private scrollThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+  private resumeRefreshFrame: number | null = null;
+  private continuationRefreshFrame: number | null = null;
   private scrollThrottlePending = false;
   private enabled = false;
   private suspended = false;
@@ -145,13 +148,13 @@ export class KeywordHighlighter implements IDisposable {
     this.suspended = suspended;
 
     if (suspended) {
-      this.clearAllDecorations();
+      this.clearAllTimers();
       return;
     }
 
     if (this.enabled && this.compiledRules.length > 0) {
       this.lastViewportY = -1;
-      this.triggerWriteRefresh();
+      this.triggerResumeRefresh();
     }
   }
 
@@ -171,6 +174,14 @@ export class KeywordHighlighter implements IDisposable {
     if (this.scrollThrottleTimer) {
       clearTimeout(this.scrollThrottleTimer);
       this.scrollThrottleTimer = null;
+    }
+    if (this.resumeRefreshFrame !== null) {
+      cancelAnimationFrame(this.resumeRefreshFrame);
+      this.resumeRefreshFrame = null;
+    }
+    if (this.continuationRefreshFrame !== null) {
+      cancelAnimationFrame(this.continuationRefreshFrame);
+      this.continuationRefreshFrame = null;
     }
     this.scrollThrottlePending = false;
   }
@@ -242,6 +253,32 @@ export class KeywordHighlighter implements IDisposable {
         this.triggerScrollRefresh();
       }
     }, XTERM_PERFORMANCE_CONFIG.highlighting.throttleMs);
+  }
+
+  /**
+   * Let the visible terminal's first fit/refresh/output frame complete before
+   * doing highlight work after a tab becomes visible again.
+   */
+  private triggerResumeRefresh(): void {
+    if (!this.canRefresh()) return;
+    if (this.resumeRefreshFrame !== null) return;
+
+    this.resumeRefreshFrame = requestAnimationFrame(() => {
+      this.resumeRefreshFrame = requestAnimationFrame(() => {
+        this.resumeRefreshFrame = null;
+        this.refreshViewport();
+      });
+    });
+  }
+
+  private triggerContinuationRefresh(): void {
+    if (!this.canRefresh()) return;
+    if (this.continuationRefreshFrame !== null) return;
+
+    this.continuationRefreshFrame = requestAnimationFrame(() => {
+      this.continuationRefreshFrame = null;
+      this.refreshViewport();
+    });
   }
 
   /**
@@ -344,6 +381,7 @@ export class KeywordHighlighter implements IDisposable {
   ): boolean {
     if (this.decorationCache.size >= config.maxDecorations) {
       budget.hitLimit = true;
+      budget.hitTotalDecorationLimit = true;
       return false;
     }
     if (budget.createdDecorations >= config.maxDecorationsPerRefresh) {
@@ -727,6 +765,7 @@ export class KeywordHighlighter implements IDisposable {
       createdDecorations: 0,
       deadlineMs: performance.now() + config.maxRefreshTimeMs,
       hitLimit: false,
+      hitTotalDecorationLimit: false,
     };
 
     // Expand the active zone with overscan so decorations survive typical scroll bursts
@@ -876,6 +915,10 @@ export class KeywordHighlighter implements IDisposable {
         this.scannedLines.delete(lineY);
         this.lineToKeys.delete(lineY);
       }
+    }
+
+    if (budget.hitLimit && !budget.hitTotalDecorationLimit) {
+      this.triggerContinuationRefresh();
     }
   }
 }

@@ -30,6 +30,7 @@ export function AICommandCardView({
 }) {
   const { t } = useTranslation();
   const status = execution?.status ?? "idle";
+  const hasTarget = !!card.target?.terminalSessionId;
 
   const copy = async () => {
     await navigator.clipboard.writeText(card.command);
@@ -46,6 +47,11 @@ export function AICommandCardView({
       <pre className="mt-3 max-h-32 overflow-auto rounded-md border border-border/60 bg-muted/30 p-2 font-mono text-[0.6875rem] leading-5 terminal-scroll whitespace-pre-wrap break-all">
         {card.command}
       </pre>
+      <div className="mt-2 text-[0.6875rem] font-medium text-muted-foreground">
+        {hasTarget
+          ? t("ai.commandTargetLabel", { target: card.target?.label })
+          : t("ai.commandTargetMissing")}
+      </div>
       <div className="mt-3 space-y-1 leading-5 text-muted-foreground">
         <p>{card.explanation}</p>
         <p>{card.expectedEffect}</p>
@@ -74,7 +80,7 @@ export function AICommandCardView({
                 <MdBlock />
                 {t("ai.rejectExecute")}
               </Button>
-              <Button size="xs" onClick={() => onAuthorize(card)}>
+              <Button size="xs" disabled={!hasTarget} onClick={() => onAuthorize(card)}>
                 <MdPlayArrow />
                 {t("ai.authorizeExecute")}
               </Button>
@@ -86,7 +92,7 @@ export function AICommandCardView({
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap gap-1.5">
-        <Button size="xs" onClick={() => onInsert(card)}>
+        <Button size="xs" disabled={!hasTarget} onClick={() => onInsert(card)}>
           <MdInput />
           {t("ai.insertTerminal")}
         </Button>

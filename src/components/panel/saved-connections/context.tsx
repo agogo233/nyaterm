@@ -34,6 +34,7 @@ export interface SavedConnectionsContextValue {
   expandedGroups: Set<string>;
   selectedConnectionIds: Set<string>;
   savedConnections: SavedConnection[];
+  savedGroups: Group[];
 
   // List actions
   toggleGroup: (id: string) => void;
@@ -41,6 +42,8 @@ export interface SavedConnectionsContextValue {
   handleConnectOnly: (conn: SavedConnection) => void;
   handleConnectSelected: () => void;
   handleCopyConnection: (conn: SavedConnection) => void;
+  requestMoveConnectionToGroup: (conn: SavedConnection, groupId: string | null) => void;
+  requestMoveSelectedConnectionsToGroup: (groupId: string | null) => void;
   handleConnectionSelectionStart: (conn: SavedConnection, event: ReactMouseEvent) => void;
   handleConnectionContextMenu: (conn: SavedConnection, event: ReactMouseEvent) => void;
   onEditConnection: (

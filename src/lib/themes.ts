@@ -1065,3 +1065,28 @@ export const themes = Object.fromEntries(themeList.map((theme) => [theme.id, the
   Record<string, Theme | undefined>;
 
 export const DEFAULT_THEME_ID = "github-dark" satisfies ThemeId;
+
+export function isBuiltinThemeId(id: string) {
+  return !!themes[id];
+}
+
+export function getAvailableThemes(customThemes: readonly Theme[] = []): Theme[] {
+  const seen = new Set<string>(themeList.map((theme) => theme.id));
+  const custom = customThemes.filter((theme) => {
+    if (!theme?.id || seen.has(theme.id)) return false;
+    seen.add(theme.id);
+    return true;
+  });
+  return [...themeList, ...custom];
+}
+
+export function resolveTheme(id: string | null | undefined, customThemes: readonly Theme[] = []) {
+  if (id) {
+    const customTheme = customThemes.find(
+      (theme) => theme.id === id && !isBuiltinThemeId(theme.id),
+    );
+    if (customTheme) return customTheme;
+    if (themes[id]) return themes[id];
+  }
+  return themes[DEFAULT_THEME_ID];
+}

@@ -100,19 +100,25 @@ export function TransferDuplicateDialog() {
         onKeyDown={(event) => {
           if (event.key === "Enter" && !submitting && request) {
             event.preventDefault();
-            void handleChoice("overwrite");
+            void handleChoice(request.unverified ? "skip" : "overwrite");
           }
         }}
       >
         <AlertDialogHeader className="min-w-0 text-left">
           <AlertDialogTitle className="text-sm">
-            {t("fileTransfer.duplicateTitle")}
+            {request?.unverified
+              ? t("fileTransfer.duplicateUnverifiedTitle")
+              : t("fileTransfer.duplicateTitle")}
           </AlertDialogTitle>
           <AlertDialogDescription className="text-xs leading-relaxed">
-            {t("fileTransfer.duplicateDescription", {
-              kind: kindLabel,
-              name: request?.fileName ?? "",
-            })}
+            {request?.unverified
+              ? t("fileTransfer.duplicateUnverifiedDescription", {
+                  name: request?.fileName ?? "",
+                })
+              : t("fileTransfer.duplicateDescription", {
+                  kind: kindLabel,
+                  name: request?.fileName ?? "",
+                })}
           </AlertDialogDescription>
         </AlertDialogHeader>
 

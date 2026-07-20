@@ -259,10 +259,13 @@ fn serial_session_thread(
                     }
                 }
             }
-            SessionCommand::ZmodemAcceptUpload { files } => {
+            SessionCommand::ZmodemAcceptUpload {
+                files,
+                conflict_mode,
+            } => {
                 let mut zm = zmodem_state.lock().unwrap();
                 if let Some(ref mut transfer) = *zm {
-                    let actions = transfer.accept_upload(files);
+                    let actions = transfer.accept_upload(files, conflict_mode);
                     for action in actions {
                         match action {
                             ZmodemAction::SendToRemote(data) => {

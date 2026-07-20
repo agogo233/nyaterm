@@ -24,6 +24,19 @@ pub enum AiProviderKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiBackendKind {
+    Genai,
+    Codex,
+}
+
+impl Default for AiBackendKind {
+    fn default() -> Self {
+        Self::Genai
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AiMode {
     Ask,
@@ -102,6 +115,8 @@ pub struct AiModelConfigItem {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub backend: AiBackendKind,
+    #[serde(default)]
     pub provider_kind: Option<AiProviderKind>,
     #[serde(default)]
     pub credential_id: Option<String>,
@@ -111,6 +126,45 @@ pub struct AiModelConfigItem {
     pub source: AiModelSource,
     #[serde(default)]
     pub last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexThreadMode {
+    Persistent,
+    Ephemeral,
+}
+
+impl Default for CodexThreadMode {
+    fn default() -> Self {
+        Self::Persistent
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexIntegrationSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub executable_path: Option<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub thread_mode: CodexThreadMode,
+    #[serde(default)]
+    pub remote_terminal_agent_enabled: bool,
+}
+
+impl Default for CodexIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            executable_path: None,
+            default_model: None,
+            thread_mode: CodexThreadMode::Persistent,
+            remote_terminal_agent_enabled: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,10 +239,12 @@ pub struct AiSettings {
     pub agent_command_execution_mode: AgentCommandExecutionMode,
     #[serde(default = "default_agent_smart_auto_execute_max_risk")]
     pub agent_smart_auto_execute_max_risk: RiskLevel,
+    #[serde(default)]
+    pub codex: CodexIntegrationSettings,
 }
 
 fn default_schema_version() -> u32 {
-    3
+    4
 }
 
 fn default_true() -> bool {
@@ -372,6 +428,7 @@ fn model_from_profile(profile: &AiProviderProfile) -> Option<AiModelConfigItem> 
     Some(AiModelConfigItem {
         id,
         name: name.to_string(),
+        backend: AiBackendKind::Genai,
         provider_kind: Some(profile.provider_kind.clone()),
         credential_id: is_manual.then(|| profile.id.clone()),
         enabled: profile.enabled,
@@ -438,7 +495,7 @@ impl Default for AiSettings {
             .map(|item| item.id.clone());
 
         Self {
-            schema_version: 3,
+            schema_version: 4,
             enabled: true,
             context_line_limit: default_context_line_limit(),
             redaction_enabled: true,
@@ -462,6 +519,7 @@ impl Default for AiSettings {
             agent_background_execution_enabled: false,
             agent_command_execution_mode: AgentCommandExecutionMode::ConfirmEach,
             agent_smart_auto_execute_max_risk: default_agent_smart_auto_execute_max_risk(),
+            codex: CodexIntegrationSettings::default(),
         }
     }
 }
@@ -520,7 +578,7 @@ pub fn merge_masked_ai_settings(current: &AiSettings, mut next: AiSettings) -> A
 pub fn normalize_ai_settings(settings: &mut AiSettings) -> bool {
     let original = serde_json::to_string(settings).unwrap_or_default();
 
-    settings.schema_version = 3;
+    settings.schema_version = 4;
     if settings.request_user_agent.trim().is_empty() {
         settings.request_user_agent = default_request_user_agent();
     }
@@ -554,8 +612,14 @@ pub fn normalize_ai_settings(settings: &mut AiSettings) -> bool {
     }
 
     for model in &mut settings.models {
+        if model.backend == AiBackendKind::Codex {
+            model.provider_kind = None;
+            model.credential_id = None;
+        }
         if model.id.trim().is_empty() {
-            model.id = if let Some(credential_id) = model.credential_id.as_deref() {
+            model.id = if model.backend == AiBackendKind::Codex {
+                format!("codex:{}", model.name)
+            } else if let Some(credential_id) = model.credential_id.as_deref() {
                 ai_model_id_for_credential(credential_id, &model.name)
             } else if let Some(kind) = &model.provider_kind {
                 ai_model_id_for_provider(kind, &model.name)
@@ -684,7 +748,7 @@ mod tests {
         settings.active_profile_id = "deepseek".to_string();
 
         assert!(normalize_ai_settings(&mut settings));
-        assert_eq!(settings.schema_version, 3);
+        assert_eq!(settings.schema_version, 4);
         assert!(!settings.provider_credentials.is_empty());
         assert!(
             settings
@@ -705,6 +769,61 @@ mod tests {
         );
         assert_eq!(settings.agent_smart_auto_execute_max_risk, RiskLevel::Low);
         assert!(!settings.agent_background_execution_enabled);
+        assert!(!settings.codex.enabled);
+        assert!(
+            settings
+                .models
+                .iter()
+                .all(|model| model.backend == AiBackendKind::Genai)
+        );
+    }
+
+    #[test]
+    fn normalize_migrates_v3_models_to_v4_genai_backend() {
+        let mut settings: AiSettings = serde_json::from_value(serde_json::json!({
+            "schema_version": 3,
+            "models": [
+                {
+                    "id": "openai:gpt-4o-mini",
+                    "name": "gpt-4o-mini",
+                    "provider_kind": "openai",
+                    "enabled": true,
+                    "source": "rust-genai"
+                }
+            ],
+            "provider_credentials": []
+        }))
+        .expect("legacy v3 settings should deserialize");
+
+        assert!(normalize_ai_settings(&mut settings));
+
+        assert_eq!(settings.schema_version, 4);
+        assert_eq!(settings.models[0].backend, AiBackendKind::Genai);
+        assert!(!settings.codex.enabled);
+    }
+
+    #[test]
+    fn normalize_codex_models_clear_genai_provider_fields() {
+        let mut settings = AiSettings {
+            models: vec![AiModelConfigItem {
+                id: String::new(),
+                name: "gpt-5-codex".to_string(),
+                backend: AiBackendKind::Codex,
+                provider_kind: Some(AiProviderKind::Openai),
+                credential_id: Some("openai".to_string()),
+                enabled: true,
+                source: AiModelSource::RustGenai,
+                last_seen_at: None,
+            }],
+            ..AiSettings::default()
+        };
+
+        assert!(normalize_ai_settings(&mut settings));
+
+        assert_eq!(settings.models[0].id, "codex:gpt-5-codex");
+        assert_eq!(settings.models[0].backend, AiBackendKind::Codex);
+        assert!(settings.models[0].provider_kind.is_none());
+        assert!(settings.models[0].credential_id.is_none());
     }
 
     #[test]

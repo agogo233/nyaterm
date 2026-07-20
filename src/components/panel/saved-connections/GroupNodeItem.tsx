@@ -64,12 +64,36 @@ export default function GroupNodeItem({ node, depth }: GroupNodeItemProps) {
           draggable={isDragEnabled && !isPointerDragEnabled}
           onPointerDown={
             isPointerDragEnabled
-              ? (e) => handlePointerDragStart(e, "group", node.group.id)
+              ? (e) => {
+                  e.stopPropagation();
+                  handlePointerDragStart(e, "group", node.group.id);
+                }
               : undefined
           }
-          onPointerMove={isPointerDragEnabled ? handlePointerDragMove : undefined}
-          onPointerUp={isPointerDragEnabled ? handlePointerDragEnd : undefined}
-          onPointerCancel={isPointerDragEnabled ? handlePointerDragCancel : undefined}
+          onPointerMove={
+            isPointerDragEnabled
+              ? (e) => {
+                  e.stopPropagation();
+                  handlePointerDragMove(e);
+                }
+              : undefined
+          }
+          onPointerUp={
+            isPointerDragEnabled
+              ? (e) => {
+                  e.stopPropagation();
+                  handlePointerDragEnd(e);
+                }
+              : undefined
+          }
+          onPointerCancel={
+            isPointerDragEnabled
+              ? (e) => {
+                  e.stopPropagation();
+                  handlePointerDragCancel(e);
+                }
+              : undefined
+          }
           onDragStart={
             isDragEnabled ? (e) => handleDragStart(e, "group", node.group.id) : undefined
           }

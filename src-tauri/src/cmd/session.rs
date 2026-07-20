@@ -2,6 +2,7 @@ use crate::config;
 use crate::core::ssh::{
     self, HostKeyVerifyManager, PendingAuthManager, PendingSshAuthManager, SshAuthResponse,
 };
+use crate::core::zmodem::ZmodemUploadConflictMode;
 use crate::core::{
     self, QuickCommandsStore, RecordingManager, SessionCommand, SessionInfo, SessionManager,
     TerminalHistorySearchRequest, TerminalHistorySearchResponse,
@@ -732,6 +733,7 @@ pub async fn zmodem_accept_upload(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
     file_paths: Vec<String>,
+    conflict_mode: Option<String>,
 ) -> AppResult<()> {
     state
         .send_command(
@@ -741,6 +743,7 @@ pub async fn zmodem_accept_upload(
                     .into_iter()
                     .map(std::path::PathBuf::from)
                     .collect(),
+                conflict_mode: ZmodemUploadConflictMode::from_wire(conflict_mode.as_deref()),
             },
         )
         .await

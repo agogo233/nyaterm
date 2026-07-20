@@ -1,7 +1,9 @@
+use crate::config;
 use crate::core::SessionManager;
 use crate::core::ai::{
-    self, AgentApprovalManager, AiAuditLog, AiChatRequest, AiMessage, AiSession, AiStreamStart,
-    AppendAiAuditRequest,
+    self, AgentApprovalManager, AiAuditLog, AiChatRequest, AiMessage, AiSession, AiSessionScope,
+    AiStreamStart, AppendAiAuditRequest, CodexAccountStatus, CodexCliStatus, CodexLoginFlow,
+    CodexLoginStart,
 };
 use crate::error::AppResult;
 use std::sync::Arc;
@@ -17,12 +19,53 @@ pub fn start_ai_chat_stream(
 
 #[tauri::command]
 pub async fn list_ai_model_names(app: tauri::AppHandle) -> AppResult<Vec<ai::AiModelDiscovery>> {
-    ai::list_model_names(&app).await
+    let mut models = ai::list_model_names(&app).await?;
+    let settings = config::load_app_settings(&app)?;
+    let manager = ai::manager_from_app(&app).await?;
+    models.extend(manager.list_models(&settings.ai).await?);
+    Ok(models)
 }
 
 #[tauri::command]
 pub fn cancel_ai_chat_stream(stream_id: String) -> AppResult<()> {
     ai::cancel_chat_stream(stream_id)
+}
+
+#[tauri::command]
+pub async fn detect_codex_cli(app: tauri::AppHandle) -> AppResult<CodexCliStatus> {
+    let settings = config::load_app_settings(&app)?;
+    Ok(ai::CodexAppServerManager::detect_cli(settings.ai.codex.executable_path).await)
+}
+
+#[tauri::command]
+pub async fn get_codex_account_status(app: tauri::AppHandle) -> AppResult<CodexAccountStatus> {
+    let settings = config::load_app_settings(&app)?;
+    let manager = ai::manager_from_app(&app).await?;
+    manager.account_read(&settings.ai).await
+}
+
+#[tauri::command]
+pub async fn start_codex_login(
+    app: tauri::AppHandle,
+    flow: CodexLoginFlow,
+) -> AppResult<CodexLoginStart> {
+    let settings = config::load_app_settings(&app)?;
+    let manager = ai::manager_from_app(&app).await?;
+    manager.login_start(&settings.ai, flow).await
+}
+
+#[tauri::command]
+pub async fn cancel_codex_login(app: tauri::AppHandle, login_id: String) -> AppResult<()> {
+    let settings = config::load_app_settings(&app)?;
+    let manager = ai::manager_from_app(&app).await?;
+    manager.login_cancel(&settings.ai, login_id).await
+}
+
+#[tauri::command]
+pub async fn logout_codex(app: tauri::AppHandle) -> AppResult<()> {
+    let settings = config::load_app_settings(&app)?;
+    let manager = ai::manager_from_app(&app).await?;
+    manager.logout(&settings.ai).await
 }
 
 #[tauri::command]
@@ -55,6 +98,15 @@ pub fn clear_ai_history(app: tauri::AppHandle) -> AppResult<()> {
 #[tauri::command]
 pub fn delete_ai_session(app: tauri::AppHandle, session_id: String) -> AppResult<()> {
     ai::delete_ai_session(&app, session_id)
+}
+
+#[tauri::command]
+pub fn rebind_ai_session(
+    app: tauri::AppHandle,
+    session_id: String,
+    owner_scope: AiSessionScope,
+) -> AppResult<AiSession> {
+    ai::rebind_ai_session(&app, session_id, owner_scope)
 }
 
 #[tauri::command]

@@ -3,12 +3,12 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::storage::{self, SettingsDocKey};
 
 use super::types::{
-    AiAuditLog, AiChatRequest, AiMessage, AiMessageRole, AiSession, AppendAiAuditRequest,
-    now_rfc3339, uuid,
+    AiAuditLog, AiChatRequest, AiMessage, AiMessageRole, AiSession, AiSessionBackendMetadata,
+    AiSessionScope, AiSessionScopeType, AppendAiAuditRequest, now_rfc3339, uuid,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -29,8 +29,32 @@ const AI_HISTORY_MAX_SESSIONS: usize = 200;
 const AI_HISTORY_MAX_MESSAGES: usize = 2_000;
 const AI_AUDIT_MAX_LOGS: usize = 2_000;
 
+fn normalize_session_scope(session: &mut AiSession) {
+    if session.scope.r#type == AiSessionScopeType::Unbound && session.scope.target_id.is_none() {
+        if let Some(connection_id) = session.connection_id.as_ref() {
+            if !connection_id.trim().is_empty()
+                && !session
+                    .scope
+                    .connection_ids
+                    .iter()
+                    .any(|value| value == connection_id)
+            {
+                session.scope.connection_ids.push(connection_id.clone());
+            }
+        }
+    }
+}
+
+fn normalize_history(history: &mut AiHistoryFile) {
+    for session in &mut history.sessions {
+        normalize_session_scope(session);
+    }
+}
+
 pub(super) fn load_history(_app: &AppHandle) -> AppResult<AiHistoryFile> {
-    storage::load_settings_doc(SettingsDocKey::AiHistory)
+    let mut history: AiHistoryFile = storage::load_settings_doc(SettingsDocKey::AiHistory)?;
+    normalize_history(&mut history);
+    Ok(history)
 }
 
 pub(super) fn trim_history(history: &mut AiHistoryFile) {
@@ -89,6 +113,7 @@ pub(super) fn save_user_message(
         .trim()
         .to_string();
     let connection_id = request.connection_id.clone();
+    let scope = request.owner_scope.clone();
     let user_input = request.user_input.clone();
     let session_id = session_id.to_string();
 
@@ -103,6 +128,7 @@ pub(super) fn save_user_message(
         } else {
             history.sessions.push(AiSession {
                 id: session_id.clone(),
+                scope,
                 connection_id,
                 title: if title.is_empty() {
                     "AI Session".to_string()
@@ -111,6 +137,7 @@ pub(super) fn save_user_message(
                 },
                 created_at: now.clone(),
                 updated_at: now.clone(),
+                backend_metadata: None,
             });
         }
         history.messages.push(AiMessage {
@@ -125,6 +152,31 @@ pub(super) fn save_user_message(
         trim_history(history);
         Ok(())
     })
+}
+
+pub(super) fn validate_session_scope(
+    app: &AppHandle,
+    session_id: &str,
+    request: &AiChatRequest,
+) -> AppResult<()> {
+    let history = load_history(app)?;
+    let Some(existing) = history.sessions.iter().find(|item| item.id == session_id) else {
+        return Ok(());
+    };
+
+    if existing.scope.r#type == AiSessionScopeType::Unbound {
+        return Ok(());
+    }
+
+    if existing.scope.r#type != request.owner_scope.r#type
+        || existing.scope.target_id != request.owner_scope.target_id
+    {
+        return Err(AppError::Config(
+            "AI session belongs to another terminal scope".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 pub(super) fn append_message(app: &AppHandle, message: AiMessage) -> AppResult<()> {
@@ -148,6 +200,36 @@ pub(super) fn append_message(app: &AppHandle, message: AiMessage) -> AppResult<(
         }
         history.messages.push(message);
         trim_history(history);
+        Ok(())
+    })
+}
+
+pub(super) fn get_session_backend_metadata(
+    app: &AppHandle,
+    session_id: &str,
+) -> AppResult<Option<AiSessionBackendMetadata>> {
+    Ok(load_history(app)?
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .and_then(|session| session.backend_metadata))
+}
+
+pub(super) fn set_session_backend_metadata(
+    app: &AppHandle,
+    session_id: &str,
+    metadata: AiSessionBackendMetadata,
+) -> AppResult<()> {
+    let _ = app;
+    let session_id = session_id.to_string();
+    storage::update_settings_doc::<AiHistoryFile, _, _>(SettingsDocKey::AiHistory, |history| {
+        if let Some(session) = history
+            .sessions
+            .iter_mut()
+            .find(|item| item.id == session_id)
+        {
+            session.backend_metadata = Some(metadata);
+        }
         Ok(())
     })
 }
@@ -179,6 +261,27 @@ pub fn delete_ai_session(app: &AppHandle, session_id: String) -> AppResult<()> {
         history.messages.retain(|m| m.session_id != session_id);
         trim_history(history);
         Ok(())
+    })
+}
+
+pub fn rebind_ai_session(
+    app: &AppHandle,
+    session_id: String,
+    owner_scope: AiSessionScope,
+) -> AppResult<AiSession> {
+    let _ = app;
+    storage::update_settings_doc::<AiHistoryFile, _, _>(SettingsDocKey::AiHistory, |history| {
+        normalize_history(history);
+        let Some(session) = history
+            .sessions
+            .iter_mut()
+            .find(|item| item.id == session_id)
+        else {
+            return Err(AppError::Config("AI session not found".to_string()));
+        };
+        session.scope = owner_scope;
+        session.updated_at = now_rfc3339();
+        Ok(session.clone())
     })
 }
 
@@ -250,10 +353,12 @@ mod tests {
             );
             history.sessions.push(AiSession {
                 id: session_id.clone(),
+                scope: AiSessionScope::default(),
                 connection_id: None,
                 title: session_id.clone(),
                 created_at: updated_at.clone(),
                 updated_at,
+                backend_metadata: None,
             });
             for message_idx in 0..10 {
                 history.messages.push(AiMessage {

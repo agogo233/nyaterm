@@ -1227,13 +1227,11 @@ impl Session {
                 () = &mut keepalive_timer => {
                     if let Some(ref mut enc) = self.common.encrypted {
                         if matches!(enc.state, EncryptedState::Authenticated) {
-                            self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
-                            if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
-                                debug!("Timeout, server not responding to keepalives");
-                                return Err(crate::Error::KeepaliveTimeout.into());
-                            }
+                            let (alive_timeouts, want_reply) =
+                                process_keepalive_tick(&self.common.config, self.common.alive_timeouts)?;
+                            self.common.alive_timeouts = alive_timeouts;
                             sent_keepalive = true;
-                            self.send_keepalive(true)?;
+                            self.send_keepalive(want_reply)?;
                         }
                     }
                 }
@@ -1862,6 +1860,105 @@ mod tests {
         packet
     }
 
+    #[test]
+    fn compatible_keepalive_tick_does_not_timeout() {
+        let config = Config {
+            keepalive_mode: KeepaliveMode::Compatible,
+            keepalive_max: 3,
+            ..Config::default()
+        };
+        let mut alive_timeouts = 0;
+
+        for _ in 0..10 {
+            let (next_timeouts, want_reply) =
+                process_keepalive_tick(&config, alive_timeouts).expect("compatible keeps alive");
+            alive_timeouts = next_timeouts;
+
+            assert_eq!(alive_timeouts, 0);
+            assert!(!want_reply);
+        }
+    }
+
+    #[test]
+    fn strict_keepalive_tick_times_out_after_max_is_exceeded() {
+        let config = Config {
+            keepalive_mode: KeepaliveMode::Strict,
+            keepalive_max: 3,
+            ..Config::default()
+        };
+        let mut alive_timeouts = 0;
+
+        for expected in 1..=3 {
+            let (next_timeouts, want_reply) =
+                process_keepalive_tick(&config, alive_timeouts).expect("strict keeps alive");
+            alive_timeouts = next_timeouts;
+
+            assert_eq!(alive_timeouts, expected);
+            assert!(want_reply);
+        }
+
+        let err = process_keepalive_tick(&config, alive_timeouts)
+            .expect_err("fourth unanswered keepalive exceeds max");
+        assert!(matches!(err, crate::Error::KeepaliveTimeout));
+    }
+
+    #[cfg(feature = "flate2")]
+    #[test]
+    fn keepalive_without_reply_does_not_enter_global_request_queue() {
+        let mut session = authenticated_session();
+
+        session
+            .send_keepalive(false)
+            .expect("keepalive without reply is sent");
+
+        assert_eq!(session.open_global_requests.len(), 0);
+    }
+
+    #[cfg(feature = "flate2")]
+    #[test]
+    fn strict_keepalive_enters_global_request_queue() {
+        let mut session = authenticated_session();
+
+        session
+            .send_keepalive(true)
+            .expect("strict keepalive is sent");
+
+        assert_eq!(session.open_global_requests.len(), 1);
+        assert!(matches!(
+            session.open_global_requests.front(),
+            Some(crate::session::GlobalRequestResponse::Keepalive)
+        ));
+    }
+
+    #[cfg(feature = "flate2")]
+    #[tokio::test]
+    async fn keepalive_without_reply_does_not_pollute_tcpip_forward_response() {
+        let mut session = authenticated_session();
+        let mut handler = TestHandler;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+
+        session
+            .send_keepalive(false)
+            .expect("compatible keepalive is sent");
+        session
+            .tcpip_forward(Some(reply_tx), "127.0.0.1", 0)
+            .expect("tcpip-forward is sent");
+
+        assert_eq!(session.open_global_requests.len(), 1);
+        assert!(matches!(
+            session.open_global_requests.front(),
+            Some(crate::session::GlobalRequestResponse::TcpIpForward(_))
+        ));
+
+        session
+            .process_packet(&mut handler, &[msg::REQUEST_SUCCESS])
+            .await
+            .expect("REQUEST_SUCCESS is processed");
+
+        assert_eq!(reply_rx.await.expect("tcpip-forward reply"), Some(0));
+        assert_eq!(session.open_global_requests.len(), 0);
+    }
+
     #[tokio::test]
     async fn oversized_keyboard_interactive_prompt_count_is_rejected() {
         let (mut session, _sender, mut replies) = keyboard_interactive_session();
@@ -2065,6 +2162,29 @@ impl Default for GexParams {
     }
 }
 
+/// Client-side keepalive behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepaliveMode {
+    /// Send keepalive traffic without expecting a global request response.
+    Compatible,
+    /// Send keepalive traffic and close after too many unanswered attempts.
+    Strict,
+}
+
+fn process_keepalive_tick(config: &Config, alive_timeouts: usize) -> Result<(usize, bool), Error> {
+    match config.keepalive_mode {
+        KeepaliveMode::Strict => {
+            let alive_timeouts = alive_timeouts.saturating_add(1);
+            if config.keepalive_max != 0 && alive_timeouts > config.keepalive_max {
+                debug!("Timeout, server not responding to keepalives");
+                return Err(Error::KeepaliveTimeout);
+            }
+            Ok((alive_timeouts, true))
+        }
+        KeepaliveMode::Compatible => Ok((0, false)),
+    }
+}
+
 /// The configuration of clients.
 #[derive(Debug)]
 pub struct Config {
@@ -2086,6 +2206,8 @@ pub struct Config {
     pub keepalive_interval: Option<std::time::Duration>,
     /// If this many keepalives have been sent without reply, close the connection.
     pub keepalive_max: usize,
+    /// Determines whether keepalive packets require replies and can close the connection.
+    pub keepalive_mode: KeepaliveMode,
     /// Whether to expect and wait for an authentication call.
     pub anonymous: bool,
     /// DH dynamic group exchange parameters.
@@ -2111,6 +2233,7 @@ impl Default for Config {
             inactivity_timeout: None,
             keepalive_interval: None,
             keepalive_max: 3,
+            keepalive_mode: KeepaliveMode::Strict,
             anonymous: false,
             gex: Default::default(),
             nodelay: false,

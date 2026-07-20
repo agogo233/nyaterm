@@ -4,8 +4,8 @@
 
 use rstest::rstest;
 use zmodem2::{
-    Encoding, Frame, Header, Receiver, ReceiverEvent, Sender, SubpacketType, XON, ZDLE, ZPAD,
-    Zrinit,
+    Encoding, Frame, Header, Receiver, ReceiverEvent, Sender, SenderEvent, SubpacketType, XON,
+    ZDLE, ZPAD, ZfileManagementOption, Zrinit,
 };
 
 #[rstest]
@@ -70,6 +70,35 @@ fn write_zrpos(offset: u32) -> Vec<u8> {
     wire
 }
 
+fn write_zskip() -> Vec<u8> {
+    let mut wire = Vec::new();
+    Header::new(Encoding::ZHEX, Frame::ZSKIP, &[0; 4])
+        .write(&mut wire)
+        .expect("write zskip")
+        .expect("complete zskip");
+    wire
+}
+
+fn write_zabort() -> Vec<u8> {
+    let mut wire = Vec::new();
+    Header::new(Encoding::ZHEX, Frame::ZABORT, &[0; 4])
+        .write(&mut wire)
+        .expect("write zabort")
+        .expect("complete zabort");
+    wire
+}
+
+fn zbin32_header_from_wire(wire: &[u8]) -> Header {
+    assert!(
+        wire.starts_with(&[ZPAD, ZDLE, Encoding::ZBIN32 as u8]),
+        "expected ZBIN32 header, got {wire:?}"
+    );
+    let mut port = &wire[2..];
+    Header::read(&mut port)
+        .expect("read header")
+        .expect("header")
+}
+
 fn has_subpacket_kind(wire: &[u8], kind: SubpacketType) -> bool {
     wire.windows(2).any(|window| window == [ZDLE, kind as u8])
 }
@@ -104,6 +133,52 @@ fn test_sender_requests_8k_file_chunks_after_large_zrinit() {
     let request = sender.poll_file().expect("file data request");
     assert_eq!(request.offset, 0);
     assert_eq!(request.len, 8 * 1024);
+}
+
+#[test]
+fn test_sender_writes_zfile_management_options() {
+    let mut sender = Sender::new().unwrap();
+    sender.set_file_options(ZfileManagementOption::ZMCLOB);
+    sender.start_file(b"overwrite.bin", 1).unwrap();
+    sender.advance_outgoing(sender.drain_outgoing().len());
+
+    sender.feed_incoming(&write_zrinit(&[0; 4])).unwrap();
+
+    let header = zbin32_header_from_wire(sender.drain_outgoing());
+    assert_eq!(header.frame(), Frame::ZFILE);
+    assert_eq!(
+        header.count().to_le_bytes(),
+        [1, ZfileManagementOption::ZMCLOB.bits(), 0, 0]
+    );
+}
+
+#[test]
+fn test_sender_treats_zskip_as_file_complete() {
+    let mut sender = Sender::new().unwrap();
+    sender.set_file_options(ZfileManagementOption::ZMSKNOLOC);
+    sender.start_file(b"existing.bin", 1).unwrap();
+    sender.advance_outgoing(sender.drain_outgoing().len());
+    sender.feed_incoming(&write_zrinit(&[0; 4])).unwrap();
+    sender.advance_outgoing(sender.drain_outgoing().len());
+
+    sender.feed_incoming(&write_zskip()).unwrap();
+
+    assert_eq!(sender.poll_event(), Some(SenderEvent::FileComplete));
+    assert!(sender.poll_file().is_none());
+}
+
+#[test]
+fn test_sender_reports_remote_abort() {
+    let mut sender = Sender::new().unwrap();
+    sender.start_file(b"blocked.bin", 1).unwrap();
+    sender.advance_outgoing(sender.drain_outgoing().len());
+    sender.feed_incoming(&write_zrinit(&[0; 4])).unwrap();
+    sender.advance_outgoing(sender.drain_outgoing().len());
+
+    assert_eq!(
+        sender.feed_incoming(&write_zabort()),
+        Err(zmodem2::Error::RemoteAborted)
+    );
 }
 
 #[test]

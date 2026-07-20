@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::configure_local_pty_environment;
     #[cfg(target_os = "macos")]
     use super::is_utf8_locale;
@@ -9,7 +9,7 @@ mod tests {
         should_emit_visible_output,
     };
     use crate::core::ssh::osc::build_ready_marker;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     use portable_pty::CommandBuilder;
 
     fn ready_marker() -> String {
@@ -139,15 +139,28 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
-    fn local_pty_environment_sets_terminal_and_utf8_locale() {
-        let mut cmd = CommandBuilder::new("/bin/zsh");
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn local_pty_environment_sets_terminal() {
+        let shell = if cfg!(target_os = "macos") {
+            "/bin/zsh"
+        } else {
+            "/bin/bash"
+        };
+        let mut cmd = CommandBuilder::new(shell);
         configure_local_pty_environment(&mut cmd);
 
         assert_eq!(
             cmd.get_env("TERM").and_then(|value| value.to_str()),
             Some("xterm-256color")
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn local_pty_environment_sets_utf8_locale() {
+        let mut cmd = CommandBuilder::new("/bin/zsh");
+        configure_local_pty_environment(&mut cmd);
+
         assert!(
             cmd.get_env("LANG")
                 .and_then(|value| value.to_str())

@@ -10,17 +10,22 @@ pub fn build_portable_snapshot(
     } else {
         Vec::new()
     };
+    let mut sessions = config::load_sessions(app)?;
+    if snapshot_kind == PortableSnapshotKind::Sync {
+        strip_device_local_sessions(&mut sessions);
+    }
+    let portable_settings = PortableAppSettings::from_app_settings(&settings, &snapshot_kind);
 
     let mut snapshot = PortableSnapshot {
         schema_version: PORTABLE_SNAPSHOT_SCHEMA_VERSION,
-        snapshot_kind,
+        snapshot_kind: snapshot_kind.clone(),
         revision_id: uuid::Uuid::new_v4().to_string(),
         device_id: device_id.to_string(),
         created_at_ms: current_time_ms(),
         payload_hash: String::new(),
         app_version: app.package_info().version.to_string(),
-        settings: PortableAppSettings::from_app_settings(&settings),
-        sessions: config::load_sessions(app)?,
+        settings: portable_settings,
+        sessions,
         keys: config::load_keys(app)?,
         passwords: config::load_passwords(app)?,
         credentials: config::load_credentials(app)?,

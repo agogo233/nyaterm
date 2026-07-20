@@ -1,7 +1,57 @@
-use crate::config::{AiMode, AiModelSource, AiProviderKind, RiskLevel};
+use crate::config::{AiBackendKind, AiMode, AiModelSource, AiProviderKind, RiskLevel};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiSessionScopeType {
+    Terminal,
+    Workspace,
+    Global,
+    Unbound,
+}
+
+impl Default for AiSessionScopeType {
+    fn default() -> Self {
+        Self::Unbound
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSessionScope {
+    #[serde(default)]
+    pub r#type: AiSessionScopeType,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub connection_ids: Vec<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTerminalTarget {
+    pub terminal_session_id: String,
+    #[serde(default)]
+    pub connection_id: Option<String>,
+    pub label: String,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+    pub session_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTargetContext {
+    pub target: Option<AiTerminalTarget>,
+    #[serde(default)]
+    pub context: AiContext,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +71,10 @@ pub struct AiCommandCard {
     pub category: Option<String>,
     #[serde(default)]
     pub references: Vec<String>,
+    #[serde(default)]
+    pub target_terminal_session_id: Option<String>,
+    #[serde(default)]
+    pub target: Option<AiTerminalTarget>,
 }
 
 // ---------------------------------------------------------------------------
@@ -40,6 +94,8 @@ pub struct AgentStepAction {
     pub kind: AgentActionKind,
     #[serde(default)]
     pub command: Option<String>,
+    #[serde(default)]
+    pub target: Option<AiTerminalTarget>,
     #[serde(default)]
     pub risk_level: Option<RiskLevel>,
     #[serde(default)]
@@ -99,6 +155,8 @@ pub(super) struct AgentLlmResponse {
     pub action: String,
     #[serde(default)]
     pub command: Option<String>,
+    #[serde(default)]
+    pub target_terminal_session_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_risk_level")]
     pub risk_level: Option<RiskLevel>,
     #[serde(default)]
@@ -187,6 +245,12 @@ pub struct AiChatRequest {
     /// The terminal session id to execute commands on (Agent mode).
     #[serde(default)]
     pub terminal_session_id: Option<String>,
+    #[serde(default)]
+    pub owner_scope: AiSessionScope,
+    #[serde(default)]
+    pub targets: Vec<AiTerminalTarget>,
+    #[serde(default)]
+    pub target_contexts: Vec<AiTargetContext>,
     #[serde(default = "default_mode")]
     pub mode: AiMode,
     #[serde(default)]
@@ -235,10 +299,23 @@ pub struct AiStreamEventPayload {
 pub struct AiSession {
     pub id: String,
     #[serde(default)]
+    pub scope: AiSessionScope,
+    #[serde(default)]
     pub connection_id: Option<String>,
     pub title: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub backend_metadata: Option<AiSessionBackendMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSessionBackendMetadata {
+    #[serde(default)]
+    pub backend: AiBackendKind,
+    #[serde(default)]
+    pub external_thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,6 +387,8 @@ pub struct AppendAiAuditRequest {
 pub struct AiModelDiscovery {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub backend: AiBackendKind,
     #[serde(default)]
     pub provider_kind: Option<AiProviderKind>,
     #[serde(default)]

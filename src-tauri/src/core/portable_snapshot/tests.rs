@@ -5,6 +5,7 @@ mod tests {
         PortableSnapshotKind, PortableSnapshotMeta, PortableUiSettings, SNAPSHOT_ENTITIES_TABLE,
         SNAPSHOT_META_KEY, SNAPSHOT_META_TABLE, SNAPSHOT_ZIP_PAYLOAD_NAME, calculate_payload_hash,
         calculate_v3_raw_payload_hash, encode_portable_snapshot, encode_portable_snapshot_redb,
+        preserve_device_local_sessions, strip_device_local_sessions,
     };
     use crate::config::{self, ActivityBarLayout, AppSettings};
     use crate::error::AppError;
@@ -21,14 +22,15 @@ mod tests {
         current.ai.active_profile_id = "local-profile".to_string();
         current.ai.provider_profiles[0].api_key = Some("local-key".to_string());
 
-        let mut updated = PortableAppSettings::from_app_settings(&current);
+        let mut updated =
+            PortableAppSettings::from_app_settings(&current, &PortableSnapshotKind::Backup);
         updated.general.startup_restore = false;
         updated.ui.language = Some("zh-CN".to_string());
         updated.ui.saved_connections_sort_mode = "name-asc".to_string();
         updated.ai.active_profile_id = "synced-profile".to_string();
         updated.ai.provider_profiles[0].api_key = Some("synced-key".to_string());
 
-        let merged = updated.apply_to(current.clone());
+        let merged = updated.apply_to(current.clone(), &PortableSnapshotKind::Backup);
         assert_eq!(
             merged.security.master_password,
             current.security.master_password
@@ -42,6 +44,165 @@ mod tests {
             merged.ai.provider_profiles[0].api_key.as_deref(),
             Some("synced-key")
         );
+    }
+
+    #[test]
+    fn sync_portable_settings_strip_device_local_paths() {
+        let mut current = AppSettings::default();
+        current.appearance.background_image_path = Some("D:\\background.png".to_string());
+        current.appearance.background_image_fit = "tile".to_string();
+        current.appearance.background_image_opacity = 0.8;
+        current.transfer.download_path = "D:\\downloads".to_string();
+        current.transfer.default_editor = "D:\\tools\\editor.exe".to_string();
+        current.transfer.recording_path = "D:\\recordings".to_string();
+
+        let portable =
+            PortableAppSettings::from_app_settings(&current, &PortableSnapshotKind::Sync);
+
+        assert!(portable.appearance.background_image_path.is_none());
+        assert_eq!(
+            portable.appearance.background_image_fit,
+            config::AppearanceSettings::default().background_image_fit
+        );
+        assert_eq!(
+            portable.appearance.background_image_opacity,
+            config::AppearanceSettings::default().background_image_opacity
+        );
+        assert!(portable.transfer.download_path.is_empty());
+        assert!(portable.transfer.default_editor.is_empty());
+        assert!(portable.transfer.recording_path.is_empty());
+    }
+
+    #[test]
+    fn backup_portable_settings_preserve_device_local_paths() {
+        let mut current = AppSettings::default();
+        current.appearance.background_image_path = Some("D:\\background.png".to_string());
+        current.appearance.background_image_fit = "tile".to_string();
+        current.appearance.background_image_opacity = 0.8;
+        current.transfer.download_path = "D:\\downloads".to_string();
+        current.transfer.default_editor = "D:\\tools\\editor.exe".to_string();
+        current.transfer.recording_path = "D:\\recordings".to_string();
+
+        let portable =
+            PortableAppSettings::from_app_settings(&current, &PortableSnapshotKind::Backup);
+
+        assert_eq!(
+            portable.appearance.background_image_path.as_deref(),
+            Some("D:\\background.png")
+        );
+        assert_eq!(portable.appearance.background_image_fit, "tile");
+        assert_eq!(portable.appearance.background_image_opacity, 0.8);
+        assert_eq!(portable.transfer.download_path, "D:\\downloads");
+        assert_eq!(portable.transfer.default_editor, "D:\\tools\\editor.exe");
+        assert_eq!(portable.transfer.recording_path, "D:\\recordings");
+    }
+
+    #[test]
+    fn applying_sync_portable_settings_preserves_current_device_paths() {
+        let mut current = AppSettings::default();
+        current.appearance.background_image_path = Some("/Users/me/local.png".to_string());
+        current.appearance.background_image_fit = "contain".to_string();
+        current.appearance.background_image_opacity = 0.4;
+        current.transfer.download_path = "/Users/me/Downloads".to_string();
+        current.transfer.default_editor = "/Applications/Editor.app".to_string();
+        current.transfer.recording_path = "/Users/me/Recordings".to_string();
+
+        let mut incoming = AppSettings::default();
+        incoming.appearance.background_image_path = Some("D:\\background.png".to_string());
+        incoming.appearance.background_image_fit = "tile".to_string();
+        incoming.appearance.background_image_opacity = 0.9;
+        incoming.transfer.download_path = "D:\\downloads".to_string();
+        incoming.transfer.default_editor = "D:\\tools\\editor.exe".to_string();
+        incoming.transfer.recording_path = "D:\\recordings".to_string();
+
+        let portable =
+            PortableAppSettings::from_app_settings(&incoming, &PortableSnapshotKind::Backup);
+        let merged = portable.apply_to(current, &PortableSnapshotKind::Sync);
+
+        assert_eq!(
+            merged.appearance.background_image_path.as_deref(),
+            Some("/Users/me/local.png")
+        );
+        assert_eq!(merged.appearance.background_image_fit, "contain");
+        assert_eq!(merged.appearance.background_image_opacity, 0.4);
+        assert_eq!(merged.transfer.download_path, "/Users/me/Downloads");
+        assert_eq!(merged.transfer.default_editor, "/Applications/Editor.app");
+        assert_eq!(merged.transfer.recording_path, "/Users/me/Recordings");
+    }
+
+    #[test]
+    fn sync_sessions_strip_local_terminal_and_serial_device_fields() {
+        let mut sessions = sample_sessions_with_device_local_connections();
+
+        strip_device_local_sessions(&mut sessions);
+
+        let local = sessions
+            .connections
+            .iter()
+            .find(|connection| connection.id == "local-1")
+            .expect("local connection");
+        let config::ConnectionType::LocalTerminal {
+            shell_path,
+            shell_args,
+            working_dir,
+            ..
+        } = &local.config
+        else {
+            panic!("expected local terminal");
+        };
+        assert!(shell_path.is_empty());
+        assert!(shell_args.is_empty());
+        assert!(working_dir.is_none());
+
+        let serial = sessions
+            .connections
+            .iter()
+            .find(|connection| connection.id == "serial-1")
+            .expect("serial connection");
+        let config::ConnectionType::Serial { port_name, .. } = &serial.config else {
+            panic!("expected serial");
+        };
+        assert!(port_name.is_empty());
+    }
+
+    #[test]
+    fn applying_sync_sessions_preserves_matching_device_fields() {
+        let current = sample_sessions_with_device_local_connections();
+        let mut incoming = sample_sessions_with_device_local_connections();
+        strip_device_local_sessions(&mut incoming);
+
+        preserve_device_local_sessions(&mut incoming, &current);
+
+        let local = incoming
+            .connections
+            .iter()
+            .find(|connection| connection.id == "local-1")
+            .expect("local connection");
+        let config::ConnectionType::LocalTerminal {
+            shell_path,
+            shell_args,
+            working_dir,
+            ..
+        } = &local.config
+        else {
+            panic!("expected local terminal");
+        };
+        assert_eq!(
+            shell_path,
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        );
+        assert_eq!(shell_args, "-NoLogo");
+        assert_eq!(working_dir.as_deref(), Some("C:\\Users\\me"));
+
+        let serial = incoming
+            .connections
+            .iter()
+            .find(|connection| connection.id == "serial-1")
+            .expect("serial connection");
+        let config::ConnectionType::Serial { port_name, .. } = &serial.config else {
+            panic!("expected serial");
+        };
+        assert_eq!(port_name, "COM3");
     }
 
     fn sample_portable_settings() -> PortableAppSettings {
@@ -101,6 +262,67 @@ mod tests {
         };
         snapshot.payload_hash = calculate_payload_hash(&snapshot).expect("hash snapshot");
         snapshot
+    }
+
+    fn sample_sessions_with_device_local_connections() -> config::SessionsConfig {
+        config::SessionsConfig {
+            groups: Vec::new(),
+            connections: vec![
+                config::SavedConnection {
+                    id: "local-1".to_string(),
+                    name: "Local PowerShell".to_string(),
+                    config: config::ConnectionType::LocalTerminal {
+                        shell_path:
+                            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+                                .to_string(),
+                        shell_args: "-NoLogo".to_string(),
+                        working_dir: Some("C:\\Users\\me".to_string()),
+                        ai_execution_profile: config::AiExecutionProfile::Auto,
+                        encoding: String::new(),
+                    },
+                    group_id: None,
+                    description: None,
+                    sort_order: 0,
+                    icon: None,
+                    icon_auto_detect: None,
+                    auth: None,
+                    network: None,
+                    post_login: None,
+                    ssh_algorithms: None,
+                    sftp: config::SftpSettings::default(),
+                    created_at_ms: None,
+                    updated_at_ms: None,
+                    last_used_at_ms: None,
+                },
+                config::SavedConnection {
+                    id: "serial-1".to_string(),
+                    name: "Serial Console".to_string(),
+                    config: config::ConnectionType::Serial {
+                        port_name: "COM3".to_string(),
+                        baud_rate: 115_200,
+                        data_bits: 8,
+                        parity: "none".to_string(),
+                        stop_bits: "1".to_string(),
+                        ai_execution_profile: config::AiExecutionProfile::Auto,
+                        backspace_mode: "del".to_string(),
+                        encoding: String::new(),
+                    },
+                    group_id: None,
+                    description: None,
+                    sort_order: 1,
+                    icon: None,
+                    icon_auto_detect: None,
+                    auth: None,
+                    network: None,
+                    post_login: None,
+                    ssh_algorithms: None,
+                    sftp: config::SftpSettings::default(),
+                    created_at_ms: None,
+                    updated_at_ms: None,
+                    last_used_at_ms: None,
+                },
+            ],
+        }
     }
 
     #[test]

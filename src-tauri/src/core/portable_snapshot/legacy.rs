@@ -32,9 +32,12 @@ fn decode_v2_snapshot(
     let settings = if let Some(raw) = json_docs.get(SNAPSHOT_JSON_PORTABLE_SETTINGS) {
         serde_json::from_str(raw)?
     } else if let Some(raw) = json_docs.get("settings") {
-        PortableAppSettings::from_app_settings(&serde_json::from_str::<AppSettings>(raw)?)
+        PortableAppSettings::from_app_settings(
+            &serde_json::from_str::<AppSettings>(raw)?,
+            &meta.snapshot_kind,
+        )
     } else {
-        PortableAppSettings::from_app_settings(&AppSettings::default())
+        PortableAppSettings::from_app_settings(&AppSettings::default(), &meta.snapshot_kind)
     };
 
     let history = json_docs

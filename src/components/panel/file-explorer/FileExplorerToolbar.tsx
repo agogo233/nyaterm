@@ -227,7 +227,7 @@ export function FileExplorerToolbar({
 
       {isFileSearchExpanded && (
         <div
-          className="nyaterm-wallpaper-transparent-surface absolute inset-x-1.5 top-1 bottom-1 z-20 flex items-center gap-1 rounded-md border px-1.5 shadow-sm"
+          className="nyaterm-wallpaper-control-surface absolute inset-x-1.5 top-1 bottom-1 z-20 flex items-center gap-1 rounded-md border px-1.5 shadow-sm"
           style={{
             backgroundColor: "var(--df-bg-panel)",
             borderColor: "var(--df-primary)",

@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub struct AppearanceSettings {
     #[serde(default = "default_app_theme")]
     pub theme: String,
+    #[serde(default)]
+    pub custom_themes: Vec<ThemeConfig>,
     #[serde(default = "default_font")]
     pub font_family: String,
     #[serde(default = "default_ui_font")]
@@ -50,6 +52,71 @@ pub struct AppearanceSettings {
     /// Whether native Acrylic material applies blur behind transparent windows.
     #[serde(default = "default_false")]
     pub window_transparency_blur: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThemeConfig {
+    pub id: String,
+    pub name: String,
+    pub label: String,
+    pub swatch: String,
+    pub colors: ThemeColorsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeColorsConfig {
+    pub bg: String,
+    pub bg_panel: String,
+    pub bg_terminal: String,
+    pub bg_hover: String,
+    pub bg_input: String,
+    pub bg_section_header: String,
+    pub border: String,
+    pub text: String,
+    pub text_muted: String,
+    pub text_dimmed: String,
+    pub primary: String,
+    pub primary_hover: String,
+    pub on_primary: String,
+    pub focus_ring: String,
+    pub danger: String,
+    pub danger_hover: String,
+    pub success: String,
+    pub warning: String,
+    pub link: String,
+    pub shadow: String,
+    pub scroll_thumb: String,
+    pub accent: String,
+    pub terminal: TerminalColorsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalColorsConfig {
+    pub background: String,
+    pub foreground: String,
+    pub cursor: String,
+    pub selection_background: String,
+    pub line_highlight: String,
+    pub find_match_background: String,
+    pub find_match_border: String,
+    pub black: String,
+    pub red: String,
+    pub green: String,
+    pub yellow: String,
+    pub blue: String,
+    pub magenta: String,
+    pub cyan: String,
+    pub white: String,
+    pub bright_black: String,
+    pub bright_red: String,
+    pub bright_green: String,
+    pub bright_yellow: String,
+    pub bright_blue: String,
+    pub bright_magenta: String,
+    pub bright_cyan: String,
+    pub bright_white: String,
 }
 
 fn default_app_theme() -> String {
@@ -96,6 +163,7 @@ impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             theme: default_app_theme(),
+            custom_themes: Vec::new(),
             font_family: default_font(),
             ui_font_family: default_ui_font(),
             font_size: default_font_size(),

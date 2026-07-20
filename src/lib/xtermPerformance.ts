@@ -20,6 +20,10 @@ export const XTERM_PERFORMANCE_CONFIG = {
     maxRefreshTimeMs: 12,
   },
   output: {
+    /** Backlog threshold where terminal side work should start yielding to rendering/input. */
+    strainedBacklogBytes: 128 * 1024,
+    /** Backlog threshold for using microtask low-latency writes on normal shell output. */
+    lowLatencyFlushBacklogBytes: 64 * 1024,
     /** Max UTF-8 bytes to write into xterm in a single call. */
     writeChunkBytes: 32 * 1024,
     /** Lower per-frame write budget for repaint-heavy alternate-screen TUIs. */
@@ -40,6 +44,18 @@ export const XTERM_PERFORMANCE_CONFIG = {
     hiddenRecoveryThresholdBytes: 50_000,
     /** How long to keep the recovery notice visible. */
     recoveryNoticeMs: 3_000,
+  },
+  webgl: {
+    /** Release WebGL resources after a terminal has been hidden for this long. */
+    hiddenDisposeDelayMs: 15_000,
+    /** Delay before trying to recreate WebGL after a context loss. */
+    contextLossRetryDelayMs: 50,
+    /** Rolling window for context-loss circuit breaking. */
+    contextLossWindowMs: 10_000,
+    /** More losses than this in the rolling window disables WebGL until settings/session reset. */
+    contextLossCircuitBreakerLimit: 2,
+    /** Number of reveal frames to repaint after a hidden terminal becomes visible. */
+    revealRefreshFrames: 2,
   },
 } as const;
 

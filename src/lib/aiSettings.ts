@@ -402,6 +402,46 @@ export const AI_PROVIDERS: Array<{ value: AIProviderKind; label: string }> = [
   { value: "openai_compatible", label: "OpenAI Compatible" },
 ];
 
+export type CustomAIProviderProtocol = Extract<
+  AIProviderKind,
+  "openai_compatible" | "anthropic" | "gemini"
+>;
+
+export const CUSTOM_AI_PROVIDER_PROTOCOLS: Array<{
+  value: CustomAIProviderProtocol;
+  labelKey: string;
+}> = [
+  { value: "openai_compatible", labelKey: "ai.apiProtocolOpenaiCompatible" },
+  { value: "anthropic", labelKey: "ai.apiProtocolAnthropic" },
+  { value: "gemini", labelKey: "ai.apiProtocolGemini" },
+];
+
+const CUSTOM_PROVIDER_BASE_URL_PLACEHOLDERS: Record<CustomAIProviderProtocol, string> = {
+  openai_compatible: "https://api.example.com/v1/",
+  anthropic: "https://api.anthropic.com/",
+  gemini: "https://generativelanguage.googleapis.com/",
+};
+
+export function getCustomProviderBaseUrlPlaceholder(providerKind: AIProviderKind): string {
+  return CUSTOM_PROVIDER_BASE_URL_PLACEHOLDERS[providerKind as CustomAIProviderProtocol] ?? "";
+}
+
+export function supportsCustomModelDiscovery(
+  credential: Pick<AIProviderCredential, "id" | "enabled" | "provider_kind">,
+): boolean {
+  return (
+    !isBuiltinProvider(credential.id) &&
+    credential.enabled &&
+    credential.provider_kind === "openai_compatible"
+  );
+}
+
+export function requiresManualCustomModelEntry(
+  credential: Pick<AIProviderCredential, "id" | "provider_kind">,
+): boolean {
+  return !isBuiltinProvider(credential.id) && credential.provider_kind !== "openai_compatible";
+}
+
 const DEFAULT_PROVIDER_PROFILES: AIProviderProfile[] = [
   {
     id: "openai",
@@ -517,7 +557,10 @@ export const DEFAULT_FILE_AI_ACTIONS: AICustomActionConfig[] = [
 ];
 
 export function getModelProviderLabel(
-  model: { provider_kind?: AIProviderKind | null; credential_id?: string | null },
+  model: {
+    provider_kind?: AIProviderKind | null;
+    credential_id?: string | null;
+  },
   credentials: AIProviderCredential[],
 ): string {
   if (model.credential_id) {
@@ -547,7 +590,7 @@ function credentialFromProfile(profile: AIProviderProfile): AIProviderCredential
 }
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
-  schema_version: 3,
+  schema_version: 4,
   enabled: false,
   context_line_limit: 200,
   redaction_enabled: true,
@@ -571,6 +614,13 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   agent_background_execution_enabled: false,
   agent_command_execution_mode: "confirm_each",
   agent_smart_auto_execute_max_risk: "low",
+  codex: {
+    enabled: false,
+    executable_path: null,
+    default_model: null,
+    thread_mode: "persistent",
+    remote_terminal_agent_enabled: false,
+  },
 };
 
 function normalizeLocaleTag(value?: string | null): string | null {
@@ -583,8 +633,26 @@ function normalizeAILocale(value?: string | null): string | null {
   const normalized = normalizeLocaleTag(value);
   if (!normalized) return null;
   const lower = normalized.toLowerCase();
-  if (lower === "en" || lower.startsWith("en-")) return "en";
-  if (lower === "zh" || lower.startsWith("zh-")) return "zh-CN";
+  const hyphenated = lower.replace(/_/g, "-");
+  if (hyphenated === "en" || hyphenated.startsWith("en-")) return "en";
+  if (
+    hyphenated === "zh-tw" ||
+    hyphenated === "zh-hant" ||
+    hyphenated.startsWith("zh-hant-") ||
+    hyphenated === "zh-hk" ||
+    hyphenated === "zh-mo"
+  ) {
+    return "zh-TW";
+  }
+  if (
+    hyphenated === "zh" ||
+    hyphenated === "zh-cn" ||
+    hyphenated === "zh-sg" ||
+    hyphenated === "zh-hans" ||
+    hyphenated.startsWith("zh-hans-")
+  ) {
+    return "zh-CN";
+  }
   return normalized;
 }
 
@@ -624,6 +692,7 @@ export function mergeModelDiscoveries(
         : {
             id: item.id,
             name: item.name,
+            backend: item.backend ?? "genai",
             provider_kind: item.providerKind ?? null,
             credential_id: item.credentialId ?? null,
             enabled: false,
@@ -634,7 +703,7 @@ export function mergeModelDiscoveries(
   }
 
   for (const old of oldModels) {
-    if (!seen.has(old.id) && old.source === "manual") {
+    if (!seen.has(old.id) && (old.source === "manual" || old.backend === "codex")) {
       merged.push(old);
     }
   }

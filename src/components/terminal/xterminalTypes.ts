@@ -31,5 +31,4 @@ export interface MultiLinePasteDialogProps {
   onSendLineByLine: (text: string) => void;
 }
 
-export type PerformanceMode = "normal" | "overloaded";
-export type PerformanceOverlayState = "overloaded" | "recovered" | null;
+export type PerformanceMode = "normal" | "strained" | "overloaded";

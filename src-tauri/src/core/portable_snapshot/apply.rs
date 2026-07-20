@@ -4,7 +4,12 @@ pub async fn apply_portable_snapshot(
 ) -> AppResult<()> {
     validate_portable_snapshot(snapshot)?;
 
-    config::save_sessions(app, &snapshot.sessions)?;
+    let mut sessions = snapshot.sessions.clone();
+    if snapshot.snapshot_kind == PortableSnapshotKind::Sync {
+        let current_sessions = config::load_sessions(app).unwrap_or_default();
+        preserve_device_local_sessions(&mut sessions, &current_sessions);
+    }
+    config::save_sessions(app, &sessions)?;
     config::save_keys(app, &snapshot.keys)?;
     config::save_passwords(app, &snapshot.passwords)?;
     config::save_credentials(app, &snapshot.credentials)?;
@@ -16,10 +21,10 @@ pub async fn apply_portable_snapshot(
     config::save_quick_commands(app, &snapshot.quick_commands)?;
     crate::storage::replace_command_history_entries(&snapshot.history)?;
 
-    let merged = snapshot
-        .settings
-        .clone()
-        .apply_to(config::load_app_settings(app).unwrap_or_default());
+    let merged = snapshot.settings.clone().apply_to(
+        config::load_app_settings(app).unwrap_or_default(),
+        &snapshot.snapshot_kind,
+    );
     let mut persisted = merged.clone();
     persisted.cloud_sync = config::encrypt_cloud_sync_settings(merged.cloud_sync.clone())?;
     persisted.ai = config::encrypt_ai_settings(merged.ai.clone())?;

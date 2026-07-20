@@ -1,6 +1,16 @@
-import { useMemo, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MdAdd, MdDelete, MdExpandLess, MdExpandMore, MdRefresh } from "react-icons/md";
+import {
+  MdAdd,
+  MdDelete,
+  MdExpandLess,
+  MdExpandMore,
+  MdLogin,
+  MdLogout,
+  MdOpenInNew,
+  MdRefresh,
+} from "react-icons/md";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,9 +22,13 @@ import {
   aiModelIdForCredential,
   aiModelIdForProvider,
   BUILTIN_PROVIDERS,
+  CUSTOM_AI_PROVIDER_PROTOCOLS,
+  getCustomProviderBaseUrlPlaceholder,
   getProviderLabel,
   isBuiltinProvider,
   mergeModelDiscoveries,
+  requiresManualCustomModelEntry,
+  supportsCustomModelDiscovery,
 } from "@/lib/aiSettings";
 import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
@@ -23,7 +37,9 @@ import type {
   AIModelConfigItem,
   AIModelDiscovery,
   AIProviderCredential,
+  AIProviderKind,
   AISettings,
+  CodexIntegrationSettings,
 } from "@/types/global";
 import {
   SettingFieldGrid,
@@ -77,6 +93,41 @@ function DeleteIconButton({ onDelete, title }: { onDelete: () => void; title: st
       <MdDelete className="text-[0.95rem]" />
     </Button>
   );
+}
+
+interface CodexCliStatus {
+  installed: boolean;
+  path?: string | null;
+  version?: string | null;
+  error?: string | null;
+}
+
+interface CodexAccountStatus {
+  connected: boolean;
+  authMode?: string | null;
+  planType?: string | null;
+  email?: string | null;
+  requiresOpenaiAuth: boolean;
+}
+
+interface CodexLoginStart {
+  loginId?: string | null;
+  loginType: string;
+  authUrl?: string | null;
+  verificationUrl?: string | null;
+  userCode?: string | null;
+}
+
+function normalizeCodexSettings(
+  value?: Partial<CodexIntegrationSettings>,
+): CodexIntegrationSettings {
+  return {
+    enabled: value?.enabled ?? false,
+    executable_path: value?.executable_path ?? null,
+    default_model: value?.default_model ?? null,
+    thread_mode: value?.thread_mode ?? "persistent",
+    remote_terminal_agent_enabled: value?.remote_terminal_agent_enabled ?? false,
+  };
 }
 
 export function AiGeneralTab() {
@@ -192,7 +243,235 @@ interface ModelGroup {
   groupKey: string;
   label: string;
   credential?: AIProviderCredential;
+  backend?: "genai" | "codex";
   models: AIModelConfigItem[];
+}
+
+export function AiAgentsTab() {
+  const { t } = useTranslation();
+  const { appSettings, updateAppSettings } = useApp();
+  const ai = appSettings.ai;
+  const codex = normalizeCodexSettings(ai.codex);
+  const [cliStatus, setCliStatus] = useState<CodexCliStatus | null>(null);
+  const [accountStatus, setAccountStatus] = useState<CodexAccountStatus | null>(null);
+  const [deviceLogin, setDeviceLogin] = useState<CodexLoginStart | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const codexModels = useMemo(
+    () => ai.models.filter((model) => model.backend === "codex" && model.enabled),
+    [ai.models],
+  );
+
+  const update = useCallback(
+    (patch: Partial<CodexIntegrationSettings>) =>
+      updateAppSettings({ ai: { ...ai, codex: { ...codex, ...patch } } }),
+    [ai, codex, updateAppSettings],
+  );
+
+  const detect = useCallback(async () => {
+    setBusy(true);
+    try {
+      const status = await invoke<CodexCliStatus>("detect_codex_cli");
+      setCliStatus(status);
+      if (status.installed && status.path && !codex.executable_path) {
+        update({ executable_path: status.path });
+      }
+      if (status.installed) toast.success(t("ai.codexDetected"));
+      else toast.error(status.error || t("ai.codexNotInstalled"));
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [codex.executable_path, t, update]);
+
+  const refreshAccount = useCallback(async () => {
+    setBusy(true);
+    try {
+      const status = await invoke<CodexAccountStatus>("get_codex_account_status");
+      setAccountStatus(status);
+      toast.success(t("ai.codexStatusRefreshed"));
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [t]);
+
+  const startLogin = useCallback(
+    async (flow: "browser" | "deviceCode") => {
+      setBusy(true);
+      try {
+        const result = await invoke<CodexLoginStart>("start_codex_login", { flow });
+        setDeviceLogin(flow === "deviceCode" ? result : null);
+        if (result.authUrl) {
+          await openUrl(result.authUrl);
+        }
+        toast.success(t("ai.codexLoginStarted"));
+      } catch (error) {
+        toast.error(getErrorMessage(error));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [t],
+  );
+
+  const logout = useCallback(async () => {
+    setBusy(true);
+    try {
+      await invoke("logout_codex");
+      setAccountStatus({ connected: false, requiresOpenaiAuth: true });
+      toast.success(t("ai.codexLoggedOut"));
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [t]);
+
+  const bootstrappedRef = useRef(false);
+  useEffect(() => {
+    if (bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    void detect();
+    if (codex.enabled) void refreshAccount();
+  }, [codex.enabled, detect, refreshAccount]);
+
+  const connectedLabel = accountStatus?.connected
+    ? t("ai.codexConnected")
+    : t("ai.codexNotLoggedIn");
+
+  return (
+    <div className="space-y-5">
+      <SettingSection
+        title={t("ai.localAgents")}
+        action={
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void detect()}>
+            <MdRefresh className={busy ? "animate-spin" : ""} />
+            {t("ai.detect")}
+          </Button>
+        }
+        contentClassName="space-y-4"
+      >
+        <div className="rounded-md border border-border/70 bg-background/75 p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">OpenAI Codex</div>
+              <div className="mt-1 text-xs text-muted-foreground">{t("ai.codexDesc")}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant={cliStatus?.installed ? "default" : "outline"}>
+                {cliStatus?.installed ? t("ai.installed") : t("ai.notInstalled")}
+              </Badge>
+              <Badge variant={accountStatus?.connected ? "default" : "outline"}>
+                {connectedLabel}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <SettingRow label={t("ai.codexEnabled")}>
+              <SettingSwitch checked={codex.enabled} onChange={(enabled) => update({ enabled })} />
+            </SettingRow>
+            <SettingRow label={t("ai.codexRemoteAgent")}>
+              <SettingSwitch
+                checked={codex.remote_terminal_agent_enabled}
+                onChange={(remote_terminal_agent_enabled) =>
+                  update({ remote_terminal_agent_enabled })
+                }
+              />
+            </SettingRow>
+            <SettingFieldGrid>
+              <SettingInput
+                label={t("ai.codexPath")}
+                value={codex.executable_path ?? ""}
+                placeholder="codex"
+                onChange={(event) => update({ executable_path: event.target.value || null })}
+                fieldClassName="lg:col-span-2"
+              />
+              <SettingSelect
+                label={t("ai.codexThreadMode")}
+                value={codex.thread_mode}
+                onValueChange={(thread_mode) =>
+                  update({ thread_mode: thread_mode as CodexIntegrationSettings["thread_mode"] })
+                }
+              >
+                <SelectItem value="persistent">{t("ai.codexThreadPersistent")}</SelectItem>
+                <SelectItem value="ephemeral">{t("ai.codexThreadEphemeral")}</SelectItem>
+              </SettingSelect>
+              <SettingSelect
+                label={t("ai.codexDefaultModel")}
+                value={codex.default_model ?? "__none__"}
+                onValueChange={(value) =>
+                  update({ default_model: value === "__none__" ? null : value })
+                }
+              >
+                <SelectItem value="__none__">{t("ai.useModelPicker")}</SelectItem>
+                {codexModels.map((model) => (
+                  <SelectItem key={model.id} value={model.name}>
+                    {model.name}
+                  </SelectItem>
+                ))}
+              </SettingSelect>
+            </SettingFieldGrid>
+
+            <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+              <div>
+                {t("ai.codexVersion")}: {cliStatus?.version || "-"}
+              </div>
+              <div>
+                {t("ai.codexAuthMode")}: {accountStatus?.authMode || "-"}
+              </div>
+              <div>
+                {t("ai.codexPlan")}: {accountStatus?.planType || "-"}
+              </div>
+              <div>
+                {t("ai.codexEmail")}: {accountStatus?.email || "-"}
+              </div>
+            </div>
+
+            {deviceLogin?.verificationUrl && deviceLogin.userCode ? (
+              <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-xs">
+                <div className="font-medium">{t("ai.codexDeviceLogin")}</div>
+                <div className="mt-2 font-mono">{deviceLogin.verificationUrl}</div>
+                <div className="mt-1 font-mono text-sm">{deviceLogin.userCode}</div>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void refreshAccount()}
+              >
+                <MdRefresh className={busy ? "animate-spin" : ""} />
+                {t("ai.refreshStatus")}
+              </Button>
+              <Button size="sm" disabled={busy} onClick={() => void startLogin("browser")}>
+                <MdLogin />
+                {t("ai.codexLogin")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void startLogin("deviceCode")}
+              >
+                <MdOpenInNew />
+                {t("ai.codexDeviceCodeLogin")}
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void logout()}>
+                <MdLogout />
+                {t("ai.codexLogout")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </SettingSection>
+    </div>
+  );
 }
 
 function groupKeyForCredential(credential: AIProviderCredential) {
@@ -211,12 +490,21 @@ function groupModels(
     if (!groups.has(key)) groups.set(key, []);
   }
   for (const model of models) {
+    if (model.backend === "codex") {
+      const key = "codex";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)?.push(model);
+      continue;
+    }
     const key = model.credential_id ?? model.provider_kind ?? "unknown";
     const list = groups.get(key);
     if (list) list.push(model);
     else groups.set(key, [model]);
   }
   return Array.from(groups.entries()).map(([groupKey, items]) => {
+    if (groupKey === "codex") {
+      return { groupKey, label: "OpenAI Codex", backend: "codex", models: items };
+    }
     const cred = credentialMap.get(groupKey);
     const label =
       cred && !isBuiltinProvider(cred.id)
@@ -251,11 +539,12 @@ export function AiModelsTab() {
 
   const visibleModels = useMemo(() => {
     return ai.models.filter((model) => {
+      if (model.backend === "codex") return ai.codex.enabled;
       if (model.credential_id) return enabledProviderKinds.has(model.credential_id);
       if (model.provider_kind) return enabledProviderKinds.has(model.provider_kind);
       return false;
     });
-  }, [ai.models, enabledProviderKinds]);
+  }, [ai.models, ai.codex.enabled, enabledProviderKinds]);
 
   const filteredModels = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -312,9 +601,7 @@ export function AiModelsTab() {
     update({ models, default_model_id: updateDefaultModelId(ai, models) });
   };
 
-  const hasCustomCredentials = ai.provider_credentials.some(
-    (c) => !isBuiltinProvider(c.id) && c.enabled,
-  );
+  const hasRefreshableCustomCredential = ai.provider_credentials.some(supportsCustomModelDiscovery);
 
   const refreshModels = async () => {
     setRefreshing(true);
@@ -385,6 +672,7 @@ export function AiModelsTab() {
       credential_id: builtin ? null : credential.id,
       enabled: true,
       source: "manual",
+      backend: "genai",
       last_seen_at: null,
     };
     const models = [model, ...ai.models];
@@ -434,6 +722,7 @@ export function AiModelsTab() {
               nextModels.push({
                 id: modelId,
                 name,
+                backend: "genai",
                 provider_kind: providerKind,
                 credential_id: null,
                 enabled: false,
@@ -483,7 +772,7 @@ export function AiModelsTab() {
           <Button
             size="icon-sm"
             variant="outline"
-            disabled={refreshing || !hasCustomCredentials}
+            disabled={refreshing || !hasRefreshableCustomCredential}
             onClick={() => void refreshModels()}
             title={t("ai.refreshModels")}
           >
@@ -550,6 +839,11 @@ export function AiModelsTab() {
                               {t("common.add")}
                             </Button>
                           </div>
+                          {requiresManualCustomModelEntry(group.credential) ? (
+                            <div className="mt-2 text-xs leading-5 text-muted-foreground">
+                              {t("ai.modelDiscoveryUnsupported")} {t("ai.manualModelRequired")}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                       {group.models.map((model) => (
@@ -646,9 +940,26 @@ export function AiModelsTab() {
                       updateCredential(credential.id, { name: event.target.value })
                     }
                   />
+                  <SettingSelect
+                    label={t("ai.apiProtocol")}
+                    value={credential.provider_kind}
+                    onValueChange={(provider_kind) =>
+                      updateCredential(credential.id, {
+                        provider_kind: provider_kind as AIProviderKind,
+                      })
+                    }
+                    triggerClassName="min-w-0 [&>span]:truncate"
+                  >
+                    {CUSTOM_AI_PROVIDER_PROTOCOLS.map((protocol) => (
+                      <SelectItem key={protocol.value} value={protocol.value}>
+                        {t(protocol.labelKey)}
+                      </SelectItem>
+                    ))}
+                  </SettingSelect>
                   <SettingInput
                     label={t("ai.baseUrl")}
-                    placeholder="https://api.openai.com/v1/"
+                    desc={t("ai.baseUrlRootHint")}
+                    placeholder={getCustomProviderBaseUrlPlaceholder(credential.provider_kind)}
                     value={credential.base_url ?? ""}
                     onChange={(event) =>
                       updateCredential(credential.id, { base_url: event.target.value })

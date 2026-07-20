@@ -2,7 +2,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
-use super::types::AiCommandCard;
+use super::types::{AiChatRequest, AiCommandCard, AiTerminalTarget};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +50,48 @@ pub(super) fn parse_model_output(
             promote_reasoning_to_text(result)
         }
     }
+}
+
+pub(super) fn bind_command_card_targets(cards: &mut [AiCommandCard], request: &AiChatRequest) {
+    match request.targets.as_slice() {
+        [] => {}
+        [target] => {
+            for card in cards {
+                card.target = Some(target.clone());
+                card.target_terminal_session_id = Some(target.terminal_session_id.clone());
+            }
+        }
+        targets => {
+            for card in cards {
+                card.target = resolve_card_target(card, targets);
+            }
+        }
+    }
+}
+
+fn resolve_card_target(
+    card: &AiCommandCard,
+    targets: &[AiTerminalTarget],
+) -> Option<AiTerminalTarget> {
+    if let Some(target_id) = card
+        .target_terminal_session_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return targets
+            .iter()
+            .find(|target| target.terminal_session_id == target_id)
+            .cloned();
+    }
+
+    if let Some(model_target) = card.target.as_ref() {
+        return targets
+            .iter()
+            .find(|target| target.terminal_session_id == model_target.terminal_session_id)
+            .cloned();
+    }
+
+    None
 }
 
 /// When the primary text is empty but reasoning content exists, try to
@@ -173,6 +215,7 @@ pub(super) fn trim_optional_to_option(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::ai::types::AiAction;
 
     #[test]
     fn parses_json_command_cards() {
@@ -181,6 +224,101 @@ mod tests {
         assert_eq!(text, "ok");
         assert_eq!(reasoning, None);
         assert_eq!(cards.len(), 1);
+    }
+
+    #[test]
+    fn single_target_request_binds_all_command_cards() {
+        let mut cards = vec![AiCommandCard {
+            id: "1".to_string(),
+            title: "CPU".to_string(),
+            command: "ps aux".to_string(),
+            explanation: "x".to_string(),
+            risk_level: None,
+            risk_reason: None,
+            expected_effect: "list".to_string(),
+            rollback: None,
+            category: None,
+            references: vec![],
+            target_terminal_session_id: None,
+            target: None,
+        }];
+        let mut request = test_request();
+        request.targets.push(AiTerminalTarget {
+            terminal_session_id: "term-a".to_string(),
+            connection_id: Some("conn-a".to_string()),
+            label: "Prod".to_string(),
+            host: Some("10.0.0.1".to_string()),
+            username: Some("root".to_string()),
+            session_type: "SSH".to_string(),
+        });
+
+        bind_command_card_targets(&mut cards, &request);
+
+        assert_eq!(
+            cards[0]
+                .target
+                .as_ref()
+                .map(|target| target.terminal_session_id.as_str()),
+            Some("term-a")
+        );
+    }
+
+    #[test]
+    fn multi_target_request_rejects_unknown_command_target() {
+        let mut cards = vec![AiCommandCard {
+            id: "1".to_string(),
+            title: "CPU".to_string(),
+            command: "ps aux".to_string(),
+            explanation: "x".to_string(),
+            risk_level: None,
+            risk_reason: None,
+            expected_effect: "list".to_string(),
+            rollback: None,
+            category: None,
+            references: vec![],
+            target_terminal_session_id: Some("term-x".to_string()),
+            target: None,
+        }];
+        let mut request = test_request();
+        request.targets.push(AiTerminalTarget {
+            terminal_session_id: "term-a".to_string(),
+            connection_id: None,
+            label: "Prod".to_string(),
+            host: None,
+            username: None,
+            session_type: "SSH".to_string(),
+        });
+        request.targets.push(AiTerminalTarget {
+            terminal_session_id: "term-b".to_string(),
+            connection_id: None,
+            label: "Test".to_string(),
+            host: None,
+            username: None,
+            session_type: "SSH".to_string(),
+        });
+
+        bind_command_card_targets(&mut cards, &request);
+
+        assert!(cards[0].target.is_none());
+    }
+
+    fn test_request() -> AiChatRequest {
+        AiChatRequest {
+            stream_id: None,
+            session_id: None,
+            connection_id: None,
+            terminal_session_id: None,
+            owner_scope: Default::default(),
+            targets: vec![],
+            target_contexts: vec![],
+            mode: crate::config::AiMode::Ask,
+            model_id: None,
+            model_name: None,
+            action: AiAction::GenerateCommand,
+            user_input: "test".to_string(),
+            context: Default::default(),
+            options: Default::default(),
+        }
     }
 
     #[test]

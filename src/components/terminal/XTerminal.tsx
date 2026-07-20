@@ -97,7 +97,7 @@ import {
   readRecentOutput,
 } from "./terminalInputSelection";
 import { createTerminalLinkHandlers } from "./terminalLinkHandlers";
-import type { PerformanceMode, PerformanceOverlayState, XTerminalProps } from "./xterminalTypes";
+import type { PerformanceMode, XTerminalProps } from "./xterminalTypes";
 import { createZmodemEventHandler, type ZmodemEventPayload } from "./zmodemTerminalEvents";
 import "@xterm/xterm/css/xterm.css";
 
@@ -111,7 +111,9 @@ interface XTermInternalTrimSource {
       buffers?: {
         normal?: {
           lines?: {
-            onTrim?: (listener: (amount: number) => void) => { dispose: () => void };
+            onTrim?: (listener: (amount: number) => void) => {
+              dispose: () => void;
+            };
           };
         };
       };
@@ -241,8 +243,6 @@ export default function XTerminal({
   const [terminalInstance, setTerminalInstance] = useState<Terminal | null>(null);
   const [terminalReady, setTerminalReady] = useState(false);
   const [performanceMode, setPerformanceMode] = useState<PerformanceMode>("normal");
-  const [performanceOverlay, setPerformanceOverlay] = useState<PerformanceOverlayState>(null);
-  const [skippedOutputBytes, setSkippedOutputBytes] = useState(0);
   const [multiLinePasteText, setMultiLinePasteText] = useState<string | null>(null);
   const [isExternalDropActive, setIsExternalDropActive] = useState(false);
   const aiCapturingRef = useRef(false);
@@ -258,8 +258,14 @@ export default function XTerminal({
     [appearance, terminalTheme.colors.terminal],
   );
   const terminalTransparencyEnabled = isTerminalTransparencyEnabled(appearance);
-  const terminalLifecycleStateRef = useRef({ sessionId, terminalTransparencyEnabled });
-  terminalLifecycleStateRef.current = { sessionId, terminalTransparencyEnabled };
+  const terminalLifecycleStateRef = useRef({
+    sessionId,
+    terminalTransparencyEnabled,
+  });
+  terminalLifecycleStateRef.current = {
+    sessionId,
+    terminalTransparencyEnabled,
+  };
   const showLineNumbers = terminalSettings.show_line_numbers;
   const showTimestamps = terminalSettings.show_timestamps;
   const showTimestampMilliseconds = terminalSettings.show_timestamp_milliseconds ?? false;
@@ -276,6 +282,8 @@ export default function XTerminal({
   const doFindRef = useRef<(selection?: string) => void>(() => {});
   const pasteTextRef = useRef<(text: string, options?: { skipDialog?: boolean }) => void>(() => {});
   const disconnectedRef = useRef(false);
+  const disconnectedNoticeShownRef = useRef(false);
+  const disconnectedCloseRequestedRef = useRef(false);
   const reconnectingRef = useRef(false);
   const preservedReconnectContentRef = useRef<string | null>(null);
   const outputWriteQueueRef = useRef(Promise.resolve());
@@ -292,8 +300,6 @@ export default function XTerminal({
   const visibleRef = useRef(visible);
   const activeRef = useRef(active);
   const performanceModeRef = useRef<PerformanceMode>("normal");
-  const performanceOverlayTimerRef = useRef<number | null>(null);
-  const skippedOutputBytesRef = useRef(0);
   const queuedOutputChunksRef = useRef<QueuedOutputChunk[]>([]);
   const queuedOutputBytesRef = useRef(0);
   const writingOutputBytesRef = useRef(0);
@@ -301,6 +307,7 @@ export default function XTerminal({
   const pendingOutputAckBytesRef = useRef(0);
   const outputAckTimerRef = useRef<number | null>(null);
   const pendingOutputFlushRef = useRef<number | null>(null);
+  const pendingOutputMicrotaskRef = useRef(false);
   const pendingOutputFlushTimerRef = useRef<number | null>(null);
   const lastAlternateScreenWriteAtRef = useRef(0);
   const handleVisibilityChangeRef = useRef<(() => void) | null>(null);
@@ -395,35 +402,21 @@ export default function XTerminal({
     tRef.current = t;
   }, [t]);
 
-  const clearPerformanceOverlayTimer = useCallback(() => {
-    if (performanceOverlayTimerRef.current !== null) {
-      window.clearTimeout(performanceOverlayTimerRef.current);
-      performanceOverlayTimerRef.current = null;
-    }
-  }, []);
-
   const enterOverloadedMode = useCallback(() => {
-    clearPerformanceOverlayTimer();
     performanceModeRef.current = "overloaded";
     setPerformanceMode("overloaded");
-    setPerformanceOverlay("overloaded");
-  }, [clearPerformanceOverlayTimer]);
+  }, []);
 
-  const exitOverloadedMode = useCallback(() => {
-    clearPerformanceOverlayTimer();
-    performanceModeRef.current = "normal";
-    setPerformanceMode("normal");
-    setPerformanceOverlay("recovered");
-    performanceOverlayTimerRef.current = window.setTimeout(() => {
-      setPerformanceOverlay((current) => (current === "recovered" ? null : current));
-      performanceOverlayTimerRef.current = null;
-    }, XTERM_PERFORMANCE_CONFIG.output.recoveryNoticeMs);
-  }, [clearPerformanceOverlayTimer]);
+  const setOutputPressureMode = useCallback((mode: PerformanceMode) => {
+    if (performanceModeRef.current === mode) return;
+    performanceModeRef.current = mode;
+    setPerformanceMode(mode);
+  }, []);
 
-  const formatSkippedCount = useCallback(
-    (value: number) => new Intl.NumberFormat().format(value),
-    [],
-  );
+  const exitOverloadedMode = useCallback((nextMode: PerformanceMode = "normal") => {
+    performanceModeRef.current = nextMode;
+    setPerformanceMode(nextMode);
+  }, []);
 
   // Search Addon state and handlers
   const {
@@ -445,7 +438,7 @@ export default function XTerminal({
     terminal: terminalInstance,
     sessionId,
     visible: visible && active,
-    performanceMode,
+    performanceMode: performanceMode === "strained" ? "busy" : performanceMode,
   });
 
   // Shell integration state
@@ -556,17 +549,16 @@ export default function XTerminal({
     backendUnackedOutputBytesRef.current = 0;
     pendingOutputAckBytesRef.current = 0;
     lastAlternateScreenWriteAtRef.current = 0;
-    skippedOutputBytesRef.current = 0;
     outputWriteInFlightRef.current = false;
     outputWriteQueueRef.current = Promise.resolve();
+    pendingOutputMicrotaskRef.current = false;
     disconnectedRef.current = false;
+    disconnectedNoticeShownRef.current = false;
+    disconnectedCloseRequestedRef.current = false;
     reconnectingRef.current = false;
     performanceModeRef.current = "normal";
     resetCredentialAutofill();
     setPerformanceMode("normal");
-    setPerformanceOverlay(null);
-    setSkippedOutputBytes(0);
-    clearPerformanceOverlayTimer();
     let disposed = false;
 
     const terminal = new Terminal({
@@ -593,7 +585,9 @@ export default function XTerminal({
       webLinksAddon,
       removePopup: removeLinkPopup,
     } = createTerminalLinkHandlers(terminal, tRef);
-    const searchAddon = new SearchAddon({ highlightLimit: TERMINAL_SEARCH_VISIBLE_MATCH_LIMIT });
+    const searchAddon = new SearchAddon({
+      highlightLimit: TERMINAL_SEARCH_VISIBLE_MATCH_LIMIT,
+    });
     const unicodeGraphemesAddon = new UnicodeGraphemesAddon();
     const zmodemHandler = createZmodemEventHandler(
       terminal,
@@ -672,7 +666,9 @@ export default function XTerminal({
 
       switch (sessionTypeRef.current) {
         case "Local":
-          return invoke<string>("create_local_session", { connectionId: connectionId || null });
+          return invoke<string>("create_local_session", {
+            connectionId: connectionId || null,
+          });
         case "Telnet":
           return invoke<string>("create_telnet_session", { connectionId });
         case "Serial":
@@ -1399,7 +1395,7 @@ export default function XTerminal({
       }
       const terminalSettings = terminalAppSettingsRef.current?.terminal;
       if (
-        performanceModeRef.current !== "overloaded" &&
+        performanceModeRef.current === "normal" &&
         (terminalSettings?.show_line_numbers || terminalSettings?.show_timestamps)
       ) {
         window.dispatchEvent(new CustomEvent("nyaterm:refresh-gutter", { detail: { sessionId } }));
@@ -1453,7 +1449,7 @@ export default function XTerminal({
 
     const refreshGutter = () => {
       if (!isTerminalAlive()) return;
-      if (performanceModeRef.current === "overloaded") return;
+      if (performanceModeRef.current !== "normal") return;
       const terminalSettings = terminalAppSettingsRef.current?.terminal;
       if (!terminalSettings?.show_line_numbers && !terminalSettings?.show_timestamps) return;
       window.dispatchEvent(new CustomEvent("nyaterm:refresh-gutter", { detail: { sessionId } }));
@@ -1480,7 +1476,7 @@ export default function XTerminal({
         }
       }
 
-      if (performanceModeRef.current !== "overloaded") {
+      if (performanceModeRef.current === "normal") {
         refreshGutter();
       }
     };
@@ -1523,10 +1519,18 @@ export default function XTerminal({
       writingOutputBytesRef.current +
       pendingOutputAckBytesRef.current;
 
+    const getNonOverloadedPressureMode = (): PerformanceMode =>
+      getPendingOutputBytes() >= XTERM_PERFORMANCE_CONFIG.output.strainedBacklogBytes
+        ? "strained"
+        : "normal";
+
+    const refreshOutputPressureMode = () => {
+      if (performanceModeRef.current === "overloaded") return;
+      setOutputPressureMode(getNonOverloadedPressureMode());
+    };
+
     const noteSkippedOutput = (count: number) => {
       if (count <= 0) return;
-      skippedOutputBytesRef.current += count;
-      setSkippedOutputBytes(skippedOutputBytesRef.current);
       enterOverloadedMode();
     };
 
@@ -1607,7 +1611,10 @@ export default function XTerminal({
 
       return [
         { data: chunk.data.slice(0, index), bytes },
-        { data: chunk.data.slice(index), bytes: Math.max(0, chunk.bytes - bytes) },
+        {
+          data: chunk.data.slice(index),
+          bytes: Math.max(0, chunk.bytes - bytes),
+        },
       ];
     };
 
@@ -1673,8 +1680,14 @@ export default function XTerminal({
       if (!isTerminalAlive()) return;
       if (performanceModeRef.current !== "overloaded") return;
       if (getPendingOutputBytes() > getRecoveryThresholdBytes()) return;
-      exitOverloadedMode();
+      exitOverloadedMode(getNonOverloadedPressureMode());
     };
+
+    const shouldUseLowLatencyFlush = () =>
+      visibleRef.current &&
+      !isAlternateScreenActive() &&
+      performanceModeRef.current !== "overloaded" &&
+      getPendingOutputBytes() <= XTERM_PERFORMANCE_CONFIG.output.lowLatencyFlushBacklogBytes;
 
     const writeChunkToTerminal = (payload: QueuedOutputChunk) => {
       writingOutputBytesRef.current += payload.bytes;
@@ -1721,15 +1734,17 @@ export default function XTerminal({
 
                   flushPendingOutputAck(queuedOutputBytesRef.current === 0);
                   maybeRecoverPerformanceMode();
+                  refreshOutputPressureMode();
                   resolve();
 
                   if (
                     visibleRef.current &&
                     isTerminalAlive() &&
                     queuedOutputBytesRef.current > 0 &&
-                    pendingOutputFlushRef.current === null
+                    pendingOutputFlushRef.current === null &&
+                    !pendingOutputMicrotaskRef.current
                   ) {
-                    pendingOutputFlushRef.current = requestAnimationFrame(flushPendingOutput);
+                    schedulePendingOutputFlush();
                   }
                 });
               } catch {
@@ -1742,20 +1757,111 @@ export default function XTerminal({
                 noteSkippedOutput(payload.bytes);
                 flushPendingOutputAck(true);
                 maybeRecoverPerformanceMode();
+                refreshOutputPressureMode();
                 resolve();
               }
             }),
         );
     };
 
+    const writeTerminalTextAfterOutputQueue = (data: string) => {
+      outputWriteQueueRef.current = outputWriteQueueRef.current
+        .catch(() => {})
+        .then(
+          () =>
+            new Promise<void>((resolve) => {
+              if (!isTerminalAlive()) {
+                resolve();
+                return;
+              }
+
+              try {
+                terminal.write(data, () => resolve());
+              } catch {
+                resolve();
+              }
+            }),
+        );
+      return outputWriteQueueRef.current;
+    };
+
+    const flushQueuedOutputBeforeStatusNotice = async () => {
+      if (pendingOutputFlushRef.current !== null) {
+        cancelAnimationFrame(pendingOutputFlushRef.current);
+        pendingOutputFlushRef.current = null;
+      }
+      clearPendingOutputFlushTimer();
+
+      const dropped = trimQueuedOutput(getBacklogCapBytes());
+      noteSkippedOutput(dropped);
+
+      while (queuedOutputChunksRef.current.length > 0) {
+        const payload = dequeueOutputChunk(getWriteChunkBytes());
+        if (!payload) break;
+        writeChunkToTerminal(payload);
+      }
+
+      await outputWriteQueueRef.current.catch(() => {});
+      flushPendingOutputAck(true);
+      maybeRecoverPerformanceMode();
+      refreshOutputPressureMode();
+    };
+
+    const resetDisconnectedInputState = () => {
+      inputStateRef.current = createTerminalInputState();
+      clearCredentialPromptInputMode();
+      resetCommandSuggestionSuppression();
+      dismissSuggestions();
+    };
+
+    const enterDisconnectedState = ({
+      title,
+      message,
+      titleColor,
+      showReconnectPrompt,
+    }: {
+      title: string;
+      message?: string;
+      titleColor: "31" | "36";
+      showReconnectPrompt: boolean;
+    }) => {
+      disconnectedRef.current = true;
+      resetDisconnectedInputState();
+
+      if (disconnectedNoticeShownRef.current) return;
+      disconnectedNoticeShownRef.current = true;
+      window.dispatchEvent(
+        new CustomEvent("nyaterm:session-disconnected", {
+          detail: { sessionId },
+        }),
+      );
+
+      void (async () => {
+        await flushQueuedOutputBeforeStatusNotice();
+        if (!isTerminalAlive()) return;
+
+        await writeTerminalTextAfterOutputQueue(`\r\n\x1b[${titleColor}m[${title}]\x1b[0m\r\n`);
+        if (message) {
+          await writeTerminalTextAfterOutputQueue(`\x1b[31m${message}\x1b[0m\r\n`);
+        }
+        if (showReconnectPrompt && canReconnectDisconnectedSession()) {
+          await writeTerminalTextAfterOutputQueue(
+            `\x1b[33m[${tRef.current("terminal.pressEnterToReconnect")}]\x1b[0m\r\n`,
+          );
+        }
+      })();
+    };
+
     const flushPendingOutput = () => {
       pendingOutputFlushRef.current = null;
       if (!visibleRef.current || !isTerminalAlive() || outputWriteInFlightRef.current) {
+        refreshOutputPressureMode();
         return;
       }
 
       const dropped = trimQueuedOutput(getBacklogCapBytes());
       noteSkippedOutput(dropped);
+      refreshOutputPressureMode();
 
       if (shouldThrottleAlternateScreenWrite()) {
         const now = Date.now();
@@ -1779,6 +1885,7 @@ export default function XTerminal({
       if (!payload) {
         flushPendingOutputAck(true);
         maybeRecoverPerformanceMode();
+        refreshOutputPressureMode();
         return;
       }
 
@@ -1788,16 +1895,40 @@ export default function XTerminal({
       writeChunkToTerminal(payload);
     };
 
-    const schedulePendingOutputFlush = () => {
+    const schedulePendingOutputFlush = (preferImmediate = false) => {
       if (!visibleRef.current || !isTerminalAlive()) return;
       if (
         outputWriteInFlightRef.current ||
         pendingOutputFlushRef.current !== null ||
-        pendingOutputFlushTimerRef.current !== null
+        pendingOutputFlushTimerRef.current !== null ||
+        pendingOutputMicrotaskRef.current
       ) {
         return;
       }
+
+      if (preferImmediate || shouldUseLowLatencyFlush()) {
+        pendingOutputMicrotaskRef.current = true;
+        queueMicrotask(() => {
+          pendingOutputMicrotaskRef.current = false;
+          flushPendingOutput();
+        });
+        return;
+      }
+
       pendingOutputFlushRef.current = requestAnimationFrame(flushPendingOutput);
+    };
+
+    const repaintVisibleTerminal = () => {
+      if (!visibleRef.current || !isTerminalAlive()) return;
+      requestAnimationFrame(() => {
+        if (!visibleRef.current || !isTerminalAlive()) return;
+        terminal.clearTextureAtlas();
+        terminal.refresh(0, Math.max(0, terminal.rows - 1));
+        requestAnimationFrame(() => {
+          if (!visibleRef.current || !isTerminalAlive()) return;
+          terminal.refresh(0, Math.max(0, terminal.rows - 1));
+        });
+      });
     };
 
     const applyVisibilityPolicy = () => {
@@ -1811,15 +1942,16 @@ export default function XTerminal({
         clearPendingOutputFlushTimer();
       }
 
-      if (visibleRef.current) {
-        const dropped = trimQueuedOutput(getBacklogCapBytes());
-        noteSkippedOutput(dropped);
-      }
+      const dropped = trimQueuedOutput(getBacklogCapBytes());
+      noteSkippedOutput(dropped);
       flushPendingOutputAck(!visibleRef.current);
       maybeRecoverPerformanceMode();
+      refreshOutputPressureMode();
 
       if (visibleRef.current) {
+        flushPendingOutput();
         schedulePendingOutputFlush();
+        repaintVisibleTerminal();
       }
     };
 
@@ -1836,7 +1968,10 @@ export default function XTerminal({
             return;
           }
 
-          queuedOutputChunksRef.current.push({ data: payload.data, bytes: payload.bytes });
+          queuedOutputChunksRef.current.push({
+            data: payload.data,
+            bytes: payload.bytes,
+          });
           queuedOutputBytesRef.current += payload.bytes;
           backendUnackedOutputBytesRef.current += payload.bytes;
 
@@ -1848,21 +1983,32 @@ export default function XTerminal({
             const now = Date.now();
             if (now - lastErrorNoticeAtRef.current > 30_000) {
               lastErrorNoticeAtRef.current = now;
-              emitAIErrorDetected({ sessionId, output: recentPayload.slice(-4000) });
+              emitAIErrorDetected({
+                sessionId,
+                output: recentPayload.slice(-4000),
+              });
             }
           }
 
           noteSkippedOutput(payload.droppedBytes ?? 0);
 
           if (!visibleRef.current) {
+            const dropped = trimQueuedOutput(getBacklogCapBytes());
+            noteSkippedOutput(dropped);
+            flushPendingOutputAck(true);
+            maybeRecoverPerformanceMode();
+            refreshOutputPressureMode();
             window.dispatchEvent(
-              new CustomEvent("nyaterm:session-output", { detail: { sessionId } }),
+              new CustomEvent("nyaterm:session-output", {
+                detail: { sessionId },
+              }),
             );
             return;
           }
 
           const dropped = trimQueuedOutput(getBacklogCapBytes());
           noteSkippedOutput(dropped);
+          refreshOutputPressureMode();
           schedulePendingOutputFlush();
         },
       );
@@ -1889,15 +2035,14 @@ export default function XTerminal({
       const nextErrorUnlisten = await listen<string>(`session-error-${sessionId}`, (event) => {
         if (!isTerminalAlive()) return;
         const message = String(event.payload || tRef.current("terminal.connectionFailed"));
-        disconnectedRef.current = true;
-        terminal.write(`\r\n\x1b[31m[${tRef.current("terminal.connectionFailed")}]\x1b[0m\r\n`);
-        terminal.write(`\x1b[31m${message}\x1b[0m\r\n`);
+        enterDisconnectedState({
+          title: tRef.current("terminal.connectionFailed"),
+          message,
+          titleColor: "31",
+          showReconnectPrompt: false,
+        });
         toast.error(message);
         onConnectionErrorRef.current?.(sessionIdRef.current, message);
-        inputStateRef.current = createTerminalInputState();
-        clearCredentialPromptInputMode();
-        resetCommandSuggestionSuppression();
-        dismissSuggestions();
       });
       if (disposed) {
         nextErrorUnlisten();
@@ -1907,15 +2052,11 @@ export default function XTerminal({
 
       const nextClosedUnlisten = await listen<void>(`session-closed-${sessionId}`, () => {
         if (!isTerminalAlive()) return;
-        disconnectedRef.current = true;
-        terminal.write(`\r\n\x1b[31m[${tRef.current("terminal.sessionDisconnected")}]\x1b[0m\r\n`);
-        if (canReconnectDisconnectedSession()) {
-          terminal.write(`\x1b[33m[${tRef.current("terminal.pressEnterToReconnect")}]\x1b[0m\r\n`);
-        }
-        inputStateRef.current = createTerminalInputState();
-        clearCredentialPromptInputMode();
-        resetCommandSuggestionSuppression();
-        dismissSuggestions();
+        enterDisconnectedState({
+          title: tRef.current("terminal.sessionDisconnected"),
+          titleColor: "31",
+          showReconnectPrompt: true,
+        });
       });
       if (disposed) {
         nextClosedUnlisten();
@@ -1939,6 +2080,9 @@ export default function XTerminal({
           const payload = event.payload;
           if (payload.type === "commandStart") {
             aiCapturingRef.current = true;
+            inputStateRef.current = createTerminalInputState();
+            clearCredentialPromptInputMode();
+            dismissSuggestions();
             if (isTerminalAlive()) {
               terminal.write(renderAiCommandStart(payload));
             }
@@ -1989,9 +2133,17 @@ export default function XTerminal({
           createReconnectedSession()
             .then((newSessionId) => {
               preservedReconnectContentRef.current = serializeTerminalText(terminal);
+              const oldSessionId = sessionIdRef.current;
               disconnectedRef.current = false;
+              disconnectedNoticeShownRef.current = false;
+              disconnectedCloseRequestedRef.current = false;
               reconnectingRef.current = false;
-              onReconnectedRef.current?.(sessionIdRef.current, newSessionId);
+              window.dispatchEvent(
+                new CustomEvent("nyaterm:session-reconnected", {
+                  detail: { oldSessionId, newSessionId },
+                }),
+              );
+              onReconnectedRef.current?.(oldSessionId, newSessionId);
             })
             .catch((err) => {
               reconnectingRef.current = false;
@@ -2002,6 +2154,15 @@ export default function XTerminal({
                 `\x1b[33m[${tRef.current("terminal.pressEnterToReconnect")}]\x1b[0m\r\n`,
               );
             });
+        }
+        if (
+          data === "\x04" &&
+          sessionTypeRef.current === "Local" &&
+          !reconnectingRef.current &&
+          !disconnectedCloseRequestedRef.current
+        ) {
+          disconnectedCloseRequestedRef.current = true;
+          onDisconnectedCloseRequestedRef.current?.();
         }
         return;
       }
@@ -2349,18 +2510,18 @@ export default function XTerminal({
         pendingOutputFlushRef.current = null;
       }
       clearPendingOutputFlushTimer();
+      pendingOutputMicrotaskRef.current = false;
       flushPendingOutputAck(true);
       sendOutputAck(backendUnackedOutputBytesRef.current);
-      clearPerformanceOverlayTimer();
       queuedOutputChunksRef.current = [];
       queuedOutputBytesRef.current = 0;
       writingOutputBytesRef.current = 0;
       pendingOutputAckBytesRef.current = 0;
       backendUnackedOutputBytesRef.current = 0;
       lastAlternateScreenWriteAtRef.current = 0;
-      skippedOutputBytesRef.current = 0;
       outputWriteInFlightRef.current = false;
       outputWriteQueueRef.current = Promise.resolve();
+      pendingOutputMicrotaskRef.current = false;
       const latestLifecycleState = terminalLifecycleStateRef.current;
       if (
         latestLifecycleState.sessionId === sessionId &&
@@ -2400,7 +2561,7 @@ export default function XTerminal({
     terminalSettings,
     sessionId,
     isDark,
-    performanceMode === "overloaded" || !visible,
+    performanceMode !== "normal" || !visible,
   );
 
   const { tooltipState, menuState, closeMenu } = useActionLinks(
@@ -2408,7 +2569,7 @@ export default function XTerminal({
     terminalSettings,
     sessionId,
     replaceInputCommandRef,
-    performanceMode === "overloaded" || !visible,
+    performanceMode !== "normal" || !visible,
   );
 
   useEffect(() => {
@@ -2416,9 +2577,11 @@ export default function XTerminal({
       requestAnimationFrame(() => {
         fitAddonRef.current?.fit();
         terminalRef.current?.refresh(0, Math.max(0, terminalRef.current.rows - 1));
-        if (showGutter && performanceMode !== "overloaded") {
+        if (showGutter && performanceMode === "normal") {
           window.dispatchEvent(
-            new CustomEvent("nyaterm:refresh-gutter", { detail: { sessionId } }),
+            new CustomEvent("nyaterm:refresh-gutter", {
+              detail: { sessionId },
+            }),
           );
         }
       });
@@ -2611,7 +2774,10 @@ export default function XTerminal({
   return (
     <div
       className="nyaterm-wallpaper-transparent-surface h-full w-full relative flex"
-      style={{ display: visible ? "flex" : "none", backgroundColor: terminalBackground }}
+      style={{
+        display: visible ? "flex" : "none",
+        backgroundColor: terminalBackground,
+      }}
     >
       {showGutter && terminalReady && (
         <TerminalGutter
@@ -2622,7 +2788,7 @@ export default function XTerminal({
           lineTimestamps={lineTimestampsRef.current}
           getLineOffset={getGutterLineOffset}
           sessionId={sessionId}
-          suspended={performanceMode === "overloaded" || !visible}
+          suspended={performanceMode !== "normal" || !visible}
         />
       )}
       <div
@@ -2652,33 +2818,6 @@ export default function XTerminal({
 
         {isExternalDropActive && (
           <ExternalFileDropOverlay title={dropOverlayCopy.title} hint={dropOverlayCopy.hint} />
-        )}
-
-        {performanceOverlay && (
-          <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex justify-end">
-            <div
-              className="max-w-sm rounded-md border px-3 py-2 text-xs shadow-lg"
-              style={{
-                borderColor: "var(--df-border)",
-                backgroundColor: "var(--df-bg-panel)",
-                color: "var(--df-text)",
-              }}
-            >
-              <div className="font-medium">
-                {performanceOverlay === "overloaded"
-                  ? t("terminal.largeOutputProtectionActive")
-                  : t("terminal.largeOutputProtectionRecovered")}
-              </div>
-              <div className="mt-1 leading-5" style={{ color: "var(--df-text-dimmed)" }}>
-                {t(
-                  performanceOverlay === "overloaded"
-                    ? "terminal.largeOutputProtectionActiveDetail"
-                    : "terminal.largeOutputProtectionRecoveredDetail",
-                  { skipped: formatSkippedCount(skippedOutputBytes) },
-                )}
-              </div>
-            </div>
-          </div>
         )}
 
         {syncOverlay && <SyncActionOverlay overlay={syncOverlay} />}

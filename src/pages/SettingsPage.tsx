@@ -30,7 +30,7 @@ import {
 import { TbCubeSpark } from "react-icons/tb";
 import { toast } from "sonner";
 import ChildWindowHeader from "@/components/layout/ChildWindowHeader";
-import { AiGeneralTab, AiModelsTab, AiRulesTab } from "@/components/settings/AiTab";
+import { AiAgentsTab, AiGeneralTab, AiModelsTab, AiRulesTab } from "@/components/settings/AiTab";
 import { AppearanceTab } from "@/components/settings/AppearanceTab";
 import { GeneralTab } from "@/components/settings/GeneralTab";
 import { InteractionTab } from "@/components/settings/InteractionTab";
@@ -141,7 +141,7 @@ export default function SettingsPage() {
         id: "ai_group",
         label: t("ai.title"),
         icon: "ai",
-        items: ["ai-general", "ai-models", "ai-rules"],
+        items: ["ai-general", "ai-models", "ai-agents", "ai-rules"],
       },
       {
         id: "transfer_group",
@@ -262,6 +262,12 @@ export default function SettingsPage() {
       label: t("ai.models"),
       icon: "model",
       Component: AiModelsTab,
+    },
+    {
+      id: "ai-agents",
+      label: t("ai.localAgents"),
+      icon: "ai",
+      Component: AiAgentsTab,
     },
     {
       id: "ai-rules",

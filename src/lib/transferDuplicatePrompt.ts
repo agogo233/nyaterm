@@ -10,6 +10,7 @@ export interface TransferDuplicateRequest {
   targetWindowLabel?: string | null;
   respondViaBackend?: boolean;
   allowApplyToTask?: boolean;
+  unverified?: boolean;
 }
 
 type TransferDuplicateListener = (request: TransferDuplicateRequest | null) => void;

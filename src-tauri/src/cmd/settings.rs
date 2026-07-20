@@ -101,6 +101,22 @@ pub async fn import_keyword_highlight_rules(
     Ok(result)
 }
 
+#[tauri::command]
+pub fn read_theme_file(file_path: String) -> AppResult<config::ThemeConfig> {
+    let raw = std::fs::read_to_string(file_path)
+        .map_err(|error| AppError::Config(format!("Failed to read theme file: {error}")))?;
+    serde_json::from_str::<config::ThemeConfig>(&raw)
+        .map_err(|error| AppError::Config(format!("Failed to parse theme file: {error}")))
+}
+
+#[tauri::command]
+pub fn write_theme_file(output_path: String, theme: config::ThemeConfig) -> AppResult<()> {
+    let raw = serde_json::to_string_pretty(&theme)
+        .map_err(|error| AppError::Config(format!("Failed to serialize theme: {error}")))?;
+    std::fs::write(output_path, raw)
+        .map_err(|error| AppError::Config(format!("Failed to write theme file: {error}")))
+}
+
 pub async fn persist_app_settings(
     app: &tauri::AppHandle,
     manager: &Arc<CloudSyncManager>,

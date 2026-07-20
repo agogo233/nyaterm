@@ -8,6 +8,33 @@ pub enum ZmodemDirection {
     Upload,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmodemUploadConflictMode {
+    Overwrite,
+    Skip,
+}
+
+impl ZmodemUploadConflictMode {
+    pub fn from_wire(value: Option<&str>) -> Self {
+        match value {
+            Some(value) if value.eq_ignore_ascii_case("skip") => Self::Skip,
+            _ => Self::Overwrite,
+        }
+    }
+
+    fn file_options(self) -> zmodem2::ZfileManagementOption {
+        match self {
+            Self::Overwrite => zmodem2::ZfileManagementOption::ZMCLOB,
+            Self::Skip => zmodem2::ZfileManagementOption::ZMSKNOLOC,
+        }
+    }
+}
+
+pub struct ZmodemPreparedUpload {
+    pub files: Vec<PathBuf>,
+    pub conflict_mode: ZmodemUploadConflictMode,
+}
+
 /// Events emitted to the frontend via Tauri events.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -38,11 +65,13 @@ pub enum ZmodemEvent {
 pub fn start_zmodem_transfer(
     direction: ZmodemDirection,
     initial_bytes: &[u8],
-    prepared_upload_files: Option<Vec<PathBuf>>,
+    prepared_upload: Option<ZmodemPreparedUpload>,
 ) -> (ZmodemTransfer, Vec<ZmodemAction>) {
     let mut transfer = ZmodemTransfer::new(direction, initial_bytes);
-    let bootstrap_actions = match (direction, prepared_upload_files) {
-        (ZmodemDirection::Upload, Some(files)) => transfer.accept_upload(files),
+    let bootstrap_actions = match (direction, prepared_upload) {
+        (ZmodemDirection::Upload, Some(upload)) => {
+            transfer.accept_upload(upload.files, upload.conflict_mode)
+        }
         _ => Vec::new(),
     };
     (transfer, bootstrap_actions)

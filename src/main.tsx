@@ -11,15 +11,30 @@ import "./i18n";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { Toaster } from "./components/ui/sonner";
 import "./index.css";
-import { applyThemeToDOM, THEME_CACHE_KEY, ThemeProvider } from "./context/ThemeContext";
+import {
+  applyThemeToDOM,
+  THEME_CACHE_KEY,
+  THEME_SNAPSHOT_CACHE_KEY,
+  ThemeProvider,
+} from "./context/ThemeContext";
 import { DEFAULT_THEME_ID, themes } from "./lib/themes";
 import { installWebviewReloadGuard } from "./lib/webviewReloadGuard";
 
 // Apply cached theme synchronously before React renders to avoid flash
 try {
   const cachedId = localStorage.getItem(THEME_CACHE_KEY);
-  const theme = (cachedId && themes[cachedId]) || themes[DEFAULT_THEME_ID];
-  applyThemeToDOM(theme.colors);
+  const cachedTheme = cachedId ? themes[cachedId] : null;
+  if (cachedTheme) {
+    applyThemeToDOM(cachedTheme.colors);
+  } else {
+    const snapshot = localStorage.getItem(THEME_SNAPSHOT_CACHE_KEY);
+    const parsed = snapshot ? JSON.parse(snapshot) : null;
+    if (parsed?.id === cachedId && parsed?.colors) {
+      applyThemeToDOM(parsed.colors);
+    } else {
+      applyThemeToDOM(themes[DEFAULT_THEME_ID].colors);
+    }
+  }
 } catch {}
 
 installWebviewReloadGuard();

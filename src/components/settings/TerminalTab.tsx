@@ -4,18 +4,20 @@ import { MdAdd, MdDelete, MdExpandLess, MdExpandMore, MdFileUpload } from "react
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SelectItem } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useApp } from "@/context/AppContext";
 import { useTheme } from "@/context/ThemeContext";
 import { getBuiltinRules, hexLuminance } from "@/lib/keywordHighlightPresets";
-import type { KeywordHighlightRule } from "@/types/global";
+import type { KeywordHighlightRule, SshKeepAliveMode } from "@/types/global";
 import { KeywordHighlightImportDialog } from "../dialog/terminal/KeywordHighlightImportDialog";
 import {
   SettingInput,
   SettingNumberInput,
   SettingRow,
   SettingSection,
+  SettingSelect,
   SettingSwitch,
 } from "./SettingFormItems";
 
@@ -24,6 +26,17 @@ const DEFAULT_ACTION_LINK_MATCHERS = {
   archive: true,
   host_port: true,
 } as const;
+
+const KEEP_ALIVE_MODE_DESCRIPTION_KEYS: Record<SshKeepAliveMode, string> = {
+  compatible: "settings.keepAliveModeCompatibleDescription",
+  strict: "settings.keepAliveModeStrictDescription",
+  disabled: "settings.keepAliveModeDisabledDescription",
+};
+
+function normalizeKeepAliveMode(value: string): SshKeepAliveMode {
+  if (value === "strict" || value === "disabled") return value;
+  return "compatible";
+}
 
 export function TerminalTab() {
   const { t } = useTranslation();
@@ -44,6 +57,7 @@ export function TerminalTab() {
   const actionLinksEnabled = appSettings.terminal.action_links_enabled ?? false;
   const actionLinkMatchers =
     appSettings.terminal.action_links_matchers ?? DEFAULT_ACTION_LINK_MATCHERS;
+  const keepAliveMode = normalizeKeepAliveMode(appSettings.terminal.keep_alive_mode);
 
   function updateRules(next: KeywordHighlightRule[]) {
     updateAppSettings({ terminal: { ...appSettings.terminal, keyword_highlights: next } });
@@ -104,6 +118,25 @@ export function TerminalTab() {
           }
         />
 
+        <SettingSelect
+          label={t("settings.keepAliveMode")}
+          desc={t(KEEP_ALIVE_MODE_DESCRIPTION_KEYS[keepAliveMode])}
+          value={keepAliveMode}
+          controlClassName="max-w-sm"
+          onValueChange={(value) =>
+            updateAppSettings({
+              terminal: {
+                ...appSettings.terminal,
+                keep_alive_mode: normalizeKeepAliveMode(value),
+              },
+            })
+          }
+        >
+          <SelectItem value="compatible">{t("settings.keepAliveModeCompatible")}</SelectItem>
+          <SelectItem value="strict">{t("settings.keepAliveModeStrict")}</SelectItem>
+          <SelectItem value="disabled">{t("settings.keepAliveModeDisabled")}</SelectItem>
+        </SettingSelect>
+
         <SettingNumberInput
           label={t("settings.keepAliveInterval")}
           desc={t("settings.keepAliveIntervalDesc")}
@@ -111,6 +144,7 @@ export function TerminalTab() {
           max={600}
           step={5}
           value={appSettings.terminal.keep_alive_interval}
+          disabled={keepAliveMode === "disabled"}
           controlClassName="max-w-sm"
           onChange={(v) =>
             updateAppSettings({

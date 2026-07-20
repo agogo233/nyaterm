@@ -20,6 +20,9 @@
       "entitlements": "packages/macos/Entitlements.plist",
       "infoPlist": "packages/macos/Info.plist",
       "signingIdentity": "-"
-    }
+    },
+    "icon": [
+      "icons-macos/icon.icns"
+    ]
   }
 }

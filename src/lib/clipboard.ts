@@ -1,4 +1,5 @@
 import { invoke } from "./invoke";
+import { isWindows } from "./platform";
 
 export type ClipboardPathPayload =
   | { kind: "file_paths"; paths: string[] }
@@ -14,11 +15,25 @@ export async function readClipboardText(): Promise<string> {
 }
 
 export async function writeClipboardText(text: string): Promise<void> {
-  try {
-    await invoke<void>("write_clipboard_text", { text });
-  } catch {
-    await navigator.clipboard.writeText(text);
+  if (isWindows) {
+    try {
+      await invoke<void>("write_clipboard_text", { text });
+      return;
+    } catch {
+      /* fall back to the WebView clipboard API */
+    }
   }
+
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      /* fall back to the Tauri clipboard command */
+    }
+  }
+
+  await invoke<void>("write_clipboard_text", { text });
 }
 
 export async function readClipboardPathPayload(): Promise<ClipboardPathPayload | null> {

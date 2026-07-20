@@ -179,19 +179,24 @@ pub struct PortableAppSettings {
 }
 
 impl PortableAppSettings {
-    pub fn from_app_settings(settings: &AppSettings) -> Self {
+    pub fn from_app_settings(settings: &AppSettings, snapshot_kind: &PortableSnapshotKind) -> Self {
         let mut security = settings.security.clone();
         security.master_password = None;
+        let mut appearance = settings.appearance.clone();
+        let mut transfer = settings.transfer.clone();
+        if snapshot_kind == &PortableSnapshotKind::Sync {
+            strip_device_local_settings(&mut appearance, &mut transfer);
+        }
         Self {
             general: settings.general.clone(),
-            appearance: settings.appearance.clone(),
+            appearance,
             proxy: settings.proxy.clone(),
             search: settings.search.clone(),
             translation: settings.translation.clone(),
             security,
             terminal: settings.terminal.clone(),
             interaction: settings.interaction.clone(),
-            transfer: settings.transfer.clone(),
+            transfer,
             diagnostics: settings.diagnostics.clone(),
             ai: settings.ai.clone(),
             ui: PortableUiSettings {
@@ -212,9 +217,15 @@ impl PortableAppSettings {
         }
     }
 
-    pub fn apply_to(self, mut current: AppSettings) -> AppSettings {
+    pub fn apply_to(
+        self,
+        mut current: AppSettings,
+        snapshot_kind: &PortableSnapshotKind,
+    ) -> AppSettings {
         let master_password = current.security.master_password.clone();
         let ui_state = current.ui.clone();
+        let device_appearance = current.appearance.clone();
+        let device_transfer = current.transfer.clone();
 
         current.general = self.general;
         current.appearance = self.appearance;
@@ -226,6 +237,14 @@ impl PortableAppSettings {
         current.terminal = self.terminal;
         current.interaction = self.interaction;
         current.transfer = self.transfer;
+        if snapshot_kind == &PortableSnapshotKind::Sync {
+            preserve_device_local_settings(
+                &mut current.appearance,
+                &mut current.transfer,
+                &device_appearance,
+                &device_transfer,
+            );
+        }
         current.diagnostics = self.diagnostics;
         current.ai = self.ai;
         config::normalize_ai_settings(&mut current.ai);
@@ -256,5 +275,99 @@ impl PortableAppSettings {
         current.ui.zoom_level = ui_state.zoom_level;
         current.ui.transfer_height = ui_state.transfer_height;
         current
+    }
+}
+
+fn strip_device_local_settings(
+    appearance: &mut config::AppearanceSettings,
+    transfer: &mut TransferSettings,
+) {
+    let defaults = config::AppearanceSettings::default();
+    appearance.background_image_path = None;
+    appearance.background_image_fit = defaults.background_image_fit;
+    appearance.background_image_opacity = defaults.background_image_opacity;
+    transfer.download_path.clear();
+    transfer.default_editor.clear();
+    transfer.recording_path.clear();
+}
+
+fn preserve_device_local_settings(
+    appearance: &mut config::AppearanceSettings,
+    transfer: &mut TransferSettings,
+    device_appearance: &config::AppearanceSettings,
+    device_transfer: &TransferSettings,
+) {
+    appearance.background_image_path = device_appearance.background_image_path.clone();
+    appearance.background_image_fit = device_appearance.background_image_fit.clone();
+    appearance.background_image_opacity = device_appearance.background_image_opacity;
+    transfer.download_path = device_transfer.download_path.clone();
+    transfer.default_editor = device_transfer.default_editor.clone();
+    transfer.recording_path = device_transfer.recording_path.clone();
+}
+
+pub fn strip_device_local_sessions(sessions: &mut config::SessionsConfig) {
+    for connection in &mut sessions.connections {
+        match &mut connection.config {
+            config::ConnectionType::LocalTerminal {
+                shell_path,
+                shell_args,
+                working_dir,
+                ..
+            } => {
+                shell_path.clear();
+                shell_args.clear();
+                *working_dir = None;
+            }
+            config::ConnectionType::Serial { port_name, .. } => {
+                port_name.clear();
+            }
+            config::ConnectionType::Ssh { .. } | config::ConnectionType::Telnet { .. } => {}
+        }
+    }
+}
+
+pub fn preserve_device_local_sessions(
+    incoming: &mut config::SessionsConfig,
+    current: &config::SessionsConfig,
+) {
+    for connection in &mut incoming.connections {
+        let Some(device_connection) = current
+            .connections
+            .iter()
+            .find(|candidate| candidate.id == connection.id)
+        else {
+            continue;
+        };
+
+        match (&mut connection.config, &device_connection.config) {
+            (
+                config::ConnectionType::LocalTerminal {
+                    shell_path,
+                    shell_args,
+                    working_dir,
+                    ..
+                },
+                config::ConnectionType::LocalTerminal {
+                    shell_path: device_shell_path,
+                    shell_args: device_shell_args,
+                    working_dir: device_working_dir,
+                    ..
+                },
+            ) => {
+                *shell_path = device_shell_path.clone();
+                *shell_args = device_shell_args.clone();
+                *working_dir = device_working_dir.clone();
+            }
+            (
+                config::ConnectionType::Serial { port_name, .. },
+                config::ConnectionType::Serial {
+                    port_name: device_port_name,
+                    ..
+                },
+            ) => {
+                *port_name = device_port_name.clone();
+            }
+            _ => {}
+        }
     }
 }

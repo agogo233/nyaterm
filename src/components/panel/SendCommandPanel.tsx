@@ -1,6 +1,7 @@
 import {
   type ChangeEvent,
   type KeyboardEvent,
+  type ReactNode,
   type UIEvent,
   useCallback,
   useEffect,
@@ -9,9 +10,18 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { MdAdd, MdRemove, MdSend, MdStop } from "react-icons/md";
+import { MdAdd, MdCheck, MdKeyboardArrowDown, MdRemove, MdSend, MdStop } from "react-icons/md";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -52,11 +62,13 @@ interface SendProgress {
 }
 
 type TargetKind = "serial" | "shell";
-type TargetSelectValue = SendCommandTarget | `group:${string}`;
+type TargetSelectValue = SendCommandTarget | `group:${string}` | `session:${string}`;
 type LineEnding = "none" | "cr" | "lf" | "crlf";
 
 interface SendCommandSessionTarget {
   id: string;
+  name: string;
+  tabName: string;
   type: SessionType;
 }
 
@@ -69,6 +81,13 @@ interface SendUnit {
 interface HexGuideRow {
   lineIndex: number;
   guidePositions: number[];
+}
+
+interface TargetMenuItemProps {
+  checked: boolean;
+  children: ReactNode;
+  disabled?: boolean;
+  onSelect: () => void;
 }
 
 const LINE_INTERVAL_SECONDS = 1;
@@ -217,6 +236,25 @@ function isGroupTarget(value: TargetSelectValue): value is `group:${string}` {
   return value.startsWith("group:");
 }
 
+function isSessionTarget(value: TargetSelectValue): value is `session:${string}` {
+  return value.startsWith("session:");
+}
+
+function getSessionTargetId(value: `session:${string}`): string {
+  return value.slice("session:".length);
+}
+
+function TargetMenuItem({ checked, children, disabled, onSelect }: TargetMenuItemProps) {
+  return (
+    <DropdownMenuItem disabled={disabled} onSelect={onSelect} className="min-w-0">
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        {checked ? <MdCheck className="text-sm" /> : null}
+      </span>
+      <span className="truncate">{children}</span>
+    </DropdownMenuItem>
+  );
+}
+
 export default function SendCommandPanel({
   serialSessionId,
   currentShellSessionId,
@@ -269,10 +307,29 @@ export default function SendCommandPanel({
     [sessionTargets],
   );
 
-  const groupTargetOptions = useMemo(() => {
-    const isCompatible = (session: SendCommandSessionTarget) =>
-      targetKind === "serial" ? session.type === "Serial" : session.type !== "Serial";
+  const isCompatibleTarget = useCallback(
+    (session: SendCommandSessionTarget) =>
+      targetKind === "serial" ? session.type === "Serial" : session.type !== "Serial",
+    [targetKind],
+  );
 
+  const sessionTargetOptions = useMemo(
+    () =>
+      sessionTargets
+        .filter(isCompatibleTarget)
+        .map((session) => ({
+          session,
+          value: `session:${session.id}` as const,
+        })),
+    [isCompatibleTarget, sessionTargets],
+  );
+
+  const sessionTargetByValue = useMemo(
+    () => new Map(sessionTargetOptions.map((option) => [option.value, option])),
+    [sessionTargetOptions],
+  );
+
+  const groupTargetOptions = useMemo(() => {
     return syncGroups
       .filter((group) => group.enabled)
       .map((group) => {
@@ -281,7 +338,7 @@ export default function SendCommandPanel({
           if (group.sessionIds.indexOf(sessionId) !== index) return false;
           if (pausedSessionIds.has(sessionId)) return false;
           const session = sessionTargetById.get(sessionId);
-          return session ? isCompatible(session) : false;
+          return session ? isCompatibleTarget(session) : false;
         });
 
         return {
@@ -291,24 +348,76 @@ export default function SendCommandPanel({
         };
       })
       .filter((option) => option.sessionIds.length > 0);
-  }, [sessionTargetById, syncGroups, targetKind]);
+  }, [isCompatibleTarget, sessionTargetById, syncGroups]);
 
   const groupTargetByValue = useMemo(
     () => new Map(groupTargetOptions.map((option) => [option.value, option])),
     [groupTargetOptions],
   );
 
-  const targetSessionIds = isGroupTarget(target)
-    ? (groupTargetByValue.get(target)?.sessionIds ?? [])
-    : targetKind === "serial"
-      ? serialSessionId
-        ? [serialSessionId]
+  const getSessionTargetLabel = useCallback(
+    (session: SendCommandSessionTarget) => {
+      const name = session.name.trim() || session.id;
+      const tabName = session.tabName.trim();
+      const tabSuffix = tabName && tabName !== name ? ` · ${tabName}` : "";
+
+      return t("serialSend.singleSession", "{{name}} · {{type}}{{tabSuffix}}", {
+        name,
+        type: session.type,
+        tabSuffix,
+      });
+    },
+    [t],
+  );
+
+  const targetLabel = useMemo(() => {
+    if (isGroupTarget(target)) {
+      const option = groupTargetByValue.get(target);
+      return option
+        ? t("serialSend.groupSession", "Group: {{name}} ({{count}})", {
+            name: option.group.name,
+            count: option.sessionIds.length,
+          })
+        : t("serialSend.target", "Target");
+    }
+
+    if (isSessionTarget(target)) {
+      const session = sessionTargetByValue.get(target)?.session;
+      return session ? getSessionTargetLabel(session) : t("serialSend.targetSessions", "Sessions");
+    }
+
+    return target === "all"
+      ? t("serialSend.allSessions", "All sessions")
+      : t("serialSend.currentSession", "Current session");
+  }, [getSessionTargetLabel, groupTargetByValue, sessionTargetByValue, t, target]);
+
+  const targetSessionIds = useMemo(() => {
+    if (isGroupTarget(target)) {
+      return groupTargetByValue.get(target)?.sessionIds ?? [];
+    }
+
+    if (isSessionTarget(target)) {
+      return sessionTargetByValue.has(target) ? [getSessionTargetId(target)] : [];
+    }
+
+    if (targetKind === "serial") {
+      return serialSessionId ? [serialSessionId] : [];
+    }
+
+    return target === "current"
+      ? currentTargetSessionId
+        ? [currentTargetSessionId]
         : []
-      : target === "current"
-        ? currentTargetSessionId
-          ? [currentTargetSessionId]
-          : []
-        : shellSessionIds;
+      : shellSessionIds;
+  }, [
+    currentTargetSessionId,
+    groupTargetByValue,
+    serialSessionId,
+    sessionTargetByValue,
+    shellSessionIds,
+    target,
+    targetKind,
+  ]);
 
   const parsedHex = useMemo(() => parseHexText(hexText), [hexText]);
   const parsedHexBytes = parsedHex.error ? null : parsedHex.bytes;
@@ -344,6 +453,11 @@ export default function SendCommandPanel({
       return;
     }
 
+    if (isSessionTarget(target) && !sessionTargetByValue.has(target)) {
+      setTarget(fallbackTarget);
+      return;
+    }
+
     if (targetKind === "serial" && target === "all") {
       setTarget("current");
       return;
@@ -354,7 +468,14 @@ export default function SendCommandPanel({
     if (shellSessionIds.length > 0) {
       setTarget("all");
     }
-  }, [currentTargetSessionId, groupTargetByValue, shellSessionIds.length, target, targetKind]);
+  }, [
+    currentTargetSessionId,
+    groupTargetByValue,
+    sessionTargetByValue,
+    shellSessionIds.length,
+    target,
+    targetKind,
+  ]);
 
   useEffect(() => {
     if (
@@ -754,33 +875,65 @@ export default function SendCommandPanel({
           <Label className="shrink-0 px-2 text-[0.625rem] text-muted-foreground">
             {t("serialSend.target", "Target")}
           </Label>
-          <Select
-            value={target}
-            onValueChange={(value) => setTarget(value as TargetSelectValue)}
-            disabled={isSending}
-          >
-            <SelectTrigger className="h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-[0.6875rem] shadow-none focus-visible:ring-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="current" disabled={!currentTargetSessionId} className="text-xs">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild disabled={isSending}>
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-8 min-w-0 flex-1 justify-between rounded-none border-0 bg-transparent px-2 text-[0.6875rem] font-normal shadow-none hover:bg-transparent focus:bg-transparent active:bg-transparent dark:bg-input/30 dark:hover:bg-input/50 data-[state=open]:dark:bg-input/30 focus-visible:ring-0"
+                disabled={isSending}
+                aria-label={t("serialSend.target", "Target")}
+              >
+                <span className="truncate">{targetLabel}</span>
+                <MdKeyboardArrowDown className="ml-1 shrink-0 text-sm text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-[13rem] max-w-[22rem]">
+              <TargetMenuItem
+                checked={target === "current"}
+                disabled={!currentTargetSessionId}
+                onSelect={() => setTarget("current")}
+              >
                 {t("serialSend.currentSession", "Current session")}
-              </SelectItem>
+              </TargetMenuItem>
               {targetKind === "shell" && (
-                <SelectItem value="all" className="text-xs">
+                <TargetMenuItem checked={target === "all"} onSelect={() => setTarget("all")}>
                   {t("serialSend.allSessions", "All sessions")}
-                </SelectItem>
+                </TargetMenuItem>
               )}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger
+                  disabled={sessionTargetOptions.length === 0}
+                  className="min-w-0"
+                >
+                  <span className="truncate">{t("serialSend.targetSessions", "Sessions")}</span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="max-h-[70vh] min-w-[14rem] max-w-[22rem] overflow-y-auto">
+                  {sessionTargetOptions.map((option) => (
+                    <TargetMenuItem
+                      key={option.session.id}
+                      checked={target === option.value}
+                      onSelect={() => setTarget(option.value)}
+                    >
+                      {getSessionTargetLabel(option.session)}
+                    </TargetMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
               {groupTargetOptions.map((option) => (
-                <SelectItem key={option.group.id} value={option.value} className="text-xs">
+                <TargetMenuItem
+                  key={option.group.id}
+                  checked={target === option.value}
+                  onSelect={() => setTarget(option.value)}
+                >
                   {t("serialSend.groupSession", "Group: {{name}} ({{count}})", {
                     name: option.group.name,
                     count: option.sessionIds.length,
                   })}
-                </SelectItem>
+                </TargetMenuItem>
               ))}
-            </SelectContent>
-          </Select>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="flex h-8 min-w-[8.5rem] flex-[1_1_9.5rem] items-center overflow-hidden rounded-md border border-border/70 bg-background/60">

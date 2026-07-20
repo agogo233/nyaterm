@@ -23,7 +23,7 @@ import { useModalChildWindows } from "./hooks/useModalChildWindows";
 import { useRemoteStats } from "./hooks/useRemoteStats";
 import { resolveDisplayKeys } from "./hooks/useShortcutMap";
 import { useTerminalZoom } from "./hooks/useTerminalZoom";
-import { useUnreadTabs } from "./hooks/useUnreadTabs";
+import { useTabStatusIndicators } from "./hooks/useUnreadTabs";
 import { AI_OPEN_EVENT, type AIOpenIntent } from "./lib/aiEvents";
 import {
   buildPanelOpenUpdate,
@@ -884,7 +884,7 @@ function App() {
     return () => window.removeEventListener(AI_OPEN_EVENT, handler);
   }, [multiPanelOpen, updateUi]);
 
-  const unreadTabIds = useUnreadTabs(tabs, activeTabId);
+  const { unreadTabIds, disconnectedTabIds } = useTabStatusIndicators(tabs, activeTabId);
 
   const handleSelectLeafTab = useCallback(
     (leafId: string, tabId: string) => {
@@ -1345,29 +1345,39 @@ function App() {
     void handleCloseWorkspaceTab(activeTab);
   }, [activeTab, handleCloseWorkspaceTab, notifyLockedTabCloseBlocked]);
 
+  const getActiveLeafTabIds = useCallback(() => {
+    const leaf =
+      terminalWindows && activeTabId
+        ? findTerminalWindowLeafByTabId(terminalWindows, activeTabId)
+        : null;
+    return leaf?.tabIds ?? tabs.map((tab) => tab.id);
+  }, [activeTabId, tabs, terminalWindows]);
+
   const handleNextTab = useCallback(() => {
-    if (tabs.length < 2 || !activeTabId) return;
-    const idx = tabs.findIndex((t) => t.id === activeTabId);
-    setActiveTabId(tabs[(idx + 1) % tabs.length].id);
-  }, [tabs, activeTabId, setActiveTabId]);
+    if (!activeTabId) return;
+    const tabIds = getActiveLeafTabIds();
+    if (tabIds.length < 2) return;
+    const idx = tabIds.indexOf(activeTabId);
+    if (idx === -1) return;
+    setActiveTabId(tabIds[(idx + 1) % tabIds.length]);
+  }, [activeTabId, getActiveLeafTabIds, setActiveTabId]);
 
   const handlePrevTab = useCallback(() => {
-    if (tabs.length < 2 || !activeTabId) return;
-    const idx = tabs.findIndex((t) => t.id === activeTabId);
-    setActiveTabId(tabs[(idx - 1 + tabs.length) % tabs.length].id);
-  }, [tabs, activeTabId, setActiveTabId]);
+    if (!activeTabId) return;
+    const tabIds = getActiveLeafTabIds();
+    if (tabIds.length < 2) return;
+    const idx = tabIds.indexOf(activeTabId);
+    if (idx === -1) return;
+    setActiveTabId(tabIds[(idx - 1 + tabIds.length) % tabIds.length]);
+  }, [activeTabId, getActiveLeafTabIds, setActiveTabId]);
 
   const handleSwitchTab = useCallback(
     (index: number) => {
-      const leaf =
-        terminalWindows && activeTabId
-          ? findTerminalWindowLeafByTabId(terminalWindows, activeTabId)
-          : null;
-      const tabIds = leaf?.tabIds ?? tabs.map((tab) => tab.id);
+      const tabIds = getActiveLeafTabIds();
       const targetTabId = index === -1 ? tabIds[tabIds.length - 1] : tabIds[index];
       if (targetTabId) setActiveTabId(targetTabId);
     },
-    [activeTabId, setActiveTabId, tabs, terminalWindows],
+    [getActiveLeafTabIds, setActiveTabId],
   );
 
   const handleToggleLeftSidebar = useCallback(() => {
@@ -1798,6 +1808,11 @@ function App() {
       toast.info(t("tabCtx.reconnecting"));
 
       try {
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_reconnecting_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         const reconnectContent = capturePaneReconnectContent(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
@@ -1821,6 +1836,11 @@ function App() {
           return;
         }
         const errorMessage = getErrorMessage(error);
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_disconnected_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         logger.error({
           domain: "session.lifecycle",
           event: "session.reconnect_failed",
@@ -1872,6 +1892,11 @@ function App() {
       toast.info(t("tabCtx.reconnecting"));
 
       try {
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_reconnecting_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         const reconnectContent = capturePaneReconnectContent(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
@@ -1895,6 +1920,11 @@ function App() {
           return;
         }
         const errorMessage = getErrorMessage(error);
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_disconnected_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         logger.error({
           domain: "session.lifecycle",
           event: "session.reconnect_failed",
@@ -2029,6 +2059,11 @@ function App() {
       if (!pane || pane.connecting || !canCreateSessionFromPane(pane)) return;
 
       try {
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_reconnecting_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         const reconnectContent = capturePaneReconnectContent(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
@@ -2051,6 +2086,11 @@ function App() {
           return;
         }
         const errorMessage = getErrorMessage(error);
+        if (pane.connectionId) {
+          await invoke("mark_tunnels_disconnected_for_connection", {
+            connectionId: pane.connectionId,
+          }).catch(() => {});
+        }
         logger.error({
           domain: "session.lifecycle",
           event: "session.reconnect_failed",
@@ -2530,7 +2570,7 @@ function App() {
   const sendCommandSessionTargets = useMemo(() => {
     if (!terminalWindows) return [];
 
-    const targets: { id: string; type: SessionType }[] = [];
+    const targets: { id: string; name: string; tabName: string; type: SessionType }[] = [];
     const seen = new Set<string>();
 
     const visit = (node: TerminalWindowNode) => {
@@ -2547,7 +2587,12 @@ function App() {
         for (const pane of collectSessionPanes(tab.root)) {
           if (!hasLiveSession(pane) || seen.has(pane.sessionId)) continue;
           seen.add(pane.sessionId);
-          targets.push({ id: pane.sessionId, type: pane.type });
+          targets.push({
+            id: pane.sessionId,
+            name: pane.name,
+            tabName: getTabDisplayName(tab),
+            type: pane.type,
+          });
         }
       }
     };
@@ -2866,6 +2911,7 @@ function App() {
           tabsById,
           focusedTabId: activeTabId,
           unreadTabIds,
+          disconnectedTabIds,
           onSelectTab: handleSelectLeafTab,
           onAddTab: handleAddTabFromLeaf,
           onConnectConnection: handleConnectConnectionFromLeaf,

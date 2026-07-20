@@ -58,8 +58,11 @@ import type {
   AIMessage,
   AIMode,
   AISession,
+  AISessionScope,
   AIStreamEventPayload,
   AIStreamStart,
+  AITargetContext,
+  AITerminalTarget,
   QuickCommand,
   QuickCommandCategory,
   QuickCommandsConfig,
@@ -76,35 +79,58 @@ import type {
   AICommandExecutionStatus,
   QuotedText,
 } from "./types";
-import {
-  actionTitle,
-  buildPrismThemeFromColors,
-  createLocalMessage,
-  type DateGroup,
-  dateGroupOrder,
-  groupSessionsByDate,
-  slugCategory,
-} from "./utils";
+import { actionTitle, buildPrismThemeFromColors, createLocalMessage, slugCategory } from "./utils";
+
+interface AIDraft {
+  text: string;
+  quotedText: QuotedText | null;
+  targetPaneIds: string[];
+}
+
+type AIPanelView = { mode: "draft" } | { mode: "session"; sessionId: string };
+
+interface AIStreamRuntime {
+  streamId: string;
+  aiSessionId: string;
+  assistantMessageId: string;
+}
+
+const EMPTY_DRAFT: AIDraft = { text: "", quotedText: null, targetPaneIds: [] };
+
+function buildAIScopeKey(pane: SessionPane | null) {
+  return pane ? `terminal:${pane.sessionId}` : "unbound:";
+}
+
+function buildOwnerScope(pane: SessionPane | null): AISessionScope {
+  if (!pane) return { type: "unbound", targetId: null, connectionIds: [], label: null };
+  return {
+    type: "terminal",
+    targetId: pane.sessionId,
+    connectionIds: pane.connectionId ? [pane.connectionId] : [],
+    label: pane.name,
+  };
+}
 
 function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantPanelProps) {
   const { t } = useTranslation();
   const { appSettings, updateAppSettings, tabs, savedConnections } = useApp();
   const { theme } = useTheme();
   const aiSettings = appSettings.ai;
-  const [input, setInput] = useState("");
-  const [quotedText, setQuotedText] = useState<QuotedText | null>(null);
-  const [messages, setMessages] = useState<AIMessage[]>([]);
   const [sessions, setSessions] = useState<AISession[]>([]);
+  const [activeSessionIdByScope, setActiveSessionIdByScope] = useState<
+    Record<string, string | null>
+  >({});
+  const [messagesBySessionId, setMessagesBySessionId] = useState<Record<string, AIMessage[]>>({});
+  const [draftsByScope, setDraftsByScope] = useState<Record<string, AIDraft>>({});
+  const [panelViewByScope, setPanelViewByScope] = useState<Record<string, AIPanelView>>({});
+  const [streamRuntimeBySession, setStreamRuntimeBySession] = useState<
+    Record<string, AIStreamRuntime>
+  >({});
   const [showHistory, setShowHistory] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
-  const [loading, setLoading] = useState(false);
   const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [streamId, setStreamId] = useState<string | null>(null);
-  const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const [detectedError, setDetectedError] = useState<AIErrorDetectedDetail | null>(null);
-  const [targetPanes, setTargetPanes] = useState<SessionPane[]>([]);
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -124,11 +150,10 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   const historyCardRef = useRef<HTMLDivElement | null>(null);
   const mentionPopoverRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const streamUnlistenRef = useRef<UnlistenFn | null>(null);
-  const activeStreamIdRef = useRef<string | null>(null);
+  const streamUnlistenersRef = useRef<Map<string, UnlistenFn>>(new Map());
+  const streamSessionByStreamIdRef = useRef<Map<string, string>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
-  const cancelledRef = useRef(false);
 
   const enabledModels = useMemo(() => getEnabledAIModels(aiSettings), [aiSettings]);
   const selectedModel = useMemo(() => selectDefaultAIModel(aiSettings), [aiSettings]);
@@ -136,6 +161,20 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   const mode = aiSettings.default_mode ?? "ask";
   const agentExecutionMode = aiSettings.agent_command_execution_mode ?? "confirm_each";
   const agentBackgroundExecutionEnabled = aiSettings.agent_background_execution_enabled ?? false;
+  const scopeKey = useMemo(() => buildAIScopeKey(activePane), [activePane]);
+  const ownerScope = useMemo(() => buildOwnerScope(activePane), [activePane]);
+  const currentPanelView = panelViewByScope[scopeKey] ?? null;
+  const currentSessionId =
+    currentPanelView?.mode === "draft"
+      ? null
+      : (currentPanelView?.sessionId ?? activeSessionIdByScope[scopeKey] ?? null);
+  const currentDraft = draftsByScope[scopeKey] ?? EMPTY_DRAFT;
+  const input = currentDraft.text;
+  const quotedText = currentDraft.quotedText;
+  const messages = currentSessionId ? (messagesBySessionId[currentSessionId] ?? []) : [];
+  const currentStreamRuntime = currentSessionId ? streamRuntimeBySession[currentSessionId] : null;
+  const loading = !!currentStreamRuntime;
+  const streamingAssistantId = currentStreamRuntime?.assistantMessageId ?? null;
 
   const allSessionPanes = useMemo(() => {
     const panes: SessionPane[] = [];
@@ -160,16 +199,31 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     );
   }, [allSessionPanes, mentionQuery]);
 
+  const targetPanes = useMemo(
+    () =>
+      currentDraft.targetPaneIds
+        .map((sessionId) => allSessionPanes.find((pane) => pane.sessionId === sessionId))
+        .filter((pane): pane is SessionPane => !!pane),
+    [allSessionPanes, currentDraft.targetPaneIds],
+  );
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset selection whenever the filtered mention list changes.
   useEffect(() => {
     setMentionIndex(0);
   }, [filteredMentionPanes]);
 
-  const effectivePanes = targetPanes.length > 0 ? targetPanes : activePane ? [activePane] : [];
-  const effectiveSessionId = effectivePanes[0]?.sessionId ?? null;
-
-  const activeSessionId = activePane?.sessionId ?? null;
-
+  const effectivePanes = useMemo(() => {
+    const paneMap = new Map<string, SessionPane>();
+    if (activePane) paneMap.set(activePane.sessionId, activePane);
+    for (const pane of targetPanes) {
+      paneMap.set(pane.sessionId, pane);
+    }
+    return [...paneMap.values()];
+  }, [activePane, targetPanes]);
+  const panelMeta =
+    effectivePanes.length > 1 && activePane
+      ? t("ai.panelMetaMultiTarget", { target: activePane.name, count: effectivePanes.length - 1 })
+      : (activePane?.name ?? selectedModel?.name ?? t("ai.notConfigured"));
   useEffect(() => {
     if (!selectedModel || selectedModel.id === aiSettings.default_model_id) return;
     updateAppSettings({ ai: { ...aiSettings, default_model_id: selectedModel.id } });
@@ -186,40 +240,54 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     );
   }, [historyQuery, sessions]);
 
-  const cleanupStreamListener = useCallback(() => {
-    streamUnlistenRef.current?.();
-    streamUnlistenRef.current = null;
-  }, []);
-
-  const resetActiveStreamState = useCallback(() => {
-    activeStreamIdRef.current = null;
-    cleanupStreamListener();
-    setLoading(false);
-    setStreamId(null);
-    setStreamingAssistantId(null);
-  }, [cleanupStreamListener]);
-
-  const finishStreamState = useCallback(
-    (finishedStreamId: string) => {
-      if (activeStreamIdRef.current !== finishedStreamId) return;
-      activeStreamIdRef.current = null;
-      cleanupStreamListener();
-      setLoading(false);
-      setStreamId(null);
-      setStreamingAssistantId(null);
+  const updateDraftForScope = useCallback(
+    (updater: (draft: AIDraft) => AIDraft) => {
+      setDraftsByScope((prev) => ({
+        ...prev,
+        [scopeKey]: updater(prev[scopeKey] ?? EMPTY_DRAFT),
+      }));
     },
-    [cleanupStreamListener],
+    [scopeKey],
   );
+
+  const updateMessagesForSession = useCallback(
+    (sessionId: string, updater: (messages: AIMessage[]) => AIMessage[]) => {
+      setMessagesBySessionId((prev) => ({
+        ...prev,
+        [sessionId]: updater(prev[sessionId] ?? []),
+      }));
+    },
+    [],
+  );
+
+  const cleanupStreamListener = useCallback((finishedStreamId: string) => {
+    streamUnlistenersRef.current.get(finishedStreamId)?.();
+    streamUnlistenersRef.current.delete(finishedStreamId);
+    const aiSessionId = streamSessionByStreamIdRef.current.get(finishedStreamId);
+    streamSessionByStreamIdRef.current.delete(finishedStreamId);
+    if (aiSessionId) {
+      setStreamRuntimeBySession((prev) => {
+        const runtime = prev[aiSessionId];
+        if (!runtime || runtime.streamId !== finishedStreamId) return prev;
+        const { [aiSessionId]: _, ...rest } = prev;
+        return rest;
+      });
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
-      cleanupStreamListener();
+      for (const unlisten of streamUnlistenersRef.current.values()) {
+        unlisten();
+      }
+      streamUnlistenersRef.current.clear();
+      streamSessionByStreamIdRef.current.clear();
     };
-  }, [cleanupStreamListener]);
+  }, []);
 
   useEffect(() => {
     const watchedIds = new Set(effectivePanes.map((p) => p.sessionId));
-    if (activeSessionId) watchedIds.add(activeSessionId);
+    if (activePane?.sessionId) watchedIds.add(activePane.sessionId);
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<AIErrorDetectedDetail>).detail;
       if (!detail || !watchedIds.has(detail.sessionId)) return;
@@ -227,7 +295,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     };
     window.addEventListener(AI_ERROR_DETECTED_EVENT, handler);
     return () => window.removeEventListener(AI_ERROR_DETECTED_EVENT, handler);
-  }, [activeSessionId, effectivePanes]);
+  }, [activePane?.sessionId, effectivePanes]);
 
   const handleMessagesScroll = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -256,16 +324,23 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     void loadSessions();
   }, [loadSessions]);
 
-  const loadSessionMessages = useCallback(async (sessionId: string) => {
-    try {
-      const items = await invoke<AIMessage[]>("get_ai_messages", { sessionId });
-      setCurrentSessionId(sessionId);
-      setMessages(items);
-      setShowHistory(false);
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    }
-  }, []);
+  const loadSessionMessages = useCallback(
+    async (sessionId: string) => {
+      try {
+        const items = await invoke<AIMessage[]>("get_ai_messages", { sessionId });
+        setMessagesBySessionId((prev) => ({ ...prev, [sessionId]: items }));
+        setActiveSessionIdByScope((prev) => ({ ...prev, [scopeKey]: sessionId }));
+        setPanelViewByScope((prev) => ({
+          ...prev,
+          [scopeKey]: { mode: "session", sessionId },
+        }));
+        setShowHistory(false);
+      } catch (error) {
+        toast.error(getErrorMessage(error));
+      }
+    },
+    [scopeKey],
+  );
 
   const appendAudit = useCallback(
     (params: {
@@ -353,6 +428,59 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     [activeConnection, aiSettings.context_line_limit, savedConnections],
   );
 
+  const buildTargetForPane = useCallback(
+    (pane: SessionPane): AITerminalTarget => {
+      const conn = pane.connectionId
+        ? (savedConnections.find((item) => item.id === pane.connectionId) ?? null)
+        : pane.sessionId === activePane?.sessionId
+          ? activeConnection
+          : null;
+      return {
+        terminalSessionId: pane.sessionId,
+        connectionId: pane.connectionId ?? conn?.id ?? null,
+        label: pane.name,
+        host: conn?.host ?? null,
+        username: conn?.username ?? null,
+        sessionType: pane.type,
+      };
+    },
+    [activeConnection, activePane?.sessionId, savedConnections],
+  );
+
+  const buildTargetContexts = useCallback(
+    async (panes: SessionPane[], selectedText?: string): Promise<AITargetContext[]> => {
+      const lineLimit = Math.max(
+        1,
+        Math.floor(aiSettings.context_line_limit / Math.max(1, panes.length)),
+      );
+      return Promise.all(
+        panes.map(async (pane, index) => {
+          const conn = pane.connectionId
+            ? (savedConnections.find((item) => item.id === pane.connectionId) ?? null)
+            : pane.sessionId === activePane?.sessionId
+              ? activeConnection
+              : null;
+          return {
+            target: buildTargetForPane(pane),
+            context: await buildAIContext({
+              pane,
+              connection: conn,
+              lineLimit,
+              selectedText: index === 0 ? selectedText : undefined,
+            }),
+          };
+        }),
+      );
+    },
+    [
+      activeConnection,
+      activePane?.sessionId,
+      aiSettings.context_line_limit,
+      buildTargetForPane,
+      savedConnections,
+    ],
+  );
+
   const setCommandState = useCallback(
     (cardId: string, status: AICommandExecutionStatus, error?: string) => {
       setCommandExecution((prev) => ({ ...prev, [cardId]: { status, error } }));
@@ -362,10 +490,16 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
 
   const executeCommandCard = useCallback(
     async (card: AICommandCard, source: "auto" | "authorized") => {
-      const targetSessionId = effectiveSessionId ?? activeSessionId;
+      const targetSessionId = card.target?.terminalSessionId;
+      if (!targetSessionId) {
+        const error = t("ai.commandTargetMissing");
+        setCommandState(card.id, "failed", error);
+        toast.error(error);
+        return;
+      }
       const provider = getTerminalContextProvider(targetSessionId);
       if (!provider) {
-        const error = t("ai.noTerminal");
+        const error = t("ai.commandTargetUnavailable");
         setCommandState(card.id, "failed", error);
         toast.error(error);
         return;
@@ -396,7 +530,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
         toast.error(message);
       }
     },
-    [activeSessionId, appendAudit, effectiveSessionId, setCommandState, t],
+    [appendAudit, setCommandState, t],
   );
 
   const startChat = useCallback(
@@ -418,29 +552,77 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
       const requestMode = mode;
 
       setDetectedError(null);
-      setLoading(true);
-      cancelledRef.current = false;
-      cleanupStreamListener();
-
-      const userMessage = createLocalMessage("user", userInput, currentSessionId ?? "local");
       const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const requestStreamId = `ai-stream-${crypto.randomUUID()}`;
-      activeStreamIdRef.current = requestStreamId;
-      setStreamId(requestStreamId);
-      setMessages((prev) => [
+      let resolvedSessionId = currentSessionId ?? `pending-${requestStreamId}`;
+      const userMessage = createLocalMessage("user", userInput, resolvedSessionId);
+      const assistantMessage: AIMessage = {
+        id: assistantId,
+        sessionId: resolvedSessionId,
+        role: "assistant",
+        content: "",
+        createdAt: new Date().toISOString(),
+        reasoningContent: null,
+        commandCards: [],
+      };
+      setActiveSessionIdByScope((prev) => ({ ...prev, [scopeKey]: resolvedSessionId }));
+      setPanelViewByScope((prev) => ({
+        ...prev,
+        [scopeKey]: { mode: "session", sessionId: resolvedSessionId },
+      }));
+      updateMessagesForSession(resolvedSessionId, (prev) => [
         ...prev,
         userMessage,
-        {
-          id: assistantId,
-          sessionId: currentSessionId ?? "local",
-          role: "assistant",
-          content: requestMode === "agent" ? "" : "",
-          createdAt: new Date().toISOString(),
-          reasoningContent: null,
-          commandCards: [],
-        },
+        assistantMessage,
       ]);
-      setStreamingAssistantId(assistantId);
+      setStreamRuntimeBySession((prev) => ({
+        ...prev,
+        [resolvedSessionId]: {
+          streamId: requestStreamId,
+          aiSessionId: resolvedSessionId,
+          assistantMessageId: assistantId,
+        },
+      }));
+      streamSessionByStreamIdRef.current.set(requestStreamId, resolvedSessionId);
+
+      const bindRealSessionId = (nextSessionId: string) => {
+        if (nextSessionId === resolvedSessionId) return;
+        const previousSessionId = resolvedSessionId;
+        resolvedSessionId = nextSessionId;
+        streamSessionByStreamIdRef.current.set(requestStreamId, nextSessionId);
+        setMessagesBySessionId((prev) => {
+          const pendingMessages = prev[previousSessionId] ?? [];
+          const existingMessages = prev[nextSessionId] ?? [];
+          const { [previousSessionId]: _, ...rest } = prev;
+          return {
+            ...rest,
+            [nextSessionId]: [
+              ...existingMessages,
+              ...pendingMessages.map((message) => ({ ...message, sessionId: nextSessionId })),
+            ],
+          };
+        });
+        setActiveSessionIdByScope((prev) =>
+          prev[scopeKey] === previousSessionId ? { ...prev, [scopeKey]: nextSessionId } : prev,
+        );
+        setPanelViewByScope((prev) => ({
+          ...prev,
+          [scopeKey]: { mode: "session", sessionId: nextSessionId },
+        }));
+        setStreamRuntimeBySession((prev) => {
+          const runtime = prev[previousSessionId];
+          const { [previousSessionId]: _, ...rest } = prev;
+          return runtime
+            ? {
+                ...rest,
+                [nextSessionId]: {
+                  ...runtime,
+                  aiSessionId: nextSessionId,
+                },
+              }
+            : prev;
+        });
+      };
 
       try {
         const unlisten = await listen<AIStreamEventPayload | AgentStepPayload>(
@@ -451,6 +633,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
 
             if ("stepIndex" in raw) {
               const step = raw as unknown as AgentStepPayload;
+              if (step.sessionId) bindRealSessionId(step.sessionId);
               setAgentStepsMap((prev) => {
                 const steps = prev[assistantId] ?? [];
                 const existing = steps.findIndex((s) => s.stepIndex === step.stepIndex);
@@ -467,12 +650,12 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             const payload = raw as unknown as AIStreamEventPayload;
 
             if (payload.type === "start") {
-              if (payload.sessionId) setCurrentSessionId(payload.sessionId);
+              if (payload.sessionId) bindRealSessionId(payload.sessionId);
               return;
             }
 
             if (payload.type === "delta" && payload.textDelta) {
-              setMessages((prev) =>
+              updateMessagesForSession(resolvedSessionId, (prev) =>
                 prev.map((message) =>
                   message.id === assistantId
                     ? { ...message, content: `${message.content}${payload.textDelta}` }
@@ -483,7 +666,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             }
 
             if (payload.type === "reasoning_delta" && payload.reasoningDelta) {
-              setMessages((prev) =>
+              updateMessagesForSession(resolvedSessionId, (prev) =>
                 prev.map((message) =>
                   message.id === assistantId
                     ? {
@@ -497,11 +680,16 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             }
 
             if (payload.type === "done") {
-              finishStreamState(requestStreamId);
+              if (payload.sessionId) bindRealSessionId(payload.sessionId);
+              cleanupStreamListener(requestStreamId);
               const newMsgId = payload.message?.id;
               if (payload.message) {
-                setMessages((prev) =>
-                  prev.map((message) => (message.id === assistantId ? payload.message! : message)),
+                updateMessagesForSession(resolvedSessionId, (prev) =>
+                  prev.map((message) =>
+                    message.id === assistantId
+                      ? { ...payload.message!, sessionId: resolvedSessionId }
+                      : message,
+                  ),
                 );
               }
               if (newMsgId && newMsgId !== assistantId) {
@@ -517,34 +705,26 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             }
 
             if (payload.type === "error") {
-              const wasCancelled = cancelledRef.current;
-              finishStreamState(requestStreamId);
-              if (!wasCancelled) {
-                setMessages((prev) =>
-                  prev.map((message) =>
-                    message.id === assistantId
-                      ? {
-                          ...message,
-                          content: payload.error ?? t("ai.requestFailed"),
-                        }
-                      : message,
-                  ),
-                );
-                toast.error(payload.error ?? t("ai.requestFailed"));
-              }
+              cleanupStreamListener(requestStreamId);
+              updateMessagesForSession(resolvedSessionId, (prev) =>
+                prev.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        content: payload.error ?? t("ai.requestFailed"),
+                      }
+                    : message,
+                ),
+              );
+              toast.error(payload.error ?? t("ai.requestFailed"));
             }
           },
         );
-        if (cancelledRef.current || activeStreamIdRef.current !== requestStreamId) {
-          unlisten();
-          return;
-        }
-        streamUnlistenRef.current = unlisten;
+        streamUnlistenersRef.current.set(requestStreamId, unlisten);
 
         const context = await buildMergedContext(panes, selectedText);
-        if (cancelledRef.current || activeStreamIdRef.current !== requestStreamId) {
-          return;
-        }
+        const targets = panes.map(buildTargetForPane);
+        const targetContexts = await buildTargetContexts(panes, selectedText);
         const primaryConn = panes[0].connectionId
           ? (savedConnections.find((c) => c.id === panes[0].connectionId) ?? null)
           : activeConnection;
@@ -556,6 +736,9 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             sessionId: currentSessionId,
             connectionId: primaryConn?.id ?? null,
             terminalSessionId: panes[0]?.sessionId ?? null,
+            ownerScope,
+            targets,
+            targetContexts,
             action,
             userInput,
             mode: requestMode,
@@ -569,29 +752,17 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             },
           },
         });
-        if (cancelledRef.current || activeStreamIdRef.current !== requestStreamId) {
-          void invoke("cancel_ai_chat_stream", { streamId: result.streamId }).catch(() => {});
-          return;
-        }
-        setCurrentSessionId(result.sessionId);
-        activeStreamIdRef.current = result.streamId;
-        setStreamId(result.streamId);
+        bindRealSessionId(result.sessionId);
         appendAudit({ action: `ai.${action}`, userInput });
       } catch (error) {
-        if (activeStreamIdRef.current === requestStreamId) {
-          void invoke("cancel_ai_chat_stream", { streamId: requestStreamId }).catch(() => {});
-          resetActiveStreamState();
-        }
-        if (!cancelledRef.current) {
-          setMessages((prev) =>
-            prev.map((message) =>
-              message.id === assistantId
-                ? { ...message, content: getErrorMessage(error) }
-                : message,
-            ),
-          );
-          toast.error(getErrorMessage(error));
-        }
+        void invoke("cancel_ai_chat_stream", { streamId: requestStreamId }).catch(() => {});
+        cleanupStreamListener(requestStreamId);
+        updateMessagesForSession(resolvedSessionId, (prev) =>
+          prev.map((message) =>
+            message.id === assistantId ? { ...message, content: getErrorMessage(error) } : message,
+          ),
+        );
+        toast.error(getErrorMessage(error));
       }
     },
     [
@@ -599,17 +770,20 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
       aiSettings.enabled,
       appSettings.ui.language,
       appendAudit,
+      buildTargetContexts,
+      buildTargetForPane,
       buildMergedContext,
       cleanupStreamListener,
       currentSessionId,
       effectivePanes,
-      finishStreamState,
       loadSessions,
       mode,
-      resetActiveStreamState,
+      ownerScope,
       savedConnections,
       selectedModel,
+      scopeKey,
       t,
+      updateMessagesForSession,
     ],
   );
 
@@ -624,26 +798,28 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     const value = input.trim();
     if (!value || loading) return;
     const fullInput = quotedText ? `> ${quotedText.text}\n\n${value}` : value;
-    setInput("");
-    setQuotedText(null);
+    updateDraftForScope((draft) => ({ ...draft, text: "", quotedText: null, targetPaneIds: [] }));
     shouldAutoScrollRef.current = true;
     void startChat("generate_command", fullInput);
-  }, [input, loading, quotedText, startChat]);
+  }, [input, loading, quotedText, startChat, updateDraftForScope]);
 
   const cancelStream = useCallback(() => {
-    const activeStreamId = activeStreamIdRef.current ?? streamId;
+    const activeStreamId = currentStreamRuntime?.streamId;
     if (!activeStreamId) return;
-    cancelledRef.current = true;
     void invoke("cancel_ai_chat_stream", { streamId: activeStreamId }).catch(() => {});
-    resetActiveStreamState();
-  }, [resetActiveStreamState, streamId]);
+    cleanupStreamListener(activeStreamId);
+  }, [cleanupStreamListener, currentStreamRuntime?.streamId]);
 
   const insertCommand = useCallback(
     (card: AICommandCard) => {
-      const insertSessionId = effectiveSessionId ?? activeSessionId;
+      const insertSessionId = card.target?.terminalSessionId;
+      if (!insertSessionId) {
+        toast.error(t("ai.commandTargetMissing"));
+        return;
+      }
       const provider = getTerminalContextProvider(insertSessionId);
       if (!provider) {
-        toast.error(t("ai.noTerminal"));
+        toast.error(t("ai.commandTargetUnavailable"));
         return;
       }
       void provider
@@ -658,7 +834,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
         })
         .catch((error) => toast.error(getErrorMessage(error)));
     },
-    [activeSessionId, appendAudit, effectiveSessionId, t],
+    [appendAudit, t],
   );
 
   const saveQuickCommand = useCallback(
@@ -726,8 +902,15 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     setClearingHistory(true);
     try {
       await invoke("clear_ai_history");
-      setMessages([]);
-      setCurrentSessionId(null);
+      for (const unlisten of streamUnlistenersRef.current.values()) {
+        unlisten();
+      }
+      streamUnlistenersRef.current.clear();
+      streamSessionByStreamIdRef.current.clear();
+      setStreamRuntimeBySession({});
+      setMessagesBySessionId({});
+      setActiveSessionIdByScope({});
+      setPanelViewByScope({});
       setHistoryQuery("");
       setClearHistoryOpen(false);
       await loadSessions();
@@ -743,42 +926,91 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
       try {
         await invoke("delete_ai_session", { sessionId });
         if (currentSessionId === sessionId) {
-          setMessages([]);
-          setCurrentSessionId(null);
+          setActiveSessionIdByScope((prev) => ({ ...prev, [scopeKey]: null }));
+          setPanelViewByScope((prev) => ({ ...prev, [scopeKey]: { mode: "draft" } }));
         }
+        setMessagesBySessionId((prev) => {
+          const { [sessionId]: _, ...rest } = prev;
+          return rest;
+        });
         await loadSessions();
       } catch (error) {
         toast.error(getErrorMessage(error));
       }
     },
-    [currentSessionId, loadSessions],
+    [currentSessionId, loadSessions, scopeKey],
   );
 
-  const dateGroupLabel: Record<DateGroup, string> = useMemo(
-    () => ({
-      today: t("ai.dateToday"),
-      yesterday: t("ai.dateYesterday"),
-      last7Days: t("ai.dateLast7Days"),
-      earlier: t("ai.dateEarlier"),
-    }),
-    [t],
+  const historySections = useMemo(() => {
+    const current: AISession[] = [];
+    const sameConnection: AISession[] = [];
+    const other: AISession[] = [];
+    for (const session of filteredSessions) {
+      const scope = session.scope;
+      if (scope?.type === "terminal" && scope.targetId === activePane?.sessionId) {
+        current.push(session);
+      } else if (
+        activePane?.connectionId &&
+        (scope?.connectionIds?.includes(activePane.connectionId) ||
+          session.connectionId === activePane.connectionId)
+      ) {
+        sameConnection.push(session);
+      } else {
+        other.push(session);
+      }
+    }
+    return [
+      { key: "current", label: t("ai.historyCurrentTerminal"), sessions: current },
+      { key: "same", label: t("ai.historySameConnection"), sessions: sameConnection },
+      { key: "other", label: t("ai.historyOtherSessions"), sessions: other },
+    ];
+  }, [activePane?.connectionId, activePane?.sessionId, filteredSessions, t]);
+
+  const isSessionUsedByAnotherScope = useCallback(
+    (sessionId: string) =>
+      Object.entries(activeSessionIdByScope).some(
+        ([key, value]) => key !== scopeKey && value === sessionId,
+      ),
+    [activeSessionIdByScope, scopeKey],
   );
 
-  const groupedSessions = useMemo(() => groupSessionsByDate(filteredSessions), [filteredSessions]);
+  const openHistorySession = useCallback(
+    async (session: AISession) => {
+      if (!activePane) {
+        await loadSessionMessages(session.id);
+        return;
+      }
+      const exactScope =
+        session.scope?.type === "terminal" && session.scope.targetId === activePane.sessionId;
+      if (!exactScope) {
+        await invoke<AISession>("rebind_ai_session", {
+          sessionId: session.id,
+          ownerScope,
+        });
+        setActiveSessionIdByScope((prev) => {
+          const next = { ...prev, [scopeKey]: session.id };
+          for (const [key, value] of Object.entries(next)) {
+            if (key !== scopeKey && value === session.id) next[key] = null;
+          }
+          return next;
+        });
+        await loadSessions();
+      }
+      await loadSessionMessages(session.id);
+    },
+    [activePane, loadSessionMessages, loadSessions, ownerScope, scopeKey],
+  );
 
   const newChat = useCallback(() => {
     if (loading) return;
-    setMessages([]);
-    setCurrentSessionId(null);
-    setInput("");
-    setQuotedText(null);
+    setActiveSessionIdByScope((prev) => ({ ...prev, [scopeKey]: null }));
+    setPanelViewByScope((prev) => ({ ...prev, [scopeKey]: { mode: "draft" } }));
+    updateDraftForScope(() => EMPTY_DRAFT);
     setDetectedError(null);
-    setTargetPanes([]);
     setCommandExecution({});
-    setAgentStepsMap({});
     setShowMentionPopover(false);
     shouldAutoScrollRef.current = true;
-  }, [loading]);
+  }, [loading, scopeKey, updateDraftForScope]);
 
   const handleCopySelection = useCallback(() => {
     const sel = window.getSelection()?.toString();
@@ -790,15 +1022,15 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   const handleQuoteSelection = useCallback(() => {
     const sel = window.getSelection()?.toString()?.trim();
     if (sel) {
-      setQuotedText({ text: sel });
+      updateDraftForScope((draft) => ({ ...draft, quotedText: { text: sel } }));
       textareaRef.current?.focus();
     }
-  }, []);
+  }, [updateDraftForScope]);
 
   const handleInputChange = useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
       const value = event.target.value;
-      setInput(value);
+      updateDraftForScope((draft) => ({ ...draft, text: value }));
 
       const cursorPos = event.target.selectionStart;
       const textBeforeCursor = value.slice(0, cursorPos);
@@ -812,31 +1044,42 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
         setMentionQuery("");
       }
     },
-    [showMentionPopover],
+    [showMentionPopover, updateDraftForScope],
   );
 
   const selectMentionPane = useCallback(
     (pane: SessionPane) => {
-      setTargetPanes((prev) => {
-        const exists = prev.some((p) => p.sessionId === pane.sessionId);
-        return exists ? prev.filter((p) => p.sessionId !== pane.sessionId) : [...prev, pane];
+      updateDraftForScope((draft) => {
+        const exists = draft.targetPaneIds.includes(pane.sessionId);
+        return {
+          ...draft,
+          targetPaneIds: exists
+            ? draft.targetPaneIds.filter((id) => id !== pane.sessionId)
+            : [...draft.targetPaneIds, pane.sessionId],
+        };
       });
 
       const cursorPos = textareaRef.current?.selectionStart ?? input.length;
       const textBeforeCursor = input.slice(0, cursorPos);
       const textAfterCursor = input.slice(cursorPos);
       const cleaned = textBeforeCursor.replace(/@\S*$/, "");
-      setInput(`${cleaned}${textAfterCursor}`);
+      updateDraftForScope((draft) => ({ ...draft, text: `${cleaned}${textAfterCursor}` }));
       setShowMentionPopover(false);
       setMentionQuery("");
       textareaRef.current?.focus();
     },
-    [input],
+    [input, updateDraftForScope],
   );
 
-  const removeTargetPane = useCallback((sessionId: string) => {
-    setTargetPanes((prev) => prev.filter((p) => p.sessionId !== sessionId));
-  }, []);
+  const removeTargetPane = useCallback(
+    (sessionId: string) => {
+      updateDraftForScope((draft) => ({
+        ...draft,
+        targetPaneIds: draft.targetPaneIds.filter((id) => id !== sessionId),
+      }));
+    },
+    [updateDraftForScope],
+  );
 
   const updateAgentExecutionMode = useCallback(
     (nextMode: AIAgentCommandExecutionMode) => {
@@ -943,7 +1186,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     >
       <PanelHeader
         title={t("ai.title")}
-        meta={selectedModel?.name ?? t("ai.notConfigured")}
+        meta={panelMeta}
         actions={
           <>
             <Tooltip>
@@ -1106,39 +1349,54 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
                 {sessions.length === 0 ? t("ai.noHistory") : t("ai.noHistoryMatches")}
               </div>
             ) : (
-              dateGroupOrder.map((group) => {
-                const items = groupedSessions[group];
-                if (items.length === 0) return null;
+              historySections.map((section) => {
+                if (section.sessions.length === 0) return null;
                 return (
-                  <div key={group} className="mb-1">
+                  <div key={section.key} className="mb-1">
                     <div className="px-2 py-1 text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                      {dateGroupLabel[group]}
+                      {section.label}
                     </div>
-                    {items.map((session) => (
-                      <div
-                        key={session.id}
-                        className="group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted/60"
-                      >
-                        <button
-                          type="button"
-                          className="min-w-0 flex-1 text-left text-xs"
-                          onClick={() => void loadSessionMessages(session.id)}
+                    {section.sessions.map((session) => {
+                      const inUse = isSessionUsedByAnotherScope(session.id);
+                      const exactScope =
+                        session.scope?.type === "terminal" &&
+                        session.scope.targetId === activePane?.sessionId;
+                      return (
+                        <div
+                          key={session.id}
+                          className="group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted/60"
                         >
-                          <div className="truncate font-medium">{session.title}</div>
-                        </button>
-                        <button
-                          type="button"
-                          className="shrink-0 rounded p-0.5 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                          title={t("ai.deleteSession")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void deleteSession(session.id);
-                          }}
-                        >
-                          <MdDeleteOutline className="text-sm" />
-                        </button>
-                      </div>
-                    ))}
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 text-left text-xs"
+                            disabled={inUse && !exactScope}
+                            onClick={() => void openHistorySession(session)}
+                          >
+                            <div className="truncate font-medium">{session.title}</div>
+                            {inUse && !exactScope ? (
+                              <div className="truncate text-[0.625rem] text-muted-foreground">
+                                {t("ai.historyInUse")}
+                              </div>
+                            ) : !exactScope ? (
+                              <div className="truncate text-[0.625rem] text-muted-foreground">
+                                {t("ai.historyMoveToCurrent")}
+                              </div>
+                            ) : null}
+                          </button>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded p-0.5 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                            title={t("ai.deleteSession")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void deleteSession(session.id);
+                            }}
+                          >
+                            <MdDeleteOutline className="text-sm" />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })
@@ -1257,7 +1515,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
                             message={message}
                             loading={loading && streamingAssistantId === message.id}
                             onEarlyParse={(parsed) => {
-                              setMessages((prev) =>
+                              updateMessagesForSession(message.sessionId, (prev) =>
                                 prev.map((m) =>
                                   m.id === message.id
                                     ? {
@@ -1383,7 +1641,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
                 <button
                   type="button"
                   className="mr-1.5 shrink-0 rounded p-0.5 text-muted-foreground/70 hover:text-foreground"
-                  onClick={() => setQuotedText(null)}
+                  onClick={() => updateDraftForScope((draft) => ({ ...draft, quotedText: null }))}
                 >
                   <MdClose className="text-xs" />
                 </button>

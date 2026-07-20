@@ -8,7 +8,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { invoke } from "@/lib/invoke";
 import type { AgentStepPayload, RiskLevel } from "@/types/global";
 import { AnimatedStatusText } from "./AnimatedStatusText";
-import { MarkdownContent } from "./MarkdownContent";
 
 const riskColorClass = {
   low: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600",
@@ -88,6 +87,11 @@ export function AgentStepView({
         >
           <div className="flex items-center gap-1.5 border-b border-border/40 px-2.5 py-1 text-[0.625rem] text-muted-foreground">
             <span className="font-medium uppercase tracking-wider">shell</span>
+            {step.action.target ? (
+              <span className="min-w-0 truncate">
+                {t("ai.commandTargetLabel", { target: step.action.target.label })}
+              </span>
+            ) : null}
             {riskLevel ? (
               <span
                 className={`ml-auto rounded-full border px-1.5 py-0.5 font-medium ${riskColorClass[riskLevel]}`}
@@ -201,12 +205,6 @@ export function AgentStepView({
 
       {step.error ? (
         <div className="mt-1.5 ml-5 text-[0.6875rem] text-destructive">{step.error}</div>
-      ) : null}
-
-      {isFinal && step.action.answer ? (
-        <div className="mt-2 ml-5">
-          <MarkdownContent content={step.action.answer} />
-        </div>
       ) : null}
     </div>
   );

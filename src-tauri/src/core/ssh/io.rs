@@ -672,9 +672,12 @@ pub(super) async fn ssh_io_loop(
                             }
                         }
                     }
-                    Some(SessionCommand::ZmodemAcceptUpload { files }) => {
+                    Some(SessionCommand::ZmodemAcceptUpload {
+                        files,
+                        conflict_mode,
+                    }) => {
                         if let Some(ref mut transfer) = zmodem_transfer {
-                            let actions = transfer.accept_upload(files);
+                            let actions = transfer.accept_upload(files, conflict_mode);
                             handle_zmodem_actions(&app, &zmodem_event_name, &mut channel, actions).await;
                             if transfer.is_done() {
                                 zmodem_transfer = None;

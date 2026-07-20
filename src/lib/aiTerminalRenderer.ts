@@ -7,13 +7,20 @@ const ACCENT = "\x1b[38;5;141m"; // purple/violet
 const GREEN = "\x1b[38;5;78m";
 const RED = "\x1b[38;5;203m";
 
+function sanitizeCommandForTerminal(command: string): string {
+  return command
+    .replace(/\r\n|\r|\n/gu, " ; ")
+    .replace(/\x1b/gu, "^[")
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/gu, " ");
+}
+
 export function renderAiCommandStart(
   event: Extract<AiCaptureEvent, { type: "commandStart" }>,
 ): string {
   const step = event.stepIndex + 1;
+  const command = sanitizeCommandForTerminal(event.command);
   const header = `${DIM}${ACCENT}┌ AI #${step}${RESET}${DIM} ${"─".repeat(30)}${RESET}`;
-  const cmd = `${DIM}${ACCENT}│${RESET} ${BOLD}$ ${event.command}${RESET}`;
-  return `\r\n${header}\r\n${cmd}\r\n`;
+  return `${BOLD}${command}${RESET}\r\n${header}\r\n`;
 }
 
 export function renderAiCommandEnd(event: Extract<AiCaptureEvent, { type: "commandEnd" }>): string {

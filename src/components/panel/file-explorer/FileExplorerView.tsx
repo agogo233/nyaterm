@@ -2147,7 +2147,7 @@ function FileExplorer({
 
       {canBrowseFiles && (
         <div
-          className="px-2 py-1.5 text-[0.6875rem] border-t flex items-center justify-between shrink-0"
+          className="nyaterm-wallpaper-control-surface px-2 py-1.5 text-[0.6875rem] border-t flex items-center justify-between shrink-0"
           style={{
             color: "var(--df-text-dimmed)",
             borderColor: "var(--df-border)",

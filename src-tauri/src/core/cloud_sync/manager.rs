@@ -220,6 +220,7 @@ impl CloudSyncManager {
                     message: "Cloud connection verified".to_string(),
                 })
                 .await;
+                self.complete_test_connection_success().await;
                 Ok(())
             }
             Err(error) => {
@@ -228,6 +229,11 @@ impl CloudSyncManager {
                 Err(error)
             }
         }
+    }
+
+    async fn complete_test_connection_success(&self) {
+        self.set_status("idle", "Cloud connection verified".to_string(), None, None)
+            .await;
     }
 
     pub async fn sync_push_now(self: &Arc<Self>, trigger: &str) -> AppResult<()> {
@@ -1339,6 +1345,35 @@ mod tests {
         let status = manager.status.lock().await.clone();
         assert_eq!(status.state, "failed");
         assert!(status.current_operation.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_connection_success_clears_running_status() {
+        let manager = CloudSyncManager::new();
+        *manager.status.lock().await = CloudSyncStatus {
+            state: "running".to_string(),
+            message: "Checking cloud sync storage access".to_string(),
+            current_operation: Some("test_connection".to_string()),
+            conflict: Some(CloudConflictPreview {
+                detected_at_ms: 1,
+                provider: "webdav".to_string(),
+                local_payload_hash: "local".to_string(),
+                remote_payload_hash: "remote".to_string(),
+                remote_revision: "revision".to_string(),
+                remote_created_at_ms: 2,
+                remote_device_id: "device".to_string(),
+                message: "conflict".to_string(),
+            }),
+            ..CloudSyncStatus::default()
+        };
+
+        manager.complete_test_connection_success().await;
+
+        let status = manager.status.lock().await.clone();
+        assert_eq!(status.state, "idle");
+        assert_eq!(status.message, "Cloud connection verified");
+        assert!(status.current_operation.is_none());
+        assert!(status.conflict.is_none());
     }
 
     #[tokio::test]

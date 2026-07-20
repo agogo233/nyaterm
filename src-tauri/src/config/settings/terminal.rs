@@ -49,6 +49,8 @@ impl Default for ActionLinksMatcherSettings {
 pub struct TerminalSettings {
     #[serde(default = "default_scrollback")]
     pub scrollback_lines: u32,
+    #[serde(default = "default_keep_alive_mode")]
+    pub keep_alive_mode: String,
     #[serde(default = "default_keep_alive")]
     pub keep_alive_interval: u32,
     #[serde(default)]
@@ -89,11 +91,15 @@ fn default_scrollback() -> u32 {
 fn default_keep_alive() -> u32 {
     60
 }
+fn default_keep_alive_mode() -> String {
+    "compatible".to_string()
+}
 
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
             scrollback_lines: default_scrollback(),
+            keep_alive_mode: default_keep_alive_mode(),
             keep_alive_interval: default_keep_alive(),
             font_size_delta: 0.0,
             x11_display: String::new(),
@@ -111,5 +117,22 @@ impl Default for TerminalSettings {
             show_multi_line_paste_dialog: true,
             paste_image_as_path: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TerminalSettings;
+
+    #[test]
+    fn missing_keep_alive_mode_defaults_to_compatible() {
+        let settings: TerminalSettings = serde_json::from_value(serde_json::json!({
+            "scrollback_lines": 5000,
+            "keep_alive_interval": 60
+        }))
+        .expect("legacy terminal settings deserialize");
+
+        assert_eq!(settings.keep_alive_mode, "compatible");
+        assert_eq!(settings.keep_alive_interval, 60);
     }
 }

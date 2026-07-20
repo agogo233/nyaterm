@@ -167,6 +167,7 @@ export function buildSurfaceCssVariables(
     return {
       "--df-bg": bg,
       "--df-bg-panel": bgPanel,
+      "--df-bg-panel-solid": colors.bgPanel,
       "--df-bg-terminal": bgTerminal,
       "--df-bg-hover": bgHover,
       "--df-bg-input": bgInput,
@@ -193,6 +194,7 @@ export function buildSurfaceCssVariables(
   return {
     "--df-bg": bg,
     "--df-bg-panel": bgPanel,
+    "--df-bg-panel-solid": colors.bgPanel,
     "--df-bg-terminal": bgTerminal,
     "--df-bg-hover": bgHover,
     "--df-bg-input": bgInput,

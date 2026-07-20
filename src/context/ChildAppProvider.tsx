@@ -31,6 +31,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   },
   appearance: {
     theme: "github-dark",
+    custom_themes: [],
     terminal_theme: "default",
     font_family: DEFAULT_TERMINAL_FONT_FAMILY,
     ui_font_family: getDefaultUiFontFamily(),
@@ -70,6 +71,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   },
   terminal: {
     scrollback_lines: 10000,
+    keep_alive_mode: "compatible",
     keep_alive_interval: 60,
     font_size_delta: 0,
     x11_display: "",

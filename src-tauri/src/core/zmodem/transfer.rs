@@ -287,13 +287,17 @@ impl ZmodemTransfer {
     }
 
     /// Called when the user accepts an **upload** and provides file paths.
-    pub fn accept_upload(&mut self, files: Vec<PathBuf>) -> Vec<ZmodemAction> {
+    pub fn accept_upload(
+        &mut self,
+        files: Vec<PathBuf>,
+        conflict_mode: ZmodemUploadConflictMode,
+    ) -> Vec<ZmodemAction> {
         let buffered = match &mut self.state {
             TransferState::WaitingForUser { buffered } => std::mem::take(buffered),
             _ => return vec![],
         };
 
-        let sender = match zmodem2::Sender::new() {
+        let mut sender = match zmodem2::Sender::new() {
             Ok(s) => s,
             Err(e) => {
                 self.state = TransferState::Done;
@@ -302,6 +306,7 @@ impl ZmodemTransfer {
                 })];
             }
         };
+        sender.set_file_options(conflict_mode.file_options());
 
         self.state = TransferState::Sending {
             sender,

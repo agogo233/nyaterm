@@ -93,7 +93,7 @@ interface AppLayoutProps {
     activeNonSerialSessionId: string | null;
     activeNonSerialSessionIds: string[];
     syncGroups: SyncGroup[];
-    sessionTargets: { id: string; type: SessionType }[];
+    sessionTargets: { id: string; name: string; tabName: string; type: SessionType }[];
     sendCommandDraft: SendCommandPanelDraft | null;
     onSendCommandDraftConsumed: () => void;
     onQuickCmdResize: (delta: number) => void;

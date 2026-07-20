@@ -1,7 +1,7 @@
 use super::auth::{authenticate_handle, load_saved_ssh_config};
 use super::client::{
-    SshConfig, SshConnectionHandles, SshHandle, SshHandler, SshRawHandle, SshStartupCommand,
-    build_client_config, connect_via_stream, connect_with_proxy,
+    RemoteForwardOpen, SshConfig, SshConnectionHandles, SshHandle, SshHandler, SshRawHandle,
+    SshStartupCommand, build_client_config, connect_via_stream, connect_with_proxy,
 };
 use super::io::{open_shell_channel, ssh_io_loop};
 use crate::config::AiExecutionProfile;
@@ -22,6 +22,18 @@ async fn create_authenticated_connection(
     SshHandle,
     Option<mpsc::UnboundedReceiver<super::x11_forwarding::X11ChannelOpen>>,
 )> {
+    create_authenticated_connection_with_notifications(app, config, None, None).await
+}
+
+async fn create_authenticated_connection_with_notifications(
+    app: &AppHandle,
+    config: &SshConfig,
+    disconnect_tx: Option<mpsc::UnboundedSender<String>>,
+    remote_forward_tx: Option<mpsc::UnboundedSender<RemoteForwardOpen>>,
+) -> AppResult<(
+    SshHandle,
+    Option<mpsc::UnboundedReceiver<super::x11_forwarding::X11ChannelOpen>>,
+)> {
     let (x11_tx, x11_rx) = if config.x11_forwarding {
         let (tx, rx) = mpsc::unbounded_channel();
         (Some(tx), Some(rx))
@@ -29,7 +41,8 @@ async fn create_authenticated_connection(
         (None, None)
     };
 
-    let (target_handle, jumps) = connect_authenticated_chain(app, config, x11_tx).await?;
+    let (target_handle, jumps) =
+        connect_authenticated_chain(app, config, x11_tx, disconnect_tx, remote_forward_tx).await?;
     Ok((
         Arc::new(SshConnectionHandles::new(target_handle, jumps)),
         x11_rx,
@@ -40,14 +53,18 @@ async fn connect_authenticated_chain(
     app: &AppHandle,
     config: &SshConfig,
     x11_tx: Option<mpsc::UnboundedSender<super::x11_forwarding::X11ChannelOpen>>,
+    disconnect_tx: Option<mpsc::UnboundedSender<String>>,
+    remote_forward_tx: Option<mpsc::UnboundedSender<RemoteForwardOpen>>,
 ) -> AppResult<(SshRawHandle, Vec<SshRawHandle>)> {
-    connect_authenticated_chain_boxed(app, config, x11_tx).await
+    connect_authenticated_chain_boxed(app, config, x11_tx, disconnect_tx, remote_forward_tx).await
 }
 
 fn connect_authenticated_chain_boxed<'a>(
     app: &'a AppHandle,
     config: &'a SshConfig,
     x11_tx: Option<mpsc::UnboundedSender<super::x11_forwarding::X11ChannelOpen>>,
+    disconnect_tx: Option<mpsc::UnboundedSender<String>>,
+    remote_forward_tx: Option<mpsc::UnboundedSender<RemoteForwardOpen>>,
 ) -> Pin<Box<dyn Future<Output = AppResult<(SshRawHandle, Vec<SshRawHandle>)>> + Send + 'a>> {
     Box::pin(async move {
         if let Some(jump_config) = config.proxy_jump.as_deref() {
@@ -60,7 +77,7 @@ fn connect_authenticated_chain_boxed<'a>(
             );
 
             let (jump_handle, mut jumps) =
-                connect_authenticated_chain(app, jump_config, None).await?;
+                connect_authenticated_chain(app, jump_config, None, None, None).await?;
             let channel = {
                 let jump = jump_handle.lock().await;
                 jump.channel_open_direct_tcpip(&config.host, config.port.into(), "127.0.0.1", 0)
@@ -85,6 +102,12 @@ fn connect_authenticated_chain_boxed<'a>(
             );
             if let Some(tx) = x11_tx {
                 target_handler = target_handler.with_x11_sender(tx);
+            }
+            if let Some(tx) = disconnect_tx {
+                target_handler = target_handler.with_disconnect_sender(tx);
+            }
+            if let Some(tx) = remote_forward_tx {
+                target_handler = target_handler.with_remote_forward_sender(tx);
             }
             let ssh_client_config = Arc::new(build_client_config(app, config)?);
             let mut target_handle =
@@ -118,6 +141,12 @@ fn connect_authenticated_chain_boxed<'a>(
         if let Some(tx) = x11_tx {
             handler = handler.with_x11_sender(tx);
         }
+        if let Some(tx) = disconnect_tx {
+            handler = handler.with_disconnect_sender(tx);
+        }
+        if let Some(tx) = remote_forward_tx {
+            handler = handler.with_remote_forward_sender(tx);
+        }
         let ssh_client_config = Arc::new(build_client_config(app, config)?);
         let mut handle = connect_with_proxy(config, ssh_client_config, handler).await?;
         authenticate_handle(
@@ -148,9 +177,34 @@ fn set_owner_window_label(config: &mut SshConfig, owner_window_label: Option<Str
 
 /// Creates an authenticated SSH handle for a saved connection without opening a PTY/shell.
 /// Used by tunnels to establish their own independent SSH connections.
+#[allow(dead_code)]
 pub async fn create_ssh_handle(app: &AppHandle, connection_id: &str) -> AppResult<SshHandle> {
     let ssh_config = load_saved_ssh_config(app, connection_id)?;
     let (handle, _x11_rx) = create_authenticated_connection(app, &ssh_config).await?;
+
+    tracing::info!(
+        host = %ssh_config.host,
+        port = ssh_config.port,
+        "Tunnel SSH handle created"
+    );
+
+    Ok(handle)
+}
+
+pub async fn create_ssh_handle_for_tunnel(
+    app: &AppHandle,
+    connection_id: &str,
+    disconnect_tx: mpsc::UnboundedSender<String>,
+    remote_forward_tx: Option<mpsc::UnboundedSender<RemoteForwardOpen>>,
+) -> AppResult<SshHandle> {
+    let ssh_config = load_saved_ssh_config(app, connection_id)?;
+    let (handle, _x11_rx) = create_authenticated_connection_with_notifications(
+        app,
+        &ssh_config,
+        Some(disconnect_tx),
+        remote_forward_tx,
+    )
+    .await?;
 
     tracing::info!(
         host = %ssh_config.host,

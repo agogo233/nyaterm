@@ -759,8 +759,69 @@ export type BackgroundImageFit = "cover" | "contain" | "stretch" | "tile";
 /** Internal native transparency marker. Windows 11 only; other platforms no-op. */
 export type WindowTransparency = "none" | "transparent";
 
+export interface TerminalThemeColors {
+  background: string;
+  foreground: string;
+  cursor: string;
+  selectionBackground: string;
+  lineHighlight: string;
+  findMatchBackground: string;
+  findMatchBorder: string;
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+  brightBlack: string;
+  brightRed: string;
+  brightGreen: string;
+  brightYellow: string;
+  brightBlue: string;
+  brightMagenta: string;
+  brightCyan: string;
+  brightWhite: string;
+}
+
+export interface ThemeSettingsColors {
+  bg: string;
+  bgPanel: string;
+  bgTerminal: string;
+  bgHover: string;
+  bgInput: string;
+  bgSectionHeader: string;
+  border: string;
+  text: string;
+  textMuted: string;
+  textDimmed: string;
+  primary: string;
+  primaryHover: string;
+  onPrimary: string;
+  focusRing: string;
+  danger: string;
+  dangerHover: string;
+  success: string;
+  warning: string;
+  link: string;
+  shadow: string;
+  scrollThumb: string;
+  accent: string;
+  terminal: TerminalThemeColors;
+}
+
+export interface CustomThemeSettings {
+  id: string;
+  name: string;
+  label: string;
+  swatch: string;
+  colors: ThemeSettingsColors;
+}
+
 export interface AppearanceSettings {
   theme: string;
+  custom_themes: CustomThemeSettings[];
   font_family: string;
   ui_font_family: string;
   font_size: number;
@@ -874,9 +935,11 @@ export interface ActionLinksMatcherSettings {
 }
 
 export type KeywordHighlightBuiltinRuleSettings = Record<string, boolean>;
+export type SshKeepAliveMode = "compatible" | "strict" | "disabled";
 
 export interface TerminalSettings {
   scrollback_lines: number;
+  keep_alive_mode: SshKeepAliveMode;
   keep_alive_interval: number;
   font_size_delta: number;
   x11_display?: string;
@@ -927,6 +990,8 @@ export type AIMode = "ask" | "agent";
 export type AIAgentCommandExecutionMode = "confirm_each" | "smart" | "auto";
 export type AIReasoningEffort = "auto" | "none" | "low" | "medium" | "high" | "xhigh";
 export type AIModelSource = "rust-genai" | "manual";
+export type AIBackendKind = "genai" | "codex";
+export type CodexThreadMode = "persistent" | "ephemeral";
 
 export type AIProviderKind =
   | "openai"
@@ -944,11 +1009,20 @@ export type AIProviderKind =
 export interface AIModelConfigItem {
   id: string;
   name: string;
+  backend?: AIBackendKind;
   provider_kind?: AIProviderKind | null;
   credential_id?: string | null;
   enabled: boolean;
   source: AIModelSource;
   last_seen_at?: string | null;
+}
+
+export interface CodexIntegrationSettings {
+  enabled: boolean;
+  executable_path?: string | null;
+  default_model?: string | null;
+  thread_mode: CodexThreadMode;
+  remote_terminal_agent_enabled: boolean;
 }
 
 export interface AIProviderProfile {
@@ -1002,6 +1076,7 @@ export interface AISettings {
   agent_background_execution_enabled: boolean;
   agent_command_execution_mode: AIAgentCommandExecutionMode;
   agent_smart_auto_execute_max_risk: RiskLevel;
+  codex: CodexIntegrationSettings;
 }
 
 export interface AIContext {
@@ -1029,6 +1104,7 @@ export type AIAction =
 export interface AIModelDiscovery {
   id: string;
   name: string;
+  backend?: AIBackendKind;
   providerKind?: AIProviderKind | null;
   credentialId?: string | null;
   source: AIModelSource;
@@ -1045,6 +1121,31 @@ export interface AICommandCard {
   rollback?: string | null;
   category?: string | null;
   references?: string[];
+  targetTerminalSessionId?: string | null;
+  target?: AITerminalTarget | null;
+}
+
+export type AIScopeType = "terminal" | "workspace" | "global" | "unbound";
+
+export interface AISessionScope {
+  type: AIScopeType;
+  targetId?: string | null;
+  connectionIds?: string[];
+  label?: string | null;
+}
+
+export interface AITerminalTarget {
+  terminalSessionId: string;
+  connectionId?: string | null;
+  label: string;
+  host?: string | null;
+  username?: string | null;
+  sessionType: string;
+}
+
+export interface AITargetContext {
+  target?: AITerminalTarget | null;
+  context: AIContext;
 }
 
 export interface AIMessage {
@@ -1059,10 +1160,15 @@ export interface AIMessage {
 
 export interface AISession {
   id: string;
+  scope?: AISessionScope;
   connectionId?: string | null;
   title: string;
   createdAt: string;
   updatedAt: string;
+  backendMetadata?: {
+    backend: AIBackendKind;
+    externalThreadId?: string | null;
+  } | null;
 }
 
 export interface AIStreamStart {
@@ -1088,6 +1194,7 @@ export type AgentStepStatus = "running" | "completed" | "needs_approval" | "reje
 export interface AgentStepAction {
   kind: AgentActionKind;
   command?: string | null;
+  target?: AITerminalTarget | null;
   riskLevel?: RiskLevel | null;
   modelRiskLevel?: RiskLevel | null;
   localRiskLevel?: RiskLevel | null;
@@ -1135,6 +1242,21 @@ export interface TunnelConfig {
   auto_open: boolean;
   bind_localhost: boolean;
   group_id?: string;
+}
+
+export type TunnelRuntimeStatus =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "reconnecting"
+  | "disconnected"
+  | "error";
+
+export interface TunnelRuntimeState {
+  tunnelId: string;
+  status: TunnelRuntimeStatus;
+  error?: string | null;
+  updatedAt?: number | null;
 }
 
 export interface InteractionSettings {
