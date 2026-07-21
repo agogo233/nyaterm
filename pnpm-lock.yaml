@@ -113,6 +113,9 @@ importers:
       '@xterm/addon-search':
         specifier: 0.17.0-beta.288
         version: 0.17.0-beta.288(@xterm/xterm@6.1.0-beta.288)
+      '@xterm/addon-serialize':
+        specifier: 0.15.0-beta.288
+        version: 0.15.0-beta.288(@xterm/xterm@6.1.0-beta.288)
       '@xterm/addon-unicode-graphemes':
         specifier: 0.5.0-beta.288
         version: 0.5.0-beta.288(@xterm/xterm@6.1.0-beta.288)
@@ -4202,6 +4205,11 @@ packages:
 
   '@xterm/addon-search@0.17.0-beta.288':
     resolution: {integrity: sha512-JQk4n83Zs0A3K2VjQGbfhGAxoQZaMZtgBMSLKOx2Zg2HuikIsjIjUsPpOoJHwAfhVXKXmgd9QmVp61DxJj8tyw==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.288
+
+  '@xterm/addon-serialize@0.15.0-beta.288':
+    resolution: {integrity: sha512-9wgP/SJeG5ko5ddUDy0gstcziSqlb8ESm8BGtddxz4/56zVGs0DVPVIKQUYKLKKHDCPxm1b6T9YuK3f6WRd3CA==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.288
 
@@ -13685,6 +13693,10 @@ snapshots:
       '@xterm/xterm': 6.1.0-beta.288
 
   '@xterm/addon-search@0.17.0-beta.288(@xterm/xterm@6.1.0-beta.288)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.288
+
+  '@xterm/addon-serialize@0.15.0-beta.288(@xterm/xterm@6.1.0-beta.288)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.288
 
