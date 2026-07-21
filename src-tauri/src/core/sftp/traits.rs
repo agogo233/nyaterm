@@ -5,6 +5,7 @@ use super::util::{
     RemoteTextFile, WriteRemoteTextResult,
 };
 use crate::error::AppResult;
+use std::any::Any;
 
 /// Common interface for remote file system operations.
 ///
@@ -12,6 +13,7 @@ use crate::error::AppResult;
 /// upper-level orchestrator can switch between them transparently.
 #[async_trait::async_trait]
 pub(crate) trait RemoteFs: Send + Sync {
+    fn as_any(&self) -> &dyn Any;
     fn backend_name(&self) -> &'static str;
 
     async fn home_dir(&self) -> AppResult<String>;

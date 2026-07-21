@@ -193,6 +193,7 @@ pub fn run() {
             cmd::sftp::update_remote_file_attributes,
             cmd::sftp::download_remote_directory,
             cmd::sftp::upload_local_directory,
+            cmd::sftp::copy_file_entry,
             cmd::sftp::pause_transfer,
             cmd::sftp::resume_transfer,
             cmd::sftp::cancel_transfer,

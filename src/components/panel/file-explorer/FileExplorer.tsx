@@ -3,21 +3,26 @@ import { downloadDir, join, tempDir } from "@tauri-apps/api/path";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
+  type CSSProperties,
   memo,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   startTransition,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { LuClipboardPaste, LuFolderSync } from "react-icons/lu";
 import {
   MdArrowDropDown,
   MdArrowDropUp,
+  MdClose,
   MdContentCopy,
   MdCreateNewFolder,
   MdDriveFolderUpload,
@@ -29,6 +34,7 @@ import {
   MdSyncLock,
   MdUpload,
 } from "react-icons/md";
+import { PiColumnsPlusRightBold } from "react-icons/pi";
 import { toast } from "sonner";
 import type {
   DeleteDialogData,
@@ -51,6 +57,12 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApp } from "@/context/AppContext";
 import { useTransfer } from "@/context/TransferContext";
@@ -117,12 +129,448 @@ const MemoizedFileExplorer = memo(FileExplorer);
 
 export default MemoizedFileExplorer;
 
-/** Remote file browser for active SSH session. Lists dirs/files, supports navigation. */
-function FileExplorer({
+type FileExplorerPaneEndpoint = {
+  sessionId: string;
+  kind: "local" | "remote";
+  currentPath: string;
+};
+
+type FileExplorerCopyEntry = {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+};
+
+type FileExplorerSendTargetOption = {
+  sessionId: string;
+  label: string;
+  meta: string;
+};
+
+interface FileExplorerPaneExtraProps {
+  headerMeta?: ReactNode;
+  headerActions?: ReactNode;
+  peerEndpoint?: FileExplorerPaneEndpoint | null;
+  onOpenPeerSelector?: () => void;
+  onDirectoryStateChange?: (state: FileExplorerPaneEndpoint | null) => void;
+  sendTargetOptions?: FileExplorerSendTargetOption[];
+  onSendEntriesToTarget?: (
+    source: FileExplorerPaneEndpoint,
+    entries: FileExplorerCopyEntry[],
+    targetSessionId: string,
+  ) => void;
+}
+
+function isFileBrowsableSession(session: SessionInfo) {
+  return (
+    session.connected &&
+    (session.session_type === "Local" ||
+      (session.session_type === "SSH" && session.remote_file_browser_enabled))
+  );
+}
+
+function getSessionExplorerKind(session: SessionInfo): FileExplorerBackendKind {
+  return session.session_type === "Local" ? "local" : "remote";
+}
+
+/** Dual-pane file browser wrapper. */
+function FileExplorer(props: FileExplorerProps) {
+  const { t } = useTranslation();
+  const { enqueueCopies } = useTransfer();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const secondaryOverlayRef = useRef<HTMLDivElement | null>(null);
+  const secondaryPositionFrameRef = useRef<number | null>(null);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [targetSessionId, setTargetSessionId] = useState<string | null>(null);
+  const [targetSelectorOpen, setTargetSelectorOpen] = useState(false);
+  const [primaryEndpoint, setPrimaryEndpoint] = useState<FileExplorerPaneEndpoint | null>(null);
+  const [secondaryEndpoint, setSecondaryEndpoint] = useState<FileExplorerPaneEndpoint | null>(null);
+  const [secondaryOverlayStyle, setSecondaryOverlayStyle] = useState<CSSProperties | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      try {
+        const next = await invoke<SessionInfo[]>("list_sessions");
+        if (!disposed) setSessions(next);
+      } catch {
+        if (!disposed) setSessions([]);
+      }
+    };
+    void load();
+    const unlisten = listen("sessions-changed", () => {
+      void load();
+    });
+    return () => {
+      disposed = true;
+      unlisten.then((dispose) => dispose());
+    };
+  }, []);
+
+  const browsableSessions = sessions.filter(isFileBrowsableSession);
+  const targetCandidates = browsableSessions.filter(
+    (session) => session.id !== props.activeSessionId,
+  );
+  const selectedTarget = targetCandidates.find((session) => session.id === targetSessionId) ?? null;
+  const currentSession = sessions.find((session) => session.id === props.activeSessionId) ?? null;
+  const canShowDualButton = !!props.activeSessionId && browsableSessions.length > 1;
+  const primarySendTargetOptions = targetCandidates.map((session) => ({
+    sessionId: session.id,
+    label: session.name,
+    meta: session.session_type,
+  }));
+  const secondarySendTargetOptions =
+    currentSession && props.activeSessionId
+      ? [
+          {
+            sessionId: props.activeSessionId,
+            label: currentSession.name,
+            meta: currentSession.session_type,
+          },
+        ]
+      : [];
+
+  const closeSecondaryPane = useCallback(() => {
+    setTargetSessionId(null);
+    setSecondaryEndpoint(null);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTarget && targetSessionId) {
+      setTargetSessionId(null);
+      setSecondaryEndpoint(null);
+    }
+  }, [selectedTarget, targetSessionId]);
+
+  const measureSecondaryOverlayPosition = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || !selectedTarget) {
+      setSecondaryOverlayStyle(null);
+      return;
+    }
+
+    const rect = container.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const gap = 8;
+    const margin = 8;
+    const preferredWidth = 420;
+    const minWidth = 320;
+    const availableRight = viewportWidth - rect.right - gap - margin;
+    const width =
+      availableRight >= minWidth
+        ? Math.min(preferredWidth, availableRight)
+        : Math.min(preferredWidth, Math.max(minWidth, viewportWidth - margin * 2));
+    const left =
+      availableRight >= minWidth
+        ? rect.right + gap
+        : Math.max(margin, Math.min(rect.right - width, viewportWidth - width - margin));
+
+    setSecondaryOverlayStyle({
+      position: "fixed",
+      left,
+      top: Math.max(margin, rect.top),
+      width,
+      height: Math.max(
+        240,
+        Math.min(rect.height, viewportHeight - Math.max(margin, rect.top) - margin),
+      ),
+      zIndex: 60,
+    });
+  }, [selectedTarget]);
+
+  const updateSecondaryOverlayPosition = useCallback(() => {
+    if (secondaryPositionFrameRef.current !== null) return;
+    secondaryPositionFrameRef.current = window.requestAnimationFrame(() => {
+      secondaryPositionFrameRef.current = null;
+      measureSecondaryOverlayPosition();
+    });
+  }, [measureSecondaryOverlayPosition]);
+
+  useLayoutEffect(() => {
+    if (!selectedTarget) {
+      setSecondaryOverlayStyle(null);
+      return;
+    }
+
+    measureSecondaryOverlayPosition();
+    window.addEventListener("resize", updateSecondaryOverlayPosition);
+    window.addEventListener("scroll", updateSecondaryOverlayPosition, true);
+    const observer =
+      typeof ResizeObserver === "undefined" || !containerRef.current
+        ? null
+        : new ResizeObserver(updateSecondaryOverlayPosition);
+    if (containerRef.current) {
+      observer?.observe(containerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener("resize", updateSecondaryOverlayPosition);
+      window.removeEventListener("scroll", updateSecondaryOverlayPosition, true);
+      observer?.disconnect();
+      if (secondaryPositionFrameRef.current !== null) {
+        window.cancelAnimationFrame(secondaryPositionFrameRef.current);
+        secondaryPositionFrameRef.current = null;
+      }
+    };
+  }, [selectedTarget, measureSecondaryOverlayPosition, updateSecondaryOverlayPosition]);
+
+  useEffect(() => {
+    if (!selectedTarget) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeSecondaryPane();
+      }
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (secondaryOverlayRef.current?.contains(target)) return;
+      if (containerRef.current?.contains(target)) return;
+      closeSecondaryPane();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [selectedTarget, closeSecondaryPane]);
+
+  const enqueuePaneCopies = useCallback(
+    (
+      source: FileExplorerPaneEndpoint,
+      target: FileExplorerPaneEndpoint,
+      entries: FileExplorerCopyEntry[],
+    ) => {
+      if (!target.currentPath || entries.length === 0) return;
+      enqueueCopies(
+        entries.map((entry) => ({
+          fileName: entry.name,
+          kind: entry.isDirectory ? "directory" : "file",
+          source: {
+            sessionId: source.sessionId,
+            kind: source.kind,
+            path: entry.path,
+          },
+          target: {
+            sessionId: target.sessionId,
+            kind: target.kind,
+            path: target.currentPath,
+          },
+        })),
+      );
+      toast.success(t("fileExplorer.copyQueued", { count: entries.length }));
+    },
+    [enqueueCopies, t],
+  );
+
+  const enqueueEntriesToSessionCwd = useCallback(
+    async (
+      source: FileExplorerPaneEndpoint,
+      entries: FileExplorerCopyEntry[],
+      targetSessionId: string,
+    ) => {
+      if (entries.length === 0) return;
+
+      const targetSession = browsableSessions.find((session) => session.id === targetSessionId);
+      if (!targetSession) {
+        toast.error(t("fileExplorer.targetCwdUnavailable"));
+        return;
+      }
+
+      try {
+        const targetKind = getSessionExplorerKind(targetSession);
+        const liveEndpoint =
+          targetSessionId === primaryEndpoint?.sessionId
+            ? primaryEndpoint
+            : targetSessionId === secondaryEndpoint?.sessionId
+              ? secondaryEndpoint
+              : null;
+        const cachedPath = fileExplorerSessionCacheStore.get(targetSessionId)?.currentPath ?? "";
+        const livePath =
+          liveEndpoint?.kind === targetKind
+            ? normalizeExplorerPath(liveEndpoint.currentPath, targetKind)
+            : "";
+        let targetPath = livePath || normalizeExplorerPath(cachedPath, targetKind);
+        if (!targetPath) {
+          const cwd = await invoke<string | null>("try_get_terminal_cwd", {
+            sessionId: targetSessionId,
+          });
+          targetPath = normalizeExplorerPath(cwd ?? "", targetKind);
+        }
+        if (!targetPath) {
+          toast.error(t("fileExplorer.targetCwdUnavailable"));
+          return;
+        }
+
+        enqueuePaneCopies(
+          source,
+          {
+            sessionId: targetSessionId,
+            kind: targetKind,
+            currentPath: targetPath,
+          },
+          entries,
+        );
+      } catch (error) {
+        logger.error({
+          domain: "transfer.lifecycle",
+          event: "copy.target_cwd_failed",
+          message: "Failed to enqueue copy to target session current directory",
+          ids: { session_id: targetSessionId },
+          error,
+        });
+        toast.error(getErrorMessage(error));
+      }
+    },
+    [browsableSessions, enqueuePaneCopies, primaryEndpoint, secondaryEndpoint, t],
+  );
+
+  const primaryActions = canShowDualButton ? (
+    <DropdownMenu open={targetSelectorOpen} onOpenChange={setTargetSelectorOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={cn(
+                "text-muted-foreground hover:text-foreground",
+                selectedTarget && "bg-primary/10 text-primary",
+              )}
+              aria-label={t("fileExplorer.dualPane")}
+            >
+              <PiColumnsPlusRightBold className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("fileExplorer.dualPane")}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="min-w-56">
+        {targetCandidates.map((session) => (
+          <DropdownMenuItem
+            key={session.id}
+            onClick={() => {
+              setTargetSessionId(session.id);
+              setTargetSelectorOpen(false);
+            }}
+          >
+            <span className="min-w-0 flex-1 truncate">{session.name}</span>
+            <span className="ml-2 shrink-0 text-[0.625rem] text-muted-foreground">
+              {session.session_type}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null;
+
+  const secondaryActions = selectedTarget ? (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      className="text-muted-foreground hover:text-foreground"
+      aria-label={t("common.close")}
+      onClick={() => {
+        closeSecondaryPane();
+      }}
+    >
+      <MdClose className="size-4" />
+    </Button>
+  ) : null;
+
+  const secondaryPane =
+    selectedTarget && secondaryOverlayStyle
+      ? createPortal(
+          <div
+            ref={secondaryOverlayRef}
+            className="overflow-hidden rounded-md border shadow-xl"
+            style={{
+              ...secondaryOverlayStyle,
+              borderColor: "var(--df-primary)",
+              backgroundColor: "var(--df-bg-panel)",
+              boxShadow:
+                "0 0 0 1px color-mix(in srgb, var(--df-primary) 35%, transparent), 0 10px 30px rgba(0,0,0,0.35)",
+            }}
+          >
+            <FileExplorerPane
+              activeSessionId={selectedTarget.id}
+              activeSessionType={selectedTarget.session_type}
+              activeConnectionId={null}
+              headerMeta={`${selectedTarget.name} · ${
+                selectedTarget.connected
+                  ? t("fileExplorer.connected")
+                  : t("fileExplorer.disconnected")
+              }`}
+              headerActions={secondaryActions}
+              peerEndpoint={primaryEndpoint}
+              onDirectoryStateChange={setSecondaryEndpoint}
+              onSendEntries={(source, entries) => {
+                if (primaryEndpoint) {
+                  enqueuePaneCopies(source, primaryEndpoint, entries);
+                }
+              }}
+              sendTargetOptions={secondarySendTargetOptions}
+              onSendEntriesToTarget={(source, entries, sessionId) => {
+                void enqueueEntriesToSessionCwd(source, entries, sessionId);
+              }}
+            />
+          </div>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <div ref={containerRef} className="relative h-full min-h-0">
+      <FileExplorerPane
+        {...props}
+        headerActions={primaryActions}
+        peerEndpoint={secondaryEndpoint}
+        onOpenPeerSelector={() => {
+          if (!selectedTarget && targetCandidates.length > 0) {
+            setTargetSelectorOpen(true);
+          }
+        }}
+        onDirectoryStateChange={setPrimaryEndpoint}
+        onSendEntries={(source, entries) => {
+          if (secondaryEndpoint) {
+            enqueuePaneCopies(source, secondaryEndpoint, entries);
+          }
+        }}
+        sendTargetOptions={primarySendTargetOptions}
+        onSendEntriesToTarget={(source, entries, sessionId) => {
+          void enqueueEntriesToSessionCwd(source, entries, sessionId);
+        }}
+      />
+
+      {secondaryPane}
+    </div>
+  );
+}
+
+interface FileExplorerPaneProps extends FileExplorerProps, FileExplorerPaneExtraProps {
+  onSendEntries?: (source: FileExplorerPaneEndpoint, entries: FileExplorerCopyEntry[]) => void;
+}
+
+/** Remote or local file browser pane. Lists dirs/files, supports navigation. */
+function FileExplorerPane({
   activeSessionId,
   activeSessionType,
   activeConnectionId,
-}: FileExplorerProps) {
+  headerMeta,
+  headerActions,
+  peerEndpoint,
+  onOpenPeerSelector,
+  onDirectoryStateChange,
+  onSendEntries,
+  sendTargetOptions = [],
+  onSendEntriesToTarget,
+}: FileExplorerPaneProps) {
   const { t } = useTranslation();
   const { appSettings, updateUi } = useApp();
   const { enqueueDownloads, enqueueUploads } = useTransfer();
@@ -241,6 +689,19 @@ function FileExplorer({
   const showHiddenFiles = appSettings.ui.file_explorer_show_hidden_files ?? true;
   const listScrollResetKey = `${activeSessionId ?? ""}:${currentPath}`;
   const listFilterResetKey = `${fileSearchQuery}:${fileSortMode.column}:${fileSortMode.direction}`;
+
+  useEffect(() => {
+    if (!onDirectoryStateChange) return;
+    if (!activeSessionId || !canBrowseFiles || !currentPath) {
+      onDirectoryStateChange(null);
+      return;
+    }
+    onDirectoryStateChange({
+      sessionId: activeSessionId,
+      kind: explorerBackend,
+      currentPath,
+    });
+  }, [activeSessionId, canBrowseFiles, currentPath, explorerBackend, onDirectoryStateChange]);
 
   useEffect(() => {
     const container = listContainerRef.current;
@@ -1492,9 +1953,12 @@ function FileExplorer({
     };
   }, [autoSyncCwd, activeSessionId, loadDirectory]);
 
-  const getEntryFullPath = (entry: FileEntry) => {
-    return joinExplorerPath(currentPath, entry.name, explorerBackend);
-  };
+  const getEntryFullPath = useCallback(
+    (entry: FileEntry) => {
+      return joinExplorerPath(currentPath, entry.name, explorerBackend);
+    },
+    [currentPath, explorerBackend],
+  );
 
   const beginInlineRename = useCallback(
     (entry: FileEntry) => {
@@ -1630,16 +2094,82 @@ function FileExplorer({
     }));
   };
 
-  const getContextMenuEntries = (entry: FileEntry) => {
-    if (isParentDirectoryEntry(entry)) {
-      return [];
-    }
+  const getContextMenuEntries = useCallback(
+    (entry: FileEntry) => {
+      if (isParentDirectoryEntry(entry)) {
+        return [];
+      }
 
-    if (selectedFiles.size > 1 && selectedFiles.has(entry.name)) {
-      return filteredSortedFiles.filter((file) => selectedFiles.has(file.name));
-    }
-    return [entry];
-  };
+      if (selectedFiles.size > 1 && selectedFiles.has(entry.name)) {
+        return filteredSortedFiles.filter((file) => selectedFiles.has(file.name));
+      }
+      return [entry];
+    },
+    [filteredSortedFiles, selectedFiles],
+  );
+
+  const handleSendToPeer = useCallback(
+    (entry: FileEntry) => {
+      if (!activeSessionId || isParentDirectoryEntry(entry)) return;
+      if (!peerEndpoint) {
+        onOpenPeerSelector?.();
+        return;
+      }
+      const entries = getContextMenuEntries(entry).map((item) => ({
+        name: item.name,
+        path: getEntryFullPath(item),
+        isDirectory: item.is_dir,
+      }));
+      if (entries.length === 0) return;
+      onSendEntries?.(
+        {
+          sessionId: activeSessionId,
+          kind: explorerBackend,
+          currentPath,
+        },
+        entries,
+      );
+    },
+    [
+      activeSessionId,
+      currentPath,
+      explorerBackend,
+      getContextMenuEntries,
+      getEntryFullPath,
+      onOpenPeerSelector,
+      onSendEntries,
+      peerEndpoint,
+    ],
+  );
+
+  const handleSendToTarget = useCallback(
+    (entry: FileEntry, targetSessionId: string) => {
+      if (!activeSessionId || isParentDirectoryEntry(entry)) return;
+      const entries = getContextMenuEntries(entry).map((item) => ({
+        name: item.name,
+        path: getEntryFullPath(item),
+        isDirectory: item.is_dir,
+      }));
+      if (entries.length === 0) return;
+      onSendEntriesToTarget?.(
+        {
+          sessionId: activeSessionId,
+          kind: explorerBackend,
+          currentPath,
+        },
+        entries,
+        targetSessionId,
+      );
+    },
+    [
+      activeSessionId,
+      currentPath,
+      explorerBackend,
+      getContextMenuEntries,
+      getEntryFullPath,
+      onSendEntriesToTarget,
+    ],
+  );
 
   const openDeleteDialog = (entries: FileEntry[]) => {
     if (!activeSessionId || entries.length === 0) return;
@@ -2001,7 +2531,7 @@ function FileExplorer({
       onMouseDownCapture={handlePanelMouseDownCapture}
       onMouseUpCapture={handlePanelMouseUpCapture}
     >
-      <PanelHeader title={t("panel.fileExplorer")} />
+      <PanelHeader title={t("panel.fileExplorer")} meta={headerMeta} actions={headerActions} />
 
       {canBrowseFiles && (
         <FileExplorerToolbar
@@ -2223,6 +2753,10 @@ function FileExplorer({
                           onUpload={handleUploadFiles}
                           onUploadFolder={handleUploadFolder}
                           onDownload={handleDownloadFromContextMenu}
+                          showPeerSendAction={!!peerEndpoint && !!onSendEntries}
+                          onSendToPeer={handleSendToPeer}
+                          sendTargetOptions={sendTargetOptions}
+                          onSendToTarget={handleSendToTarget}
                           onRename={beginInlineRename}
                           onMove={(entry) => {
                             if (activeSessionId)

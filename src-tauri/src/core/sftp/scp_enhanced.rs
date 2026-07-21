@@ -618,6 +618,10 @@ async fn exec_command_on_with_stdin(
 
 #[async_trait::async_trait]
 impl RemoteFs for ScpEnhancedBackend {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn backend_name(&self) -> &'static str {
         "scp-enhanced"
     }

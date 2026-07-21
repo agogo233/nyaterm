@@ -288,6 +288,15 @@ pub async fn upload_local_directory(
 }
 
 #[tauri::command]
+pub async fn copy_file_entry(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    request: sftp::CopyFileEntryRequest,
+) -> AppResult<()> {
+    sftp::copy_file_entry(app, state.inner().clone(), request).await
+}
+
+#[tauri::command]
 pub async fn pause_transfer(app: tauri::AppHandle, transfer_id: String) -> AppResult<()> {
     sftp::pause_transfer(app, &transfer_id).await
 }

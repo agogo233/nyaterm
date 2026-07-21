@@ -818,6 +818,10 @@ async fn ensure_remote_upload_target_allowed(
 
 #[async_trait::async_trait]
 impl RemoteFs for ScpNormalBackend {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn backend_name(&self) -> &'static str {
         "scp-normal"
     }

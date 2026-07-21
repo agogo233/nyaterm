@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   MdBlock,
+  MdContentCopy,
   MdDelete,
   MdDeleteSweep,
   MdDownload,
@@ -128,8 +129,15 @@ function TransferRow({
 }) {
   const { t } = useTranslation();
   const DirIcon =
-    item.kind === "directory" ? MdFolder : item.direction === "upload" ? MdUpload : MdDownload;
-  const dirColor = item.direction === "upload" ? "#4ade80" : "#60a5fa";
+    item.kind === "directory"
+      ? MdFolder
+      : item.direction === "copy"
+        ? MdContentCopy
+        : item.direction === "upload"
+          ? MdUpload
+          : MdDownload;
+  const dirColor =
+    item.direction === "copy" ? "#a78bfa" : item.direction === "upload" ? "#4ade80" : "#60a5fa";
   const hasByteProgress = item.totalSize > 0;
   const byteProgress = hasByteProgress
     ? Math.min(100, Math.round((item.bytesTransferred / item.totalSize) * 100))
@@ -359,7 +367,12 @@ export default function FileTransfer({ activeSessionId }: FileTransferProps) {
   const visibleTransfers = useMemo(() => {
     const topLevelTransfers = transfers.filter((transfer) => !transfer.parentId);
     const filteredTransfers = activeSessionId
-      ? topLevelTransfers.filter((transfer) => transfer.sessionId === activeSessionId)
+      ? topLevelTransfers.filter(
+          (transfer) =>
+            transfer.sessionId === activeSessionId ||
+            transfer.sourceSessionId === activeSessionId ||
+            transfer.targetSessionId === activeSessionId,
+        )
       : topLevelTransfers;
 
     return [...filteredTransfers].sort((a, b) => {
