@@ -1194,6 +1194,8 @@
     "commandPlaceholder": "例如：ls -la\n使用 {{变量名}} 注入动态参数。",
     "commandScript": "命令脚本",
     "compactListMode": "紧凑列表",
+    "copyCommand": "复制命令",
+    "copyFailed": "复制失败，请重试",
     "createCategory": "创建 \"{{name}}\"",
     "delete": "删除",
     "deleteCategory": "删除分类",

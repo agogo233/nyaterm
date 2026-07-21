@@ -1194,6 +1194,8 @@
     "commandPlaceholder": "例如：ls -la\n使用 {{varName}} 注入動態引數。",
     "commandScript": "命令指令碼",
     "compactListMode": "緊湊清單",
+    "copyCommand": "複製命令",
+    "copyFailed": "複製失敗，請重試",
     "createCategory": "建立 \"{{name}}\"",
     "delete": "刪除",
     "deleteCategory": "刪除分類",

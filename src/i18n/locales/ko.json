@@ -1191,6 +1191,8 @@
     "commandPlaceholder": "예: ls -la\n변수에는 {{varName}}을 사용하세요.",
     "commandScript": "스크립트",
     "compactListMode": "간략한 목록",
+    "copyCommand": "명령 복사",
+    "copyFailed": "복사에 실패했습니다. 다시 시도하세요",
     "createCategory": "\"{{name}}\" 생성",
     "delete": "삭제",
     "deleteCategory": "카테고리 삭제",
