@@ -9,6 +9,7 @@ pub mod credential;
 pub mod docker;
 pub mod gpu;
 pub mod importer;
+pub mod local_fs;
 pub mod log;
 pub mod otp;
 pub mod process;

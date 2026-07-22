@@ -58,15 +58,16 @@ pub use quick_command::{
 #[allow(unused_imports)]
 pub use settings::{
     AI_REQUEST_USER_AGENT_DEFAULT, ActionLinksMatcherSettings, AgentCommandExecutionMode,
-    AiBackendKind, AiCustomActionConfig, AiMode, AiModelConfigItem, AiModelSource,
-    AiProviderCredential, AiProviderKind, AiProviderProfile, AiReasoningEffort, AiSettings,
-    AppSettings, AppearanceSettings, CodexIntegrationSettings, CodexThreadMode,
-    DiagnosticsLogLevel, DiagnosticsSettings, GeneralSettings, InteractionSettings,
-    KeywordHighlightRule, ProxySettings, RiskLevel, SearchEngine, SearchSettings, SecuritySettings,
-    TerminalColorsConfig, TerminalSettings, ThemeColorsConfig, ThemeConfig, TransferSettings,
-    TranslationSettings, ai_model_id_for_credential, ai_model_id_for_provider, decrypt_ai_settings,
-    encrypt_ai_settings, load_app_settings, mask_ai_settings, merge_masked_ai_settings,
-    normalize_ai_settings, save_app_settings,
+    AiAgentKind, AiBackendKind, AiCustomActionConfig, AiMode, AiModelConfigItem, AiModelSource,
+    AiPermissionMode, AiProviderCredential, AiProviderKind, AiProviderProfile, AiReasoningEffort,
+    AiSettings, AppSettings, AppearanceSettings, ClaudeCodeIntegrationSettings,
+    CodexIntegrationSettings, CodexThreadMode, DiagnosticsLogLevel, DiagnosticsSettings,
+    GeneralSettings, InteractionSettings, KeywordHighlightRule, ProxySettings, RiskLevel,
+    SearchEngine, SearchSettings, SecuritySettings, TerminalColorsConfig, TerminalSettings,
+    ThemeColorsConfig, ThemeConfig, TransferSettings, TranslationSettings,
+    ai_model_id_for_credential, ai_model_id_for_provider, decrypt_ai_settings, encrypt_ai_settings,
+    load_app_settings, mask_ai_settings, merge_masked_ai_settings, normalize_ai_settings,
+    save_app_settings,
 };
 #[allow(unused_imports)]
 pub use tunnel::{

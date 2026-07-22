@@ -818,6 +818,10 @@ async fn ensure_remote_upload_target_allowed(
 
 #[async_trait::async_trait]
 impl RemoteFs for ScpNormalBackend {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn backend_name(&self) -> &'static str {
         "scp-normal"
     }
@@ -1006,6 +1010,43 @@ impl RemoteFs for ScpNormalBackend {
         Ok(RemoteTextFile {
             path: path.to_string(),
             content,
+            size: props.size,
+            mtime: props.mtime,
+        })
+    }
+
+    async fn read_file_bytes(&self, path: &str, max_bytes: u64) -> AppResult<RemoteBinaryFile> {
+        let props = self.stat(path).await?;
+        if props.is_dir {
+            return Err(AppError::Config(
+                "Directories cannot be previewed".to_string(),
+            ));
+        }
+        if props.size > max_bytes {
+            return Err(AppError::Config(format!(
+                "File is too large to preview ({} bytes > {} bytes)",
+                props.size, max_bytes
+            )));
+        }
+
+        let cmd = format!(
+            "dd bs=1 count={} if={} 2>/dev/null",
+            props.size,
+            sh_quote(path)
+        );
+        let result = self.exec(&cmd).await?;
+
+        if result.exit_code != Some(0) && result.stdout.is_empty() {
+            let stderr_text = String::from_utf8_lossy(&result.stderr);
+            return Err(AppError::Channel(format!(
+                "Failed to read file: {}",
+                stderr_text.trim()
+            )));
+        }
+
+        Ok(RemoteBinaryFile {
+            path: path.to_string(),
+            content_bytes: result.stdout,
             size: props.size,
             mtime: props.mtime,
         })

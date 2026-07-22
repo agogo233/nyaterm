@@ -6,7 +6,7 @@ interface TerminalGutterProps {
   terminalRef: RefObject<Terminal | null>;
   showLineNumbers: boolean;
   showTimestamps: boolean;
-  showTimestampMilliseconds: boolean;
+  timestampFormat: string;
   lineTimestamps: Map<number, number>;
   getLineOffset: () => number;
   sessionId?: string;
@@ -28,17 +28,71 @@ interface GutterLayout {
   cellWidth: number;
 }
 
-function formatTimestamp(ms: number, includeMilliseconds: boolean): string {
-  const d = new Date(ms);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  if (!includeMilliseconds) {
-    return `[${hh}:${mm}:${ss}]`;
+const DEFAULT_TIMESTAMP_FORMAT = "[HH:mm:ss]";
+const MAX_TIMESTAMP_FORMAT_LENGTH = 64;
+const TIMESTAMP_WIDTH_SAMPLE_MS = new Date(2099, 11, 28, 23, 59, 59, 999).getTime();
+
+function normalizeTimestampFormat(format: string | undefined): string {
+  if (!format || format.trim().length === 0) {
+    return DEFAULT_TIMESTAMP_FORMAT;
   }
 
-  const mmm = String(d.getMilliseconds()).padStart(3, "0");
-  return `[${hh}:${mm}:${ss}.${mmm}]`;
+  return Array.from(format).slice(0, MAX_TIMESTAMP_FORMAT_LENGTH).join("");
+}
+
+function formatTimestamp(ms: number, format: string): string {
+  try {
+    const d = new Date(ms);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const hours = d.getHours();
+    const minutes = d.getMinutes();
+    const seconds = d.getSeconds();
+    const milliseconds = String(d.getMilliseconds()).padStart(3, "0");
+
+    return normalizeTimestampFormat(format).replace(
+      /YYYY|YY|MM|M|DD|D|HH|H|mm|m|ss|s|SSS|SS|S/g,
+      (token) => {
+        switch (token) {
+          case "YYYY":
+            return String(year);
+          case "YY":
+            return String(year).slice(-2);
+          case "MM":
+            return String(month).padStart(2, "0");
+          case "M":
+            return String(month);
+          case "DD":
+            return String(day).padStart(2, "0");
+          case "D":
+            return String(day);
+          case "HH":
+            return String(hours).padStart(2, "0");
+          case "H":
+            return String(hours);
+          case "mm":
+            return String(minutes).padStart(2, "0");
+          case "m":
+            return String(minutes);
+          case "ss":
+            return String(seconds).padStart(2, "0");
+          case "s":
+            return String(seconds);
+          case "SSS":
+            return milliseconds;
+          case "SS":
+            return milliseconds.slice(0, 2);
+          case "S":
+            return milliseconds.slice(0, 1);
+          default:
+            return token;
+        }
+      },
+    );
+  } catch {
+    return formatTimestamp(ms, DEFAULT_TIMESTAMP_FORMAT);
+  }
 }
 
 interface XTermCoreWithRenderDimensions {
@@ -60,7 +114,7 @@ export default function TerminalGutter({
   terminalRef,
   showLineNumbers,
   showTimestamps,
-  showTimestampMilliseconds,
+  timestampFormat,
   lineTimestamps,
   getLineOffset,
   sessionId,
@@ -136,7 +190,7 @@ export default function TerminalGutter({
         key: logicalLine,
         timestamp:
           showTimestamps && hasRenderedRow && !isWrapped && ts
-            ? formatTimestamp(ts, showTimestampMilliseconds)
+            ? formatTimestamp(ts, timestampFormat)
             : "",
         lineNumber: showLineNumbers && hasRenderedRow && !isWrapped ? String(logicalLine + 1) : "",
       });
@@ -157,7 +211,7 @@ export default function TerminalGutter({
     getLineOffset,
     showLineNumbers,
     showTimestamps,
-    showTimestampMilliseconds,
+    timestampFormat,
   ]);
 
   const scheduleUpdate = useCallback(() => {
@@ -252,7 +306,7 @@ export default function TerminalGutter({
   const lineNumWidth = showLineNumbers
     ? Math.max(Math.ceil(layout.cellWidth * String(maxVisibleLineNumber).length) + 2, 24)
     : 0;
-  const timestampTemplate = showTimestampMilliseconds ? "[00:00:00.000]" : "[00:00:00]";
+  const timestampTemplate = formatTimestamp(TIMESTAMP_WIDTH_SAMPLE_MS, timestampFormat);
   const tsWidth = showTimestamps ? Math.ceil(layout.cellWidth * timestampTemplate.length) + 2 : 0;
   const columnGap = showLineNumbers && showTimestamps ? 8 : 0;
   const innerRightPadding = 8;

@@ -2,6 +2,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -199,18 +200,192 @@ interface QueuedOutputChunk {
   bytes: number;
 }
 
-function serializeTerminalText(terminal: Terminal): string {
+interface OutputQueue {
+  chunks: QueuedOutputChunk[];
+  headIndex: number;
+  bytes: number;
+}
+
+type PendingWakeEvent =
+  | { type: "error"; message: string }
+  | { type: "closed" }
+  | { type: "focus" }
+  | { type: "zmodem"; payload: ZmodemEventPayload }
+  | { type: "ai"; payload: AiCaptureEvent };
+
+const snapshotUtf8Encoder = new TextEncoder();
+
+function createOutputQueue(): OutputQueue {
+  return { chunks: [], headIndex: 0, bytes: 0 };
+}
+
+function utf8ByteLength(text: string): number {
+  return snapshotUtf8Encoder.encode(text).length;
+}
+
+function utf8BytesForCodePoint(codePoint: number): number {
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
+}
+
+function serializeTerminalText(terminal: Terminal, serializeAddon?: SerializeAddon | null): string {
+  const limits = XTERM_PERFORMANCE_CONFIG.lifecycle;
+
+  if (serializeAddon) {
+    let scrollback = Math.min(limits.snapshotMaxLines, terminal.buffer.active.length);
+    while (scrollback >= 0) {
+      const snapshot = serializeAddon.serialize({
+        scrollback,
+        excludeAltBuffer: true,
+      });
+      if (utf8ByteLength(snapshot) <= limits.snapshotMaxBytes || scrollback === 0) {
+        return snapshot;
+      }
+      scrollback = Math.floor(scrollback / 2);
+    }
+  }
+
   const buffer = terminal.buffer.active;
   const lastLine = Math.min(buffer.length - 1, buffer.baseY + buffer.cursorY);
   if (lastLine < 0) return "";
 
   const lines: string[] = [];
-  for (let lineIndex = 0; lineIndex <= lastLine; lineIndex += 1) {
+  let bytes = 0;
+  const firstLine = Math.max(0, lastLine - limits.snapshotMaxLines + 1);
+  for (let lineIndex = lastLine; lineIndex >= firstLine; lineIndex -= 1) {
     const line = buffer.getLine(lineIndex);
-    lines.push(line?.translateToString(true) ?? "");
+    const text = line?.translateToString(true) ?? "";
+    const lineBytes = utf8ByteLength(text) + 2;
+    if (lines.length > 0 && bytes + lineBytes > limits.snapshotMaxBytes) break;
+    lines.push(text);
+    bytes += lineBytes;
   }
 
-  return lines.join("\r\n");
+  return lines.reverse().join("\r\n");
+}
+
+function splitOutputChunk(chunk: QueuedOutputChunk, maxBytes: number): QueuedOutputChunk[] {
+  if (chunk.bytes <= maxBytes) {
+    return [chunk, { data: "", bytes: 0 }];
+  }
+
+  if (chunk.data.length === chunk.bytes) {
+    const index = Math.max(1, Math.min(maxBytes, chunk.data.length));
+    return [
+      { data: chunk.data.slice(0, index), bytes: index },
+      { data: chunk.data.slice(index), bytes: chunk.bytes - index },
+    ];
+  }
+
+  let index = 0;
+  let bytes = 0;
+  for (let offset = 0; offset < chunk.data.length; ) {
+    const codePoint = chunk.data.codePointAt(offset) ?? 0;
+    const charLength = codePoint > 0xffff ? 2 : 1;
+    const charBytes = utf8BytesForCodePoint(codePoint);
+    if (bytes > 0 && bytes + charBytes > maxBytes) break;
+    index += charLength;
+    bytes += charBytes;
+    offset += charLength;
+    if (bytes >= maxBytes) break;
+  }
+
+  if (index <= 0) {
+    const codePoint = chunk.data.codePointAt(0) ?? 0;
+    index = codePoint > 0xffff ? 2 : 1;
+    bytes = utf8BytesForCodePoint(codePoint);
+  }
+
+  return [
+    { data: chunk.data.slice(0, index), bytes },
+    {
+      data: chunk.data.slice(index),
+      bytes: Math.max(0, chunk.bytes - bytes),
+    },
+  ];
+}
+
+function compactOutputQueue(queue: OutputQueue) {
+  if (queue.headIndex <= 1024 || queue.headIndex <= queue.chunks.length / 2) return;
+  queue.chunks = queue.chunks.slice(queue.headIndex);
+  queue.headIndex = 0;
+}
+
+function pushOutputQueue(queue: OutputQueue, chunk: QueuedOutputChunk) {
+  queue.chunks.push(chunk);
+  queue.bytes += chunk.bytes;
+}
+
+function shiftOutputQueue(queue: OutputQueue): QueuedOutputChunk | null {
+  const chunk = queue.chunks[queue.headIndex];
+  if (!chunk) return null;
+  queue.headIndex += 1;
+  queue.bytes = Math.max(0, queue.bytes - chunk.bytes);
+  compactOutputQueue(queue);
+  return chunk;
+}
+
+function peekOutputQueue(queue: OutputQueue): QueuedOutputChunk | null {
+  return queue.chunks[queue.headIndex] ?? null;
+}
+
+function replaceOutputQueueHead(queue: OutputQueue, chunk: QueuedOutputChunk) {
+  if (queue.headIndex < queue.chunks.length) {
+    queue.chunks[queue.headIndex] = chunk;
+  }
+}
+
+function hasOutputQueueItems(queue: OutputQueue) {
+  return queue.headIndex < queue.chunks.length;
+}
+
+function outputQueueToBoundedString(queue: OutputQueue) {
+  const maxBytes = XTERM_PERFORMANCE_CONFIG.lifecycle.snapshotMaxBytes;
+  const parts: string[] = [];
+  let bytes = 0;
+
+  for (let i = queue.chunks.length - 1; i >= queue.headIndex; i -= 1) {
+    const chunk = queue.chunks[i];
+    if (!chunk) continue;
+    if (bytes + chunk.bytes <= maxBytes) {
+      parts.push(chunk.data);
+      bytes += chunk.bytes;
+      continue;
+    }
+
+    const remaining = maxBytes - bytes;
+    if (remaining > 0) {
+      const [, tail] = splitOutputChunk(chunk, Math.max(0, chunk.bytes - remaining));
+      if (tail.data) parts.push(tail.data);
+    }
+    break;
+  }
+
+  return parts.reverse().join("");
+}
+
+function writeTextInFrames(terminal: Terminal, text: string): Promise<void> {
+  if (!text) return Promise.resolve();
+
+  const maxBytes = XTERM_PERFORMANCE_CONFIG.output.writeChunkBytes;
+  let remaining: QueuedOutputChunk = { data: text, bytes: utf8ByteLength(text) };
+
+  return new Promise((resolve) => {
+    const writeNext = () => {
+      if (!remaining.data) {
+        resolve();
+        return;
+      }
+
+      const [head, tail] = splitOutputChunk(remaining, maxBytes);
+      remaining = tail;
+      terminal.write(head.data, () => requestAnimationFrame(writeNext));
+    };
+
+    requestAnimationFrame(writeNext);
+  });
 }
 
 function isLocalBackspaceEvent(event: KeyboardEvent, sessionType: SessionType): boolean {
@@ -243,6 +418,8 @@ export default function XTerminal({
   const [terminalInstance, setTerminalInstance] = useState<Terminal | null>(null);
   const [terminalReady, setTerminalReady] = useState(false);
   const [performanceMode, setPerformanceMode] = useState<PerformanceMode>("normal");
+  const [terminalGeneration, setTerminalGeneration] = useState(0);
+  const [hibernated, setHibernated] = useState(false);
   const [multiLinePasteText, setMultiLinePasteText] = useState<string | null>(null);
   const [isExternalDropActive, setIsExternalDropActive] = useState(false);
   const aiCapturingRef = useRef(false);
@@ -268,10 +445,10 @@ export default function XTerminal({
   };
   const showLineNumbers = terminalSettings.show_line_numbers;
   const showTimestamps = terminalSettings.show_timestamps;
-  const showTimestampMilliseconds = terminalSettings.show_timestamp_milliseconds ?? false;
+  const timestampFormat = terminalSettings.timestamp_format ?? "[HH:mm:ss]";
   const showWorkspacePadding = terminalSettings.show_workspace_padding ?? false;
   const showGutter = showLineNumbers || showTimestamps;
-  const showContentPadding = showWorkspacePadding && !showGutter;
+  const showContentPadding = showWorkspacePadding;
   const commandSuggestionsEnabled = interaction.command_suggestions_enabled;
   const commandSuggestionMinChars = interaction.command_suggestion_min_chars;
   const commandSuggestionMaxChars = interaction.command_suggestion_max_chars;
@@ -286,6 +463,12 @@ export default function XTerminal({
   const disconnectedCloseRequestedRef = useRef(false);
   const reconnectingRef = useRef(false);
   const preservedReconnectContentRef = useRef<string | null>(null);
+  const hibernationSnapshotRef = useRef<string | null>(null);
+  const hibernateTimerRef = useRef<number | null>(null);
+  const hibernationCleanupRef = useRef(false);
+  const hibernationPendingRef = useRef(false);
+  const pendingWakeEventsRef = useRef<PendingWakeEvent[]>([]);
+  const zmodemActiveRef = useRef(false);
   const outputWriteQueueRef = useRef(Promise.resolve());
   const outputWriteInFlightRef = useRef(false);
   const lineTimestampsRef = useRef<Map<number, number>>(new Map());
@@ -300,8 +483,7 @@ export default function XTerminal({
   const visibleRef = useRef(visible);
   const activeRef = useRef(active);
   const performanceModeRef = useRef<PerformanceMode>("normal");
-  const queuedOutputChunksRef = useRef<QueuedOutputChunk[]>([]);
-  const queuedOutputBytesRef = useRef(0);
+  const outputQueueRef = useRef<OutputQueue>(createOutputQueue());
   const writingOutputBytesRef = useRef(0);
   const backendUnackedOutputBytesRef = useRef(0);
   const pendingOutputAckBytesRef = useRef(0);
@@ -391,8 +573,65 @@ export default function XTerminal({
 
   useEffect(() => {
     visibleRef.current = visible;
+    if (visible && hibernated) {
+      setHibernated(false);
+      setTerminalGeneration((generation) => generation + 1);
+    }
     handleVisibilityChangeRef.current?.();
-  }, [visible]);
+  }, [hibernated, visible]);
+
+  useEffect(() => {
+    if (!hibernated) return;
+
+    let disposed = false;
+    const unlisteners: UnlistenFn[] = [];
+    const wake = (event: PendingWakeEvent) => {
+      pendingWakeEventsRef.current.push(event);
+      if (disposed) return;
+      setHibernated(false);
+      setTerminalGeneration((generation) => generation + 1);
+    };
+
+    const setupWakeListeners = async () => {
+      unlisteners.push(
+        await listen<string>(`session-error-${sessionId}`, (event) => {
+          wake({
+            type: "error",
+            message: String(event.payload || tRef.current("terminal.connectionFailed")),
+          });
+        }),
+      );
+      unlisteners.push(
+        await listen<void>(`session-closed-${sessionId}`, () => {
+          wake({ type: "closed" });
+        }),
+      );
+      unlisteners.push(
+        await listen<ZmodemEventPayload>(`zmodem-event-${sessionId}`, (event) => {
+          wake({ type: "zmodem", payload: event.payload });
+        }),
+      );
+      unlisteners.push(
+        await listen<AiCaptureEvent>(`ai-capture-${sessionId}`, (event) => {
+          wake({ type: "ai", payload: event.payload });
+        }),
+      );
+      unlisteners.push(
+        await listen<void>(`focus-terminal-${sessionId}`, () => {
+          wake({ type: "focus" });
+        }),
+      );
+    };
+
+    void setupWakeListeners();
+
+    return () => {
+      disposed = true;
+      for (const unlisten of unlisteners) {
+        unlisten();
+      }
+    };
+  }, [hibernated, sessionId]);
 
   useEffect(() => {
     terminalAppSettingsRef.current = terminalAppSettings;
@@ -539,12 +778,18 @@ export default function XTerminal({
   // Create and setup terminal
   // biome-ignore lint/correctness/useExhaustiveDependencies: terminal lifecycle is intentionally scoped to session changes.
   useEffect(() => {
+    if (hibernated) {
+      setTerminalReady(false);
+      terminalRef.current = null;
+      setTerminalInstance(null);
+      fitAddonRef.current = null;
+      return;
+    }
     if (!containerRef.current) return;
     setTerminalReady(false);
     lineTimestampsRef.current = new Map();
     gutterLineOffsetRef.current = 0;
-    queuedOutputChunksRef.current = [];
-    queuedOutputBytesRef.current = 0;
+    outputQueueRef.current = createOutputQueue();
     writingOutputBytesRef.current = 0;
     backendUnackedOutputBytesRef.current = 0;
     pendingOutputAckBytesRef.current = 0;
@@ -588,6 +833,7 @@ export default function XTerminal({
     const searchAddon = new SearchAddon({
       highlightLimit: TERMINAL_SEARCH_VISIBLE_MATCH_LIMIT,
     });
+    const serializeAddon = new SerializeAddon();
     const unicodeGraphemesAddon = new UnicodeGraphemesAddon();
     const zmodemHandler = createZmodemEventHandler(
       terminal,
@@ -605,6 +851,7 @@ export default function XTerminal({
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
     terminal.loadAddon(searchAddon);
+    terminal.loadAddon(serializeAddon);
     terminal.loadAddon(unicodeGraphemesAddon);
     terminal.open(containerRef.current);
 
@@ -626,13 +873,19 @@ export default function XTerminal({
     shellIntegrationRef.current.enabled = false;
     shellIntegrationRef.current.commandRunning = false;
     const preservedReconnectContent =
-      preservedReconnectContentRef.current ?? consumePreservedTerminalReconnectContent(sessionId);
+      hibernationSnapshotRef.current ??
+      preservedReconnectContentRef.current ??
+      consumePreservedTerminalReconnectContent(sessionId);
+    hibernationSnapshotRef.current = null;
     preservedReconnectContentRef.current = null;
+    const initialReplayPromise = preservedReconnectContent
+      ? writeTextInFrames(terminal, preservedReconnectContent)
+      : Promise.resolve();
     if (preservedReconnectContent) {
-      terminal.write(preservedReconnectContent);
+      outputWriteQueueRef.current = initialReplayPromise.catch(() => {});
     }
     const unregisterReconnectCapture = registerTerminalReconnectCapture(sessionId, () =>
-      serializeTerminalText(terminal),
+      serializeTerminalText(terminal, serializeAddon),
     );
     const isTerminalAlive = () => !disposed && terminalRef.current === terminal;
     const syncSuggestionsWithInputState = () => {
@@ -1481,7 +1734,6 @@ export default function XTerminal({
       }
     };
 
-    const utf8Encoder = new TextEncoder();
     const outputAckBatchBytes = 64 * 1024;
     const outputAckDebounceMs = 16;
 
@@ -1506,7 +1758,7 @@ export default function XTerminal({
 
     const shouldThrottleAlternateScreenWrite = () =>
       isAlternateScreenActive() &&
-      queuedOutputBytesRef.current >
+      outputQueueRef.current.bytes >
         XTERM_PERFORMANCE_CONFIG.output.alternateScreenThrottleBacklogBytes;
 
     const getRecoveryThresholdBytes = () =>
@@ -1515,7 +1767,7 @@ export default function XTerminal({
         : XTERM_PERFORMANCE_CONFIG.output.hiddenRecoveryThresholdBytes;
 
     const getPendingOutputBytes = () =>
-      queuedOutputBytesRef.current +
+      outputQueueRef.current.bytes +
       writingOutputBytesRef.current +
       pendingOutputAckBytesRef.current;
 
@@ -1584,58 +1836,26 @@ export default function XTerminal({
       sendOutputAck(bytes);
     };
 
-    const splitOutputChunk = (chunk: QueuedOutputChunk, maxBytes: number): QueuedOutputChunk[] => {
-      if (chunk.bytes <= maxBytes) {
-        return [chunk, { data: "", bytes: 0 }];
-      }
-
-      let index = 0;
-      let bytes = 0;
-      for (const char of chunk.data) {
-        const charBytes = utf8Encoder.encode(char).length;
-        if (bytes > 0 && bytes + charBytes > maxBytes) {
-          break;
-        }
-        index += char.length;
-        bytes += charBytes;
-        if (bytes >= maxBytes) {
-          break;
-        }
-      }
-
-      if (index <= 0) {
-        const [firstChar = ""] = chunk.data;
-        index = firstChar.length;
-        bytes = utf8Encoder.encode(firstChar).length;
-      }
-
-      return [
-        { data: chunk.data.slice(0, index), bytes },
-        {
-          data: chunk.data.slice(index),
-          bytes: Math.max(0, chunk.bytes - bytes),
-        },
-      ];
-    };
-
     const trimQueuedOutput = (maxBytes: number) => {
       let dropped = 0;
 
-      while (queuedOutputBytesRef.current > maxBytes && queuedOutputChunksRef.current.length > 0) {
-        const overflow = queuedOutputBytesRef.current - maxBytes;
-        const chunk = queuedOutputChunksRef.current[0];
+      while (
+        outputQueueRef.current.bytes > maxBytes &&
+        hasOutputQueueItems(outputQueueRef.current)
+      ) {
+        const overflow = outputQueueRef.current.bytes - maxBytes;
+        const chunk = peekOutputQueue(outputQueueRef.current);
         if (!chunk) break;
 
         if (chunk.bytes <= overflow) {
-          queuedOutputChunksRef.current.shift();
-          queuedOutputBytesRef.current -= chunk.bytes;
+          shiftOutputQueue(outputQueueRef.current);
           dropped += chunk.bytes;
           continue;
         }
 
         const [head, tail] = splitOutputChunk(chunk, overflow);
-        queuedOutputChunksRef.current[0] = tail;
-        queuedOutputBytesRef.current -= head.bytes;
+        replaceOutputQueueHead(outputQueueRef.current, tail);
+        outputQueueRef.current.bytes = Math.max(0, outputQueueRef.current.bytes - head.bytes);
         dropped += head.bytes;
       }
 
@@ -1644,7 +1864,7 @@ export default function XTerminal({
     };
 
     const dequeueOutputChunk = (maxBytes: number): QueuedOutputChunk | null => {
-      if (maxBytes <= 0 || queuedOutputChunksRef.current.length === 0) {
+      if (maxBytes <= 0 || !hasOutputQueueItems(outputQueueRef.current)) {
         return null;
       }
 
@@ -1652,14 +1872,13 @@ export default function XTerminal({
       const parts: string[] = [];
       let bytes = 0;
 
-      while (remaining > 0 && queuedOutputChunksRef.current.length > 0) {
-        const chunk = queuedOutputChunksRef.current[0];
+      while (remaining > 0 && hasOutputQueueItems(outputQueueRef.current)) {
+        const chunk = peekOutputQueue(outputQueueRef.current);
         if (!chunk) break;
 
         if (chunk.bytes <= remaining) {
           parts.push(chunk.data);
-          queuedOutputChunksRef.current.shift();
-          queuedOutputBytesRef.current -= chunk.bytes;
+          shiftOutputQueue(outputQueueRef.current);
           remaining -= chunk.bytes;
           bytes += chunk.bytes;
           continue;
@@ -1667,8 +1886,8 @@ export default function XTerminal({
 
         const [head, tail] = splitOutputChunk(chunk, remaining);
         parts.push(head.data);
-        queuedOutputChunksRef.current[0] = tail;
-        queuedOutputBytesRef.current -= head.bytes;
+        replaceOutputQueueHead(outputQueueRef.current, tail);
+        outputQueueRef.current.bytes = Math.max(0, outputQueueRef.current.bytes - head.bytes);
         bytes += head.bytes;
         remaining -= head.bytes;
       }
@@ -1732,7 +1951,7 @@ export default function XTerminal({
 
                   stampWrittenLines(beforeLine, afterLine, ts);
 
-                  flushPendingOutputAck(queuedOutputBytesRef.current === 0);
+                  flushPendingOutputAck(outputQueueRef.current.bytes === 0);
                   maybeRecoverPerformanceMode();
                   refreshOutputPressureMode();
                   resolve();
@@ -1740,7 +1959,7 @@ export default function XTerminal({
                   if (
                     visibleRef.current &&
                     isTerminalAlive() &&
-                    queuedOutputBytesRef.current > 0 &&
+                    outputQueueRef.current.bytes > 0 &&
                     pendingOutputFlushRef.current === null &&
                     !pendingOutputMicrotaskRef.current
                   ) {
@@ -1791,11 +2010,12 @@ export default function XTerminal({
         pendingOutputFlushRef.current = null;
       }
       clearPendingOutputFlushTimer();
+      clearHibernateTimer();
 
       const dropped = trimQueuedOutput(getBacklogCapBytes());
       noteSkippedOutput(dropped);
 
-      while (queuedOutputChunksRef.current.length > 0) {
+      while (hasOutputQueueItems(outputQueueRef.current)) {
         const payload = dequeueOutputChunk(getWriteChunkBytes());
         if (!payload) break;
         writeChunkToTerminal(payload);
@@ -1931,8 +2151,113 @@ export default function XTerminal({
       });
     };
 
+    const clearHibernateTimer = () => {
+      if (hibernateTimerRef.current !== null) {
+        window.clearTimeout(hibernateTimerRef.current);
+        hibernateTimerRef.current = null;
+      }
+    };
+
+    const replayPendingWakeEvents = () => {
+      const events = pendingWakeEventsRef.current.splice(0);
+      for (const event of events) {
+        if (!isTerminalAlive()) return;
+        switch (event.type) {
+          case "error": {
+            enterDisconnectedState({
+              title: tRef.current("terminal.connectionFailed"),
+              message: event.message,
+              titleColor: "31",
+              showReconnectPrompt: false,
+            });
+            toast.error(event.message);
+            onConnectionErrorRef.current?.(sessionIdRef.current, event.message);
+            break;
+          }
+          case "closed":
+            enterDisconnectedState({
+              title: tRef.current("terminal.sessionDisconnected"),
+              titleColor: "31",
+              showReconnectPrompt: true,
+            });
+            break;
+          case "focus":
+            terminal.focus();
+            break;
+          case "zmodem":
+            if (event.payload.type === "detected" || event.payload.type === "progress") {
+              zmodemActiveRef.current = true;
+            } else if (event.payload.type === "complete" || event.payload.type === "failed") {
+              zmodemActiveRef.current = false;
+            }
+            zmodemHandler.handle(event.payload);
+            break;
+          case "ai":
+            if (event.payload.type === "commandStart") {
+              aiCapturingRef.current = true;
+              inputStateRef.current = createTerminalInputState();
+              clearCredentialPromptInputMode();
+              dismissSuggestions();
+              terminal.write(renderAiCommandStart(event.payload));
+            } else if (event.payload.type === "commandEnd") {
+              aiCapturingRef.current = false;
+              terminal.write(renderAiCommandEnd(event.payload));
+            }
+            break;
+        }
+      }
+    };
+
+    const canHibernateRenderer = () => {
+      if (!isTerminalAlive() || visibleRef.current || hibernationPendingRef.current) return false;
+      if (sessionTypeRef.current === "Local") return false;
+      if (!["SSH", "Telnet", "Serial"].includes(sessionTypeRef.current)) return false;
+      if (terminal.buffer.active.type === "alternate") return false;
+      if (showSearchBar || activeMode === "history") return false;
+      if (aiCapturingRef.current || zmodemActiveRef.current) return false;
+      if (syncPeerSessionIdsRef.current?.length) return false;
+      if (outputWriteInFlightRef.current) return false;
+      if (disconnectedRef.current || reconnectingRef.current) return false;
+      return true;
+    };
+
+    const hibernateRenderer = async () => {
+      clearHibernateTimer();
+      if (!canHibernateRenderer()) return;
+
+      hibernationPendingRef.current = true;
+      try {
+        await invoke("detach_session_renderer", { sessionId });
+        if (!canHibernateRenderer()) return;
+
+        const serialized = serializeTerminalText(terminal, serializeAddon);
+        const queuedTail = outputQueueToBoundedString(outputQueueRef.current);
+        hibernationSnapshotRef.current = `${serialized}${queuedTail}`;
+        hibernationCleanupRef.current = true;
+        setTerminalReady(false);
+        setHibernated(true);
+        setTerminalGeneration((generation) => generation + 1);
+      } catch {
+        hibernationSnapshotRef.current = null;
+      } finally {
+        hibernationPendingRef.current = false;
+      }
+    };
+
+    const scheduleHibernate = () => {
+      if (visibleRef.current || hibernateTimerRef.current !== null) return;
+      hibernateTimerRef.current = window.setTimeout(() => {
+        hibernateTimerRef.current = null;
+        void hibernateRenderer();
+      }, XTERM_PERFORMANCE_CONFIG.lifecycle.deepHibernateDelayMs);
+    };
+
     const applyVisibilityPolicy = () => {
       if (!isTerminalAlive()) return;
+
+      if (visibleRef.current) {
+        clearHibernateTimer();
+      }
 
       if (!visibleRef.current && pendingOutputFlushRef.current !== null) {
         cancelAnimationFrame(pendingOutputFlushRef.current);
@@ -1952,10 +2277,13 @@ export default function XTerminal({
         flushPendingOutput();
         schedulePendingOutputFlush();
         repaintVisibleTerminal();
+      } else {
+        scheduleHibernate();
       }
     };
 
     handleVisibilityChangeRef.current = applyVisibilityPolicy;
+    applyVisibilityPolicy();
 
     const setupListeners = async () => {
       const nextOutputUnlisten = await listen<TerminalOutputPayload>(
@@ -1968,11 +2296,10 @@ export default function XTerminal({
             return;
           }
 
-          queuedOutputChunksRef.current.push({
+          pushOutputQueue(outputQueueRef.current, {
             data: payload.data,
             bytes: payload.bytes,
           });
-          queuedOutputBytesRef.current += payload.bytes;
           backendUnackedOutputBytesRef.current += payload.bytes;
 
           const recentPayload =
@@ -2104,6 +2431,11 @@ export default function XTerminal({
         `zmodem-event-${sessionId}`,
         (event) => {
           if (!isTerminalAlive()) return;
+          if (event.payload.type === "detected" || event.payload.type === "progress") {
+            zmodemActiveRef.current = true;
+          } else if (event.payload.type === "complete" || event.payload.type === "failed") {
+            zmodemActiveRef.current = false;
+          }
           zmodemHandler.handle(event.payload);
         },
       );
@@ -2113,7 +2445,10 @@ export default function XTerminal({
       }
       zmodemUnlisten = nextZmodemUnlisten;
 
+      replayPendingWakeEvents();
+
       try {
+        await initialReplayPromise.catch(() => {});
         await invoke("attach_session", { sessionId });
       } catch {
         // The session may already be gone during mount/unmount races.
@@ -2132,7 +2467,10 @@ export default function XTerminal({
           terminal.write(`\r\n\x1b[36m[${tRef.current("terminal.reconnecting")}]\x1b[0m\r\n`);
           createReconnectedSession()
             .then((newSessionId) => {
-              preservedReconnectContentRef.current = serializeTerminalText(terminal);
+              preservedReconnectContentRef.current = serializeTerminalText(
+                terminal,
+                serializeAddon,
+              );
               const oldSessionId = sessionIdRef.current;
               disconnectedRef.current = false;
               disconnectedNoticeShownRef.current = false;
@@ -2513,8 +2851,7 @@ export default function XTerminal({
       pendingOutputMicrotaskRef.current = false;
       flushPendingOutputAck(true);
       sendOutputAck(backendUnackedOutputBytesRef.current);
-      queuedOutputChunksRef.current = [];
-      queuedOutputBytesRef.current = 0;
+      outputQueueRef.current = createOutputQueue();
       writingOutputBytesRef.current = 0;
       pendingOutputAckBytesRef.current = 0;
       backendUnackedOutputBytesRef.current = 0;
@@ -2524,19 +2861,21 @@ export default function XTerminal({
       pendingOutputMicrotaskRef.current = false;
       const latestLifecycleState = terminalLifecycleStateRef.current;
       if (
+        !hibernationCleanupRef.current &&
         latestLifecycleState.sessionId === sessionId &&
         latestLifecycleState.terminalTransparencyEnabled !== terminalTransparencyEnabled
       ) {
-        preservedReconnectContentRef.current = serializeTerminalText(terminal);
+        preservedReconnectContentRef.current = serializeTerminalText(terminal, serializeAddon);
       }
       terminal.dispose();
       terminalRef.current = null;
       setTerminalInstance(null);
       fitAddonRef.current = null;
       registerSearchAddon(null);
+      hibernationCleanupRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, terminalTransparencyEnabled]);
+  }, [hibernated, sessionId, terminalGeneration, terminalTransparencyEnabled]);
 
   // Appearance, theme, and interaction settings sync.
   // Declared AFTER the terminal creation effect so effects from these hooks
@@ -2593,13 +2932,13 @@ export default function XTerminal({
     if (!terminalReady || !fitAddonRef.current || !terminalRef.current) return;
 
     requestAnimationFrame(() => {
-      if (paddingEnabled !== ((terminalSettings.show_workspace_padding ?? false) && !showGutter)) {
+      if (paddingEnabled !== (terminalSettings.show_workspace_padding ?? false)) {
         return;
       }
       fitAddonRef.current?.fit();
       terminalRef.current?.refresh(0, Math.max(0, terminalRef.current.rows - 1));
     });
-  }, [showContentPadding, showGutter, terminalReady, terminalSettings.show_workspace_padding]);
+  }, [showContentPadding, terminalReady, terminalSettings.show_workspace_padding]);
 
   // Re-fit and focus when tab becomes active
   useEffect(() => {
@@ -2784,7 +3123,7 @@ export default function XTerminal({
           terminalRef={terminalRef}
           showLineNumbers={showLineNumbers}
           showTimestamps={showTimestamps}
-          showTimestampMilliseconds={showTimestampMilliseconds}
+          timestampFormat={timestampFormat}
           lineTimestamps={lineTimestampsRef.current}
           getLineOffset={getGutterLineOffset}
           sessionId={sessionId}

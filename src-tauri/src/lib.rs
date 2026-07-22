@@ -41,6 +41,7 @@ pub fn run() {
     let cloud_sync_manager = Arc::new(CloudSyncManager::new());
     let agent_approval_manager = Arc::new(AgentApprovalManager::new());
     let codex_app_server_manager = Arc::new(core::ai::CodexAppServerManager::new());
+    let claude_code_runtime = Arc::new(core::ai::ClaudeCodeRuntime::new());
     let transfer_duplicate_manager = Arc::new(TransferDuplicateManager::new());
     let docker_sudo_manager = Arc::new(DockerSudoManager::new());
     let app_lock_state = AppLockState::default();
@@ -74,6 +75,7 @@ pub fn run() {
         .manage(cloud_sync_manager.clone())
         .manage(agent_approval_manager.clone())
         .manage(codex_app_server_manager.clone())
+        .manage(claude_code_runtime.clone())
         .manage(transfer_duplicate_manager.clone())
         .manage(docker_sudo_manager.clone())
         .manage(app_lock_state)
@@ -107,6 +109,8 @@ pub fn run() {
             cmd::ai::start_codex_login,
             cmd::ai::cancel_codex_login,
             cmd::ai::logout_codex,
+            cmd::ai::detect_claude_code_cli,
+            cmd::ai::get_claude_code_account_status,
             cmd::ai::respond_agent_step,
             cmd::ai::get_ai_sessions,
             cmd::ai::get_ai_messages,
@@ -145,6 +149,7 @@ pub fn run() {
             cmd::session::ack_session_output,
             cmd::session::resize_session,
             cmd::session::attach_session,
+            cmd::session::detach_session_renderer,
             cmd::session::close_session,
             cmd::session::list_sessions,
             cmd::session::add_command_history,
@@ -171,6 +176,7 @@ pub fn run() {
             cmd::session::zmodem_cancel,
             cmd::sftp::get_home_dir,
             cmd::sftp::list_remote_dir,
+            cmd::sftp::list_remote_child_directories,
             cmd::sftp::delete_remote_file,
             cmd::sftp::rename_remote_file,
             cmd::sftp::sanitize_download_file_name,
@@ -178,6 +184,7 @@ pub fn run() {
             cmd::sftp::upload_local_file,
             cmd::sftp::get_file_properties,
             cmd::sftp::read_remote_file_text,
+            cmd::sftp::read_remote_file_bytes,
             cmd::sftp::write_remote_file_text,
             cmd::sftp::create_remote_file,
             cmd::sftp::create_remote_dir,
@@ -186,10 +193,22 @@ pub fn run() {
             cmd::sftp::update_remote_file_attributes,
             cmd::sftp::download_remote_directory,
             cmd::sftp::upload_local_directory,
+            cmd::sftp::copy_file_entry,
             cmd::sftp::pause_transfer,
             cmd::sftp::resume_transfer,
             cmd::sftp::cancel_transfer,
             cmd::sftp::respond_transfer_duplicate,
+            cmd::local_fs::get_local_home_dir,
+            cmd::local_fs::list_local_dir,
+            cmd::local_fs::list_local_child_directories,
+            cmd::local_fs::create_local_file,
+            cmd::local_fs::create_local_dir,
+            cmd::local_fs::rename_local_file,
+            cmd::local_fs::delete_local_file,
+            cmd::local_fs::get_local_file_properties,
+            cmd::local_fs::read_local_file_text,
+            cmd::local_fs::read_local_file_bytes,
+            cmd::local_fs::write_local_file_text,
             cmd::connection::get_saved_connections,
             cmd::connection::get_supported_ssh_algorithms,
             cmd::connection::save_connection,
@@ -222,6 +241,7 @@ pub fn run() {
             cmd::credential::reorder_credentials,
             cmd::settings::get_app_settings,
             cmd::settings::save_app_settings,
+            cmd::settings::save_app_language,
             cmd::settings::import_keyword_highlight_rules,
             cmd::settings::read_theme_file,
             cmd::settings::write_theme_file,

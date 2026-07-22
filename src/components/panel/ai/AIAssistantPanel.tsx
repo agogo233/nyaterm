@@ -53,10 +53,12 @@ import type {
   AgentStepPayload,
   AIAction,
   AIAgentCommandExecutionMode,
+  AIAgentKind,
   AICommandCard,
   AIContext,
   AIMessage,
   AIMode,
+  AIModelConfigItem,
   AISession,
   AISessionScope,
   AIStreamEventPayload,
@@ -88,6 +90,7 @@ interface AIDraft {
 }
 
 type AIPanelView = { mode: "draft" } | { mode: "session"; sessionId: string };
+type AIRunMode = "ask" | "nyaterm_agent" | "codex_agent" | "claude_code_agent";
 
 interface AIStreamRuntime {
   streamId: string;
@@ -96,6 +99,21 @@ interface AIStreamRuntime {
 }
 
 const EMPTY_DRAFT: AIDraft = { text: "", quotedText: null, targetPaneIds: [] };
+
+function isCodexModel(model: AIModelConfigItem | null | undefined) {
+  return model?.backend === "codex";
+}
+
+function isGenaiModel(model: AIModelConfigItem | null | undefined) {
+  return (model?.backend ?? "genai") === "genai";
+}
+
+function resolveRunMode(mode: AIMode, agentKind: AIAgentKind | null | undefined): AIRunMode {
+  if (mode !== "agent") return "ask";
+  if (agentKind === "codex") return "codex_agent";
+  if (agentKind === "claude_code") return "claude_code_agent";
+  return "nyaterm_agent";
+}
 
 function buildAIScopeKey(pane: SessionPane | null) {
   return pane ? `terminal:${pane.sessionId}` : "unbound:";
@@ -156,9 +174,42 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   const shouldAutoScrollRef = useRef(true);
 
   const enabledModels = useMemo(() => getEnabledAIModels(aiSettings), [aiSettings]);
-  const selectedModel = useMemo(() => selectDefaultAIModel(aiSettings), [aiSettings]);
+  const storedSelectedModel = useMemo(() => selectDefaultAIModel(aiSettings), [aiSettings]);
   const prismStyle = useMemo(() => buildPrismThemeFromColors(theme.colors), [theme.colors]);
   const mode = aiSettings.default_mode ?? "ask";
+  const agentKind = aiSettings.default_agent_kind ?? "nyaterm";
+  const runMode = resolveRunMode(mode, agentKind);
+  const codexModels = useMemo(
+    () => enabledModels.filter((model) => isCodexModel(model)),
+    [enabledModels],
+  );
+  const genaiModels = useMemo(
+    () => enabledModels.filter((model) => isGenaiModel(model)),
+    [enabledModels],
+  );
+  const selectedModel = useMemo(() => {
+    if (runMode === "claude_code_agent") return null;
+    if (runMode === "codex_agent") {
+      const configuredModel = aiSettings.codex?.default_model ?? null;
+      return (
+        (isCodexModel(storedSelectedModel) ? storedSelectedModel : null) ??
+        codexModels.find(
+          (model) => model.id === configuredModel || model.name === configuredModel,
+        ) ??
+        codexModels[0] ??
+        null
+      );
+    }
+    return (
+      (isGenaiModel(storedSelectedModel) ? storedSelectedModel : null) ?? genaiModels[0] ?? null
+    );
+  }, [aiSettings.codex?.default_model, codexModels, genaiModels, runMode, storedSelectedModel]);
+  const selectableModels =
+    runMode === "codex_agent" ? codexModels : runMode === "claude_code_agent" ? [] : genaiModels;
+  const externalModelLabel =
+    runMode === "claude_code_agent"
+      ? (aiSettings.claude_code?.default_model ?? "Claude Code")
+      : null;
   const agentExecutionMode = aiSettings.agent_command_execution_mode ?? "confirm_each";
   const agentBackgroundExecutionEnabled = aiSettings.agent_background_execution_enabled ?? false;
   const scopeKey = useMemo(() => buildAIScopeKey(activePane), [activePane]);
@@ -168,6 +219,10 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     currentPanelView?.mode === "draft"
       ? null
       : (currentPanelView?.sessionId ?? activeSessionIdByScope[scopeKey] ?? null);
+  const currentSession = useMemo(
+    () => sessions.find((session) => session.id === currentSessionId) ?? null,
+    [currentSessionId, sessions],
+  );
   const currentDraft = draftsByScope[scopeKey] ?? EMPTY_DRAFT;
   const input = currentDraft.text;
   const quotedText = currentDraft.quotedText;
@@ -223,7 +278,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   const panelMeta =
     effectivePanes.length > 1 && activePane
       ? t("ai.panelMetaMultiTarget", { target: activePane.name, count: effectivePanes.length - 1 })
-      : (activePane?.name ?? selectedModel?.name ?? t("ai.notConfigured"));
+      : (activePane?.name ?? selectedModel?.name ?? externalModelLabel ?? t("ai.notConfigured"));
   useEffect(() => {
     if (!selectedModel || selectedModel.id === aiSettings.default_model_id) return;
     updateAppSettings({ ai: { ...aiSettings, default_model_id: selectedModel.id } });
@@ -365,6 +420,65 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
       }).catch(() => {});
     },
     [activeConnection?.id],
+  );
+
+  const selectRunMode = useCallback(
+    (nextMode: AIRunMode) => {
+      if (nextMode === "ask") {
+        updateAppSettings({
+          ai: { ...aiSettings, default_mode: "ask", default_agent_kind: "nyaterm" },
+        });
+        return;
+      }
+
+      if (nextMode === "nyaterm_agent") {
+        const nextModel = isGenaiModel(selectedModel) ? selectedModel : genaiModels[0];
+        if (!nextModel) {
+          toast.error(t("ai.noGenaiAgentModel"));
+          return;
+        }
+        updateAppSettings({
+          ai: {
+            ...aiSettings,
+            default_mode: "agent",
+            default_agent_kind: "nyaterm",
+            default_model_id: nextModel.id,
+          },
+        });
+        return;
+      }
+
+      if (nextMode === "claude_code_agent") {
+        updateAppSettings({
+          ai: { ...aiSettings, default_mode: "agent", default_agent_kind: "claude_code" },
+        });
+        return;
+      }
+
+      const configuredModel = aiSettings.codex?.default_model ?? null;
+      const nextModel =
+        (isCodexModel(selectedModel) ? selectedModel : null) ??
+        codexModels.find(
+          (model) => model.id === configuredModel || model.name === configuredModel,
+        ) ??
+        codexModels[0];
+
+      if (!nextModel) {
+        toast.error(t("ai.noCodexAgentModel"));
+        return;
+      }
+
+      updateAppSettings({
+        ai: {
+          ...aiSettings,
+          default_mode: "agent",
+          default_agent_kind: "codex",
+          default_model_id: nextModel.id,
+        },
+      });
+      return;
+    },
+    [aiSettings, codexModels, genaiModels, selectedModel, t, updateAppSettings],
   );
 
   const buildMergedContext = useCallback(
@@ -545,16 +659,26 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
         return;
       }
       const requestModel = selectedModel;
-      if (!requestModel) {
+      const requestAgentKind: AIAgentKind =
+        runMode === "codex_agent"
+          ? "codex"
+          : runMode === "claude_code_agent"
+            ? "claude_code"
+            : "nyaterm";
+      if (!requestModel && requestAgentKind !== "claude_code") {
         toast.error(t("ai.noEnabledModels"));
         return;
       }
-      const requestMode = mode;
+      const requestMode: AIMode = runMode === "ask" ? "ask" : "agent";
+      const requestSessionId =
+        currentSession?.agentKind && currentSession.agentKind !== requestAgentKind
+          ? null
+          : currentSessionId;
 
       setDetectedError(null);
       const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const requestStreamId = `ai-stream-${crypto.randomUUID()}`;
-      let resolvedSessionId = currentSessionId ?? `pending-${requestStreamId}`;
+      let resolvedSessionId = requestSessionId ?? `pending-${requestStreamId}`;
       const userMessage = createLocalMessage("user", userInput, resolvedSessionId);
       const assistantMessage: AIMessage = {
         id: assistantId,
@@ -733,17 +857,33 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
         const result = await invoke<AIStreamStart>("start_ai_chat_stream", {
           request: {
             streamId: requestStreamId,
-            sessionId: currentSessionId,
+            sessionId: requestSessionId,
             connectionId: primaryConn?.id ?? null,
             terminalSessionId: panes[0]?.sessionId ?? null,
+            agentKind: requestAgentKind,
+            permissionMode:
+              requestAgentKind === "codex"
+                ? (aiSettings.codex?.permission_mode ??
+                  aiSettings.external_agent_permission_mode ??
+                  "confirm")
+                : requestAgentKind === "claude_code"
+                  ? (aiSettings.claude_code?.permission_mode ??
+                    aiSettings.external_agent_permission_mode ??
+                    "confirm")
+                  : "confirm",
+            defaultTargetSessionId: panes[0]?.sessionId ?? null,
+            existingExternalSessionId:
+              currentSession?.agentKind === requestAgentKind
+                ? (currentSession.externalSessionId ?? null)
+                : null,
             ownerScope,
             targets,
             targetContexts,
             action,
             userInput,
             mode: requestMode,
-            modelId: requestModel.id,
-            modelName: requestModel.name,
+            modelId: requestModel?.id ?? null,
+            modelName: requestModel?.name ?? null,
             context,
             options: {
               maxOutputCommands: 2,
@@ -767,18 +907,22 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     },
     [
       activeConnection,
+      aiSettings.claude_code?.permission_mode,
+      aiSettings.codex?.permission_mode,
       aiSettings.enabled,
+      aiSettings.external_agent_permission_mode,
       appSettings.ui.language,
       appendAudit,
       buildTargetContexts,
       buildTargetForPane,
       buildMergedContext,
       cleanupStreamListener,
+      currentSession,
       currentSessionId,
       effectivePanes,
       loadSessions,
-      mode,
       ownerScope,
+      runMode,
       savedConnections,
       selectedModel,
       scopeKey,
@@ -1436,7 +1580,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
                     <MdAutoAwesome className="text-3xl" />
                     <div>{t("ai.goToSettingsToEnable")}</div>
                   </>
-                ) : !selectedModel ? (
+                ) : runMode !== "claude_code_agent" && !selectedModel ? (
                   <div className="flex flex-col items-center gap-4 px-4">
                     <div className="flex size-12 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10">
                       <MdErrorOutline className="text-2xl text-amber-500" />
@@ -1695,26 +1839,26 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
               <div className="flex flex-1 min-w-0 items-center gap-2">
                 <div className="w-1/3 min-w-0">
                   <Select
-                    value={mode}
-                    onValueChange={(default_mode) =>
-                      updateAppSettings({
-                        ai: { ...aiSettings, default_mode: default_mode as AIMode },
-                      })
-                    }
+                    value={runMode}
+                    onValueChange={(value) => selectRunMode(value as AIRunMode)}
                   >
                     <SelectTrigger size="sm" className="w-full text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent position="popper">
                       <SelectItem value="ask">{t("ai.modeAsk")}</SelectItem>
-                      <SelectItem value="agent">{t("ai.modeAgent")}</SelectItem>
+                      <SelectItem value="nyaterm_agent">{t("ai.modeNyatermAgent")}</SelectItem>
+                      <SelectItem value="codex_agent">{t("ai.modeCodexAgent")}</SelectItem>
+                      <SelectItem value="claude_code_agent">
+                        {t("ai.modeClaudeCodeAgent")}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="w-2/3 min-w-0">
                   <ModelCombobox
-                    models={enabledModels}
+                    models={selectableModels}
                     credentials={aiSettings.provider_credentials}
                     selectedModel={selectedModel}
                     selectedReasoningEffort={aiSettings.default_reasoning_effort ?? "auto"}
@@ -1740,7 +1884,11 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
                   <Button
                     size="icon-sm"
                     onClick={submit}
-                    disabled={!input.trim() || !selectedModel || !aiSettings.enabled}
+                    disabled={
+                      !input.trim() ||
+                      (!selectedModel && runMode !== "claude_code_agent") ||
+                      !aiSettings.enabled
+                    }
                   >
                     <MdSend />
                   </Button>

@@ -9,11 +9,12 @@ use tokio::time::{Duration, sleep};
 use super::SessionCommand;
 
 const OUTPUT_FLUSH_INTERVAL_MS: u64 = 4;
-const OUTPUT_NORMAL_BATCH_BYTES: usize = 128 * 1024;
-const OUTPUT_FLOOD_BATCH_BYTES: usize = 768 * 1024;
+const OUTPUT_NORMAL_BATCH_BYTES: usize = 64 * 1024;
+const OUTPUT_FLOOD_BATCH_BYTES: usize = 128 * 1024;
 const OUTPUT_PAUSE_HIGH_WATERMARK_BYTES: usize = 1024 * 1024;
 const OUTPUT_RESUME_LOW_WATERMARK_BYTES: usize = 128 * 1024;
 const OUTPUT_MAX_PENDING_BYTES: usize = 8 * 1024 * 1024;
+const OUTPUT_CLOSE_FLUSH_MAX_BYTES: usize = 1024 * 1024;
 const ALT_SCREEN_ENTER: &str = "\x1b[?1049h";
 const ALT_SCREEN_EXIT: &str = "\x1b[?1049l";
 
@@ -179,6 +180,19 @@ impl SessionOutputCoalescer {
         self.apply_flush_result(result);
     }
 
+    pub fn detach(self: &Arc<Self>) {
+        let flow_change = {
+            let mut state = self.state.lock().unwrap();
+            state.attached = false;
+            state.unacked_bytes = 0;
+            state.next_flush_id = state.next_flush_id.wrapping_add(1);
+            state.scheduled_flush_id = None;
+            update_flow_state(&mut state)
+        };
+
+        self.send_flow_change(flow_change);
+    }
+
     pub fn close(self: &Arc<Self>) {
         let result = {
             let mut state = self.state.lock().unwrap();
@@ -282,6 +296,7 @@ fn flush_from_state(state: &mut OutputState) -> FlushResult {
 }
 
 fn flush_all_from_state(state: &mut OutputState) -> FlushResult {
+    trim_pending_to_max(state, OUTPUT_CLOSE_FLUSH_MAX_BYTES);
     let payload = take_all_pending(state);
     let flow_change = update_flow_state(state);
     FlushResult {
@@ -362,11 +377,15 @@ fn payload_from_data(state: &mut OutputState, data: String) -> TerminalOutputPay
 }
 
 fn trim_pending(state: &mut OutputState) {
-    if state.pending_bytes <= OUTPUT_MAX_PENDING_BYTES {
+    trim_pending_to_max(state, OUTPUT_MAX_PENDING_BYTES);
+}
+
+fn trim_pending_to_max(state: &mut OutputState, max_bytes: usize) {
+    if state.pending_bytes <= max_bytes {
         return;
     }
 
-    let mut bytes_to_drop = state.pending_bytes - OUTPUT_MAX_PENDING_BYTES;
+    let mut bytes_to_drop = state.pending_bytes - max_bytes;
     let mut dropped_text = String::new();
     while bytes_to_drop > 0 {
         let Some(front) = state.pending.pop_front() else {
@@ -453,9 +472,9 @@ fn last_alt_screen_state(text: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, OUTPUT_FLOOD_BATCH_BYTES, OUTPUT_MAX_PENDING_BYTES,
-        OUTPUT_PAUSE_HIGH_WATERMARK_BYTES, OUTPUT_RESUME_LOW_WATERMARK_BYTES,
-        SessionOutputCoalescer, TerminalOutputPayload,
+        ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, OUTPUT_CLOSE_FLUSH_MAX_BYTES, OUTPUT_FLOOD_BATCH_BYTES,
+        OUTPUT_MAX_PENDING_BYTES, OUTPUT_NORMAL_BATCH_BYTES, OUTPUT_PAUSE_HIGH_WATERMARK_BYTES,
+        OUTPUT_RESUME_LOW_WATERMARK_BYTES, SessionOutputCoalescer, TerminalOutputPayload,
     };
     use crate::core::SessionCommand;
     use std::sync::{Arc, Mutex};
@@ -520,11 +539,11 @@ mod tests {
         let output = SessionOutputCoalescer::with_sink(sink);
 
         output.attach();
-        output.push_owned("x".repeat(128 * 1024));
+        output.push_owned("x".repeat(OUTPUT_NORMAL_BATCH_BYTES));
 
         let emitted = emitted.lock().unwrap();
         assert_eq!(emitted.len(), 1);
-        assert_eq!(emitted[0].bytes, 128 * 1024);
+        assert_eq!(emitted[0].bytes, OUTPUT_NORMAL_BATCH_BYTES);
     }
 
     #[tokio::test]
@@ -533,11 +552,11 @@ mod tests {
         let output = SessionOutputCoalescer::with_sink(sink);
 
         output.attach();
-        output.push_owned("x".repeat(128 * 1024));
-        assert_eq!(emitted.lock().unwrap()[0].bytes, 128 * 1024);
+        output.push_owned("x".repeat(OUTPUT_NORMAL_BATCH_BYTES));
+        assert_eq!(emitted.lock().unwrap()[0].bytes, OUTPUT_NORMAL_BATCH_BYTES);
 
-        output.ack(64 * 1024);
-        output.ack(64 * 1024);
+        output.ack(OUTPUT_NORMAL_BATCH_BYTES / 2);
+        output.ack(OUTPUT_NORMAL_BATCH_BYTES / 2);
 
         output.push("ok");
         sleep(Duration::from_millis(20)).await;
@@ -647,6 +666,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn detach_stops_emitting_until_attach() {
+        let (emitted, sink) = collect_sink();
+        let output = SessionOutputCoalescer::with_sink(sink);
+
+        output.attach();
+        output.push("visible");
+        sleep(Duration::from_millis(20)).await;
+        assert_eq!(emitted.lock().unwrap().len(), 1);
+
+        output.detach();
+        output.push("hidden");
+        sleep(Duration::from_millis(20)).await;
+        assert_eq!(emitted.lock().unwrap().len(), 1);
+
+        output.attach();
+        sleep(Duration::from_millis(20)).await;
+        let emitted = emitted.lock().unwrap();
+        assert!(
+            emitted
+                .iter()
+                .any(|payload| payload.data.contains("hidden"))
+        );
+    }
+
+    #[tokio::test]
     async fn close_flushes_remaining_output() {
         let (emitted, sink) = collect_sink();
         let output = SessionOutputCoalescer::with_sink(sink);
@@ -662,5 +706,20 @@ mod tests {
                 .iter()
                 .any(|payload| payload.data == "pending")
         );
+    }
+
+    #[tokio::test]
+    async fn close_flushes_only_recent_pending_output() {
+        let (emitted, sink) = collect_sink();
+        let output = SessionOutputCoalescer::with_sink(sink);
+
+        output.push_owned("a".repeat(OUTPUT_CLOSE_FLUSH_MAX_BYTES + 16));
+        output.close();
+
+        let emitted = emitted.lock().unwrap();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].bytes, OUTPUT_CLOSE_FLUSH_MAX_BYTES);
+        assert_eq!(emitted[0].dropped_bytes, 16);
+        assert!(emitted[0].data.chars().all(|ch| ch == 'a'));
     }
 }

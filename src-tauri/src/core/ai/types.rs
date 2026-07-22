@@ -1,4 +1,6 @@
-use crate::config::{AiBackendKind, AiMode, AiModelSource, AiProviderKind, RiskLevel};
+use crate::config::{
+    AiAgentKind, AiBackendKind, AiMode, AiModelSource, AiPermissionMode, AiProviderKind, RiskLevel,
+};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -51,6 +53,19 @@ pub struct AiTargetContext {
     pub target: Option<AiTerminalTarget>,
     #[serde(default)]
     pub context: AiContext,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAttachment {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,9 +269,19 @@ pub struct AiChatRequest {
     #[serde(default = "default_mode")]
     pub mode: AiMode,
     #[serde(default)]
+    pub agent_kind: AiAgentKind,
+    #[serde(default)]
+    pub permission_mode: AiPermissionMode,
+    #[serde(default)]
     pub model_id: Option<String>,
     #[serde(default)]
     pub model_name: Option<String>,
+    #[serde(default)]
+    pub default_target_session_id: Option<String>,
+    #[serde(default)]
+    pub existing_external_session_id: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<AiAttachment>,
     pub action: AiAction,
     pub user_input: String,
     #[serde(default)]
@@ -299,12 +324,16 @@ pub struct AiStreamEventPayload {
 pub struct AiSession {
     pub id: String,
     #[serde(default)]
+    pub agent_kind: AiAgentKind,
+    #[serde(default)]
     pub scope: AiSessionScope,
     #[serde(default)]
     pub connection_id: Option<String>,
     pub title: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub external_session_id: Option<String>,
     #[serde(default)]
     pub backend_metadata: Option<AiSessionBackendMetadata>,
 }
@@ -316,6 +345,8 @@ pub struct AiSessionBackendMetadata {
     pub backend: AiBackendKind,
     #[serde(default)]
     pub external_thread_id: Option<String>,
+    #[serde(default)]
+    pub codex_terminal_tools_version: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

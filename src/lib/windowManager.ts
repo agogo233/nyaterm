@@ -9,7 +9,12 @@ import i18n from "../i18n";
 import { invoke } from "./invoke";
 import { isMacOS } from "./platform";
 
-type ChildWindowStateKey = "settings" | "new-session" | "quick-command" | "file-editor";
+type ChildWindowStateKey =
+  | "settings"
+  | "new-session"
+  | "quick-command"
+  | "file-editor"
+  | "file-preview";
 
 interface ChildWindowOptions {
   label: string;
@@ -27,6 +32,7 @@ const MAIN_WINDOW_LABEL = "main";
 const MAIN_WINDOW_PREFIX = "main-";
 const AUTO_UPLOAD_WINDOW_PREFIX = "auto-upload-";
 const FILE_EDITOR_WINDOW_PREFIX = "file-editor-";
+const FILE_PREVIEW_WINDOW_PREFIX = "file-preview-";
 const AUTO_UPLOAD_OWNER_SEPARATOR = "--";
 const MODAL_CHILD_BASE_LABELS = new Set(["settings", "new-session", "quick-command"]);
 const MODAL_GROUP_RAISE_SUPPRESS_MS = 250;
@@ -421,7 +427,9 @@ export function openAutoUpload(data: { sessionId: string; localPath: string; rem
 
 export interface RemoteFileEditorWindowData {
   sessionId: string;
-  remotePath: string;
+  backend?: "remote" | "local";
+  path?: string;
+  remotePath?: string;
   name: string;
   size: number;
   mtime: number;
@@ -446,6 +454,39 @@ export function openRemoteFileEditor(data: RemoteFileEditorWindowData) {
       void win.show().catch(() => {});
       void win.setFocus().catch(() => {});
       emit("remote-file-editor-open", payload);
+    }, 120);
+    return win;
+  });
+}
+
+export interface FilePreviewWindowData {
+  sessionId: string;
+  backend?: "remote" | "local";
+  path: string;
+  name: string;
+  size: number;
+  mtime: number;
+}
+
+export function openFilePreview(data: FilePreviewWindowData) {
+  const label = `${FILE_PREVIEW_WINDOW_PREFIX}${ownerToken()}`;
+  const url = `index.html?window=file-preview&owner=${encodeURIComponent(ownerMainWindowLabel)}&data=${encodeURIComponent(JSON.stringify(data))}`;
+  return openChildWindow({
+    label,
+    title: i18n.t("filePreview.title"),
+    url,
+    kind: "modeless",
+    parentLabel: ownerMainWindowLabel,
+    width: 1080,
+    height: 760,
+    stateKey: "file-preview",
+  }).then((win) => {
+    const payload = { targetLabel: label, data };
+    emit("file-preview-open", payload);
+    window.setTimeout(() => {
+      void win.show().catch(() => {});
+      void win.setFocus().catch(() => {});
+      emit("file-preview-open", payload);
     }, 120);
     return win;
   });

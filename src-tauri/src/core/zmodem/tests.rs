@@ -3,10 +3,11 @@ mod tests {
     use super::{
         ProgressThrottle, ZMODEM_FINISH_DRAIN_IDLE, ZMODEM_PROGRESS_BYTES,
         ZMODEM_PROGRESS_INTERVAL, ZmodemDetectResult, ZmodemDetector, ZmodemDirection,
-        ZmodemDownloadOoDrain, ZmodemEvent, ZmodemUploadDrain,
+        ZmodemDownloadOoDrain, ZmodemEvent, ZmodemUploadDrain, zmodem_mtime_from_metadata,
+        zmodem_mtime_from_system_time,
     };
     use serde_json::json;
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, Instant, UNIX_EPOCH};
 
     fn detected_direction(result: ZmodemDetectResult) -> ZmodemDirection {
         match result {
@@ -79,6 +80,51 @@ mod tests {
                 "fileCount": 1,
             })
         );
+    }
+
+    #[test]
+    fn zmodem_mtime_disabled_returns_zero() {
+        let path = std::env::temp_dir().join(format!(
+            "nyaterm-zmodem-mtime-disabled-{}.tmp",
+            std::process::id()
+        ));
+        let file = std::fs::File::create(&path).expect("create temp file");
+        let metadata = file.metadata().expect("temp metadata");
+
+        assert_eq!(zmodem_mtime_from_metadata(&metadata, false), 0);
+
+        drop(file);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn zmodem_mtime_converts_unix_seconds() {
+        let time = UNIX_EPOCH + Duration::from_secs(1_710_000_000);
+
+        assert_eq!(zmodem_mtime_from_system_time(Ok(time)), 1_710_000_000);
+    }
+
+    #[test]
+    fn zmodem_mtime_failure_returns_zero() {
+        let error = std::io::Error::new(std::io::ErrorKind::Other, "modified failed");
+
+        assert_eq!(zmodem_mtime_from_system_time(Err(error)), 0);
+    }
+
+    #[test]
+    fn zmodem_mtime_pre_epoch_returns_zero() {
+        let time = UNIX_EPOCH
+            .checked_sub(Duration::from_secs(1))
+            .expect("pre epoch system time");
+
+        assert_eq!(zmodem_mtime_from_system_time(Ok(time)), 0);
+    }
+
+    #[test]
+    fn zmodem_mtime_overflow_returns_zero() {
+        let time = UNIX_EPOCH + Duration::from_secs(u64::from(u32::MAX) + 1);
+
+        assert_eq!(zmodem_mtime_from_system_time(Ok(time)), 0);
     }
 
     #[test]

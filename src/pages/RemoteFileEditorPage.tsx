@@ -1,67 +1,6 @@
-import {
-  autocompletion,
-  closeBrackets,
-  closeBracketsKeymap,
-  completionKeymap,
-} from "@codemirror/autocomplete";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { cpp } from "@codemirror/lang-cpp";
-import { css } from "@codemirror/lang-css";
-import { go } from "@codemirror/lang-go";
-import { html } from "@codemirror/lang-html";
-import { java } from "@codemirror/lang-java";
-import { javascript } from "@codemirror/lang-javascript";
-import { json } from "@codemirror/lang-json";
-import { markdown } from "@codemirror/lang-markdown";
-import { php } from "@codemirror/lang-php";
-import { python } from "@codemirror/lang-python";
-import { rust } from "@codemirror/lang-rust";
-import { sass as sassLanguage } from "@codemirror/lang-sass";
-import { sql } from "@codemirror/lang-sql";
-import { xml } from "@codemirror/lang-xml";
-import { yaml } from "@codemirror/lang-yaml";
-import {
-  bracketMatching,
-  foldGutter,
-  foldKeymap,
-  HighlightStyle,
-  indentOnInput,
-  StreamLanguage,
-  syntaxHighlighting,
-} from "@codemirror/language";
-import { csharp, dart } from "@codemirror/legacy-modes/mode/clike";
-import { cmake } from "@codemirror/legacy-modes/mode/cmake";
-import { diff } from "@codemirror/legacy-modes/mode/diff";
-import { dockerFile } from "@codemirror/legacy-modes/mode/dockerfile";
-import { lua } from "@codemirror/legacy-modes/mode/lua";
-import { fSharp } from "@codemirror/legacy-modes/mode/mllike";
-import { nginx } from "@codemirror/legacy-modes/mode/nginx";
-import { perl } from "@codemirror/legacy-modes/mode/perl";
-import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
-import { properties } from "@codemirror/legacy-modes/mode/properties";
-import { protobuf } from "@codemirror/legacy-modes/mode/protobuf";
-import { r } from "@codemirror/legacy-modes/mode/r";
-import { ruby } from "@codemirror/legacy-modes/mode/ruby";
-import { shell } from "@codemirror/legacy-modes/mode/shell";
-import { swift } from "@codemirror/legacy-modes/mode/swift";
-import { toml } from "@codemirror/legacy-modes/mode/toml";
-import { vb } from "@codemirror/legacy-modes/mode/vb";
-import { closeSearchPanel, search, searchKeymap } from "@codemirror/search";
+import { closeSearchPanel } from "@codemirror/search";
 import { EditorState } from "@codemirror/state";
-import {
-  crosshairCursor,
-  drawSelection,
-  dropCursor,
-  EditorView,
-  highlightActiveLine,
-  highlightActiveLineGutter,
-  highlightSpecialChars,
-  keymap,
-  lineNumbers,
-  rectangularSelection,
-  scrollPastEnd,
-} from "@codemirror/view";
-import { tags } from "@lezer/highlight";
+import { EditorView } from "@codemirror/view";
 import { listen } from "@tauri-apps/api/event";
 import { join, tempDir } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -82,7 +21,11 @@ import ReloadDirtyDialog from "@/components/dialog/remote-file-editor/ReloadDirt
 import RemoteFileConflictDialog from "@/components/dialog/remote-file-editor/RemoteFileConflictDialog";
 import UnsavedChangesDialog from "@/components/dialog/remote-file-editor/UnsavedChangesDialog";
 import ChildWindowHeader from "@/components/layout/ChildWindowHeader";
-import { languageFromFilename, type RemoteTextFile } from "@/components/panel/file-explorer/model";
+import {
+  getLocalPathName,
+  languageFromFilename,
+  type RemoteTextFile,
+} from "@/components/panel/file-explorer/model";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -92,91 +35,25 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApp } from "@/context/AppContext";
+import {
+  type CursorPosition,
+  codeMirrorFileViewExtensions,
+  getCursorPosition,
+  getDisplayLanguage,
+} from "@/lib/codeMirrorFileView";
 import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
 import { cn, formatSize, parseJsonSearchParam } from "@/lib/utils";
 
 const MAX_EDITOR_FILE_BYTES = 5 * 1024 * 1024;
 
-const editorHighlightStyle = HighlightStyle.define([
-  {
-    tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment, tags.meta],
-    color: "var(--df-text-muted)",
-    fontStyle: "italic",
-  },
-  {
-    tag: [
-      tags.keyword,
-      tags.controlKeyword,
-      tags.definitionKeyword,
-      tags.moduleKeyword,
-      tags.operatorKeyword,
-    ],
-    color: "var(--df-primary)",
-  },
-  {
-    tag: [tags.operator, tags.definitionOperator, tags.punctuation, tags.separator],
-    color: "var(--df-text-dimmed)",
-  },
-  {
-    tag: [tags.string, tags.docString, tags.character, tags.attributeValue],
-    color: "var(--df-success)",
-  },
-  {
-    tag: [tags.number, tags.integer, tags.float, tags.bool, tags.null, tags.atom],
-    color: "var(--df-warning)",
-  },
-  {
-    tag: [tags.regexp, tags.escape, tags.url],
-    color: "var(--df-accent)",
-  },
-  {
-    tag: [tags.className, tags.typeName, tags.namespace, tags.tagName],
-    color: "color-mix(in srgb, var(--df-link) 72%, var(--df-success))",
-  },
-  {
-    tag: [
-      tags.function(tags.variableName),
-      tags.function(tags.propertyName),
-      tags.definition(tags.variableName),
-      tags.definition(tags.propertyName),
-    ],
-    color: "var(--df-link)",
-  },
-  {
-    tag: [tags.propertyName, tags.attributeName, tags.labelName],
-    color: "color-mix(in srgb, var(--df-link) 78%, var(--df-text))",
-  },
-  {
-    tag: [tags.constant(tags.variableName), tags.standard(tags.variableName), tags.macroName],
-    color: "color-mix(in srgb, var(--df-warning) 85%, var(--df-text))",
-  },
-  {
-    tag: [tags.deleted, tags.invalid],
-    color: "var(--df-danger)",
-  },
-  {
-    tag: [tags.inserted, tags.changed],
-    color: "var(--df-success)",
-  },
-  {
-    tag: tags.heading,
-    color: "var(--df-primary)",
-    fontWeight: "600",
-  },
-  {
-    tag: [tags.emphasis],
-    fontStyle: "italic",
-  },
-  {
-    tag: [tags.strong],
-    fontWeight: "600",
-  },
-]);
+type FileEditorBackendKind = "remote" | "local";
 
 interface RemoteFileEditorData {
   sessionId: string;
-  remotePath: string;
+  backend?: FileEditorBackendKind;
+  path?: string;
+  remotePath?: string;
   name: string;
   size: number;
   mtime: number;
@@ -187,8 +64,15 @@ interface RemoteFileEditorOpenPayload {
   data: RemoteFileEditorData;
 }
 
-interface EditorTab extends RemoteFileEditorData {
+interface EditorTab {
   id: string;
+  sessionId: string;
+  backend: FileEditorBackendKind;
+  path: string;
+  remotePath: string;
+  name: string;
+  size: number;
+  mtime: number;
   content: string;
   baseSize: number;
   baseMtime: number;
@@ -206,125 +90,26 @@ interface WriteRemoteFileTextResult {
   size?: number;
 }
 
-interface CursorPosition {
-  line: number;
-  column: number;
+function getEditorDataPath(data: Pick<RemoteFileEditorData, "path" | "remotePath">) {
+  return data.path ?? data.remotePath ?? "";
 }
 
-function languageExtension(language: string) {
-  switch (language) {
-    case "batch":
-    case "shell":
-      return StreamLanguage.define(shell);
-    case "c":
-    case "cpp":
-      return cpp();
-    case "cmake":
-      return StreamLanguage.define(cmake);
-    case "csharp":
-      return StreamLanguage.define(csharp);
-    case "css":
-    case "less":
-      return css();
-    case "dart":
-      return StreamLanguage.define(dart);
-    case "diff":
-      return StreamLanguage.define(diff);
-    case "dockerfile":
-      return StreamLanguage.define(dockerFile);
-    case "fsharp":
-      return StreamLanguage.define(fSharp);
-    case "go":
-      return go();
-    case "graphql":
-      return javascript({ jsx: true, typescript: true });
-    case "html":
-      return html();
-    case "ini":
-    case "makefile":
-    case "properties":
-      return StreamLanguage.define(properties);
-    case "java":
-    case "kotlin":
-      return java();
-    case "javascript":
-      return javascript({ jsx: true });
-    case "json":
-    case "json5":
-    case "jsonc":
-      return json();
-    case "lua":
-      return StreamLanguage.define(lua);
-    case "markdown":
-      return markdown();
-    case "nginx":
-      return StreamLanguage.define(nginx);
-    case "perl":
-      return StreamLanguage.define(perl);
-    case "php":
-      return php();
-    case "powershell":
-      return StreamLanguage.define(powerShell);
-    case "protobuf":
-      return StreamLanguage.define(protobuf);
-    case "python":
-      return python();
-    case "r":
-      return StreamLanguage.define(r);
-    case "ruby":
-      return StreamLanguage.define(ruby);
-    case "rust":
-      return rust();
-    case "sass":
-      return sassLanguage({ indented: true });
-    case "scss":
-      return sassLanguage();
-    case "sql":
-      return sql();
-    case "svelte":
-    case "vue":
-      return html();
-    case "swift":
-      return StreamLanguage.define(swift);
-    case "toml":
-      return StreamLanguage.define(toml);
-    case "typescript":
-      return javascript({ jsx: true, typescript: true });
-    case "vb":
-      return StreamLanguage.define(vb);
-    case "xml":
-      return xml();
-    case "yaml":
-      return yaml();
-    default:
-      return [];
-  }
-}
-
-function tabId(data: Pick<RemoteFileEditorData, "sessionId" | "remotePath">) {
-  return `${data.sessionId}\n${data.remotePath}`;
+function tabId(data: Pick<RemoteFileEditorData, "backend" | "sessionId" | "path" | "remotePath">) {
+  const backend = data.backend ?? "remote";
+  return `${backend}\n${data.sessionId}\n${getEditorDataPath(data)}`;
 }
 
 function getParentDirectoryName(path: string) {
-  const normalized = path.replace(/\/+$/, "");
-  if (!normalized || normalized === "/") return "/";
-  const parent = normalized.slice(0, normalized.lastIndexOf("/"));
-  if (!parent || parent === "/") return "/";
-  return parent.slice(parent.lastIndexOf("/") + 1) || "/";
+  const normalized = path.replace(/[\\/]+$/, "");
+  if (!normalized || normalized === "/" || /^[a-zA-Z]:$/.test(normalized)) return normalized || "/";
+  const index = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
+  const parent = index > 0 ? normalized.slice(0, index) : "";
+  if (!parent || parent === "/" || /^[a-zA-Z]:$/.test(parent)) return parent || "/";
+  return getLocalPathName(parent, parent);
 }
 
 function getTabBaseLabel(tab: EditorTab) {
-  return tab.name || tab.remotePath.split("/").pop() || tab.remotePath;
-}
-
-function getDisplayLanguage(language: string) {
-  return language === "plaintext" ? "Plain Text" : language.toLocaleUpperCase();
-}
-
-function getCursorPosition(state: EditorState): CursorPosition {
-  const head = state.selection.main.head;
-  const line = state.doc.lineAt(head);
-  return { line: line.number, column: head - line.from + 1 };
+  return tab.name || getLocalPathName(tab.path, tab.path);
 }
 
 function formatRemoteMtime(mtime?: number) {
@@ -337,8 +122,15 @@ function formatRemoteMtime(mtime?: number) {
 }
 
 function createTab(data: RemoteFileEditorData): EditorTab {
+  const path = getEditorDataPath(data);
   return {
-    ...data,
+    sessionId: data.sessionId,
+    backend: data.backend ?? "remote",
+    path,
+    remotePath: path,
+    name: data.name,
+    size: data.size,
+    mtime: data.mtime,
     id: tabId(data),
     content: "",
     baseSize: data.size,
@@ -348,7 +140,7 @@ function createTab(data: RemoteFileEditorData): EditorTab {
     dirty: false,
     error: "",
     lastSavedAt: null,
-    language: languageFromFilename(data.name || data.remotePath),
+    language: languageFromFilename(data.name || path),
   };
 }
 
@@ -406,37 +198,9 @@ export default function RemoteFileEditorPage() {
     (content: string, language: string) =>
       EditorState.create({
         doc: content,
-        extensions: [
-          lineNumbers(),
-          foldGutter(),
-          highlightSpecialChars(),
-          history(),
-          drawSelection(),
-          dropCursor(),
-          EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          autocompletion(),
-          closeBrackets(),
-          syntaxHighlighting(editorHighlightStyle),
-          bracketMatching(),
-          highlightActiveLine(),
-          highlightActiveLineGutter(),
-          search({ top: true }),
-          languageExtension(language),
-          rectangularSelection(),
-          crosshairCursor(),
-          scrollPastEnd(),
-          keymap.of([
-            indentWithTab,
-            ...closeBracketsKeymap,
-            ...defaultKeymap,
-            ...historyKeymap,
-            ...completionKeymap,
-            ...searchKeymap,
-            ...foldKeymap,
-          ]),
-          EditorView.lineWrapping,
-          EditorView.updateListener.of((update) => {
+        extensions: codeMirrorFileViewExtensions(language, {
+          editable: true,
+          updateListener: EditorView.updateListener.of((update) => {
             const id = activeTabIdRef.current;
             if (!id) return;
             editorStatesRef.current[id] = update.state;
@@ -447,92 +211,7 @@ export default function RemoteFileEditorPage() {
             const next = update.state.doc.toString();
             updateTab(id, (tab) => ({ ...tab, content: next, dirty: true }));
           }),
-          EditorView.theme({
-            "&": {
-              height: "100%",
-              backgroundColor: "var(--background)",
-              color: "var(--foreground)",
-              fontSize: "13px",
-            },
-            "&.cm-focused": {
-              outline: "none",
-            },
-            ".cm-content": {
-              minHeight: "100%",
-              caretColor: "var(--foreground)",
-              cursor: "text",
-              userSelect: "text",
-            },
-            ".cm-line": {
-              cursor: "text",
-            },
-            ".cm-cursor, .cm-dropCursor": {
-              borderLeftColor: "var(--foreground)",
-            },
-            ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-              backgroundColor: "color-mix(in srgb, var(--primary) 28%, transparent)",
-            },
-            ".cm-scroller": {
-              fontFamily: "var(--font-mono), 'JetBrains Mono', monospace",
-              overflow: "auto",
-            },
-            ".cm-gutters": {
-              backgroundColor: "color-mix(in srgb, var(--muted) 18%, transparent)",
-              color: "var(--muted-foreground)",
-              borderRightColor: "color-mix(in srgb, var(--border) 70%, transparent)",
-            },
-            ".cm-foldGutter": {
-              width: "1.1rem",
-            },
-            ".cm-foldGutter span": {
-              cursor: "pointer",
-              color: "var(--muted-foreground)",
-              opacity: "0.45",
-              transition: "opacity 120ms ease, color 120ms ease",
-            },
-            ".cm-foldGutter:hover span": {
-              opacity: "0.8",
-            },
-            ".cm-activeLine": {
-              backgroundColor: "color-mix(in srgb, var(--muted) 22%, transparent)",
-            },
-            ".cm-activeLineGutter": {
-              backgroundColor: "color-mix(in srgb, var(--muted) 32%, transparent)",
-            },
-            ".cm-tooltip": {
-              borderColor: "var(--border)",
-              backgroundColor: "var(--popover)",
-              color: "var(--popover-foreground)",
-              fontSize: "12px",
-              boxShadow: "0 10px 30px rgb(0 0 0 / 0.22)",
-            },
-            ".cm-tooltip-autocomplete ul li[aria-selected]": {
-              backgroundColor: "color-mix(in srgb, var(--primary) 18%, transparent)",
-              color: "var(--foreground)",
-            },
-            ".cm-search": {
-              backgroundColor: "var(--popover)",
-              color: "var(--popover-foreground)",
-              borderBottomColor: "var(--border)",
-              gap: "0.375rem",
-              padding: "0.375rem",
-            },
-            ".cm-search input": {
-              backgroundColor: "var(--background)",
-              color: "var(--foreground)",
-              border: "1px solid var(--border)",
-              borderRadius: "0.25rem",
-              padding: "0.125rem 0.375rem",
-            },
-            ".cm-search button": {
-              backgroundColor: "color-mix(in srgb, var(--muted) 50%, transparent)",
-              color: "var(--foreground)",
-              border: "1px solid var(--border)",
-              borderRadius: "0.25rem",
-              padding: "0.125rem 0.375rem",
-            },
-          }),
-        ],
+        }),
       }),
     [updateTab],
   );
@@ -573,11 +252,14 @@ export default function RemoteFileEditorPage() {
 
       updateTab(id, (current) => ({ ...current, loading: true, error: "" }));
       try {
-        const result = await invoke<RemoteTextFile>("read_remote_file_text", {
-          sessionId: tab.sessionId,
-          path: tab.remotePath,
-          maxBytes: MAX_EDITOR_FILE_BYTES,
-        });
+        const result = await invoke<RemoteTextFile>(
+          tab.backend === "local" ? "read_local_file_text" : "read_remote_file_text",
+          {
+            sessionId: tab.sessionId,
+            path: tab.path,
+            maxBytes: MAX_EDITOR_FILE_BYTES,
+          },
+        );
         updateTab(id, (current) => ({
           ...current,
           content: result.content,
@@ -735,14 +417,17 @@ export default function RemoteFileEditorPage() {
       if (!tab || tab.saving) return false;
       updateTab(id, (current) => ({ ...current, saving: true, error: "" }));
       try {
-        const result = await invoke<WriteRemoteFileTextResult>("write_remote_file_text", {
-          sessionId: tab.sessionId,
-          path: tab.remotePath,
-          content: tab.content,
-          expectedMtime: tab.baseMtime,
-          expectedSize: tab.baseSize,
-          force,
-        });
+        const result = await invoke<WriteRemoteFileTextResult>(
+          tab.backend === "local" ? "write_local_file_text" : "write_remote_file_text",
+          {
+            sessionId: tab.sessionId,
+            path: tab.path,
+            content: tab.content,
+            expectedMtime: tab.baseMtime,
+            expectedSize: tab.baseSize,
+            force,
+          },
+        );
         if (result.status === "conflict") {
           setConflictTabId(id);
           return false;
@@ -785,6 +470,11 @@ export default function RemoteFileEditorPage() {
   const openExternal = useCallback(
     (tab: EditorTab) => {
       const run = async () => {
+        if (tab.backend === "local") {
+          await openPath(tab.path, appSettings.transfer.default_editor || undefined);
+          return;
+        }
+
         const root = await tempDir();
         const safeName = await invoke<string>("sanitize_download_file_name", { name: tab.name });
         const localPath = await join(
@@ -796,13 +486,13 @@ export default function RemoteFileEditorPage() {
         );
         await invoke("download_remote_file", {
           sessionId: tab.sessionId,
-          remotePath: tab.remotePath,
+          remotePath: tab.path,
           localPath,
         });
         await invoke("start_file_watch", {
           sessionId: tab.sessionId,
           localPath,
-          remotePath: tab.remotePath,
+          remotePath: tab.path,
         });
         await openPath(localPath, appSettings.transfer.default_editor || undefined);
       };

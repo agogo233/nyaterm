@@ -14,7 +14,10 @@ use tauri::{AppHandle, Emitter};
 use tokio::process::Command;
 use tokio::sync::oneshot;
 
-use crate::config::{AgentCommandExecutionMode, AiExecutionProfile, AiSettings, RiskLevel};
+use crate::config::{
+    AgentCommandExecutionMode, AiAgentKind, AiExecutionProfile, AiPermissionMode, AiSettings,
+    RiskLevel,
+};
 use crate::core::capture;
 use crate::core::session::{SessionCommand, SessionManager, SessionType};
 use crate::core::ssh::SshConnectionHandles;
@@ -1041,6 +1044,18 @@ fn decide_agent_command_execution(
     }
 }
 
+fn decide_external_agent_command_execution(
+    mode: &AiPermissionMode,
+) -> (ApprovalDecision, Option<String>) {
+    match mode {
+        AiPermissionMode::Observer | AiPermissionMode::Confirm => (
+            ApprovalDecision::NeedsApproval,
+            Some("external agent permission mode requires confirmation".to_string()),
+        ),
+        AiPermissionMode::Auto => (ApprovalDecision::Auto, None),
+    }
+}
+
 fn build_execute_action(
     command: &str,
     target: Option<AiTerminalTarget>,
@@ -1165,7 +1180,28 @@ pub(super) async fn run_external_agent_command_step(
     let assessment = assess_agent_command_risk(&parsed, &command);
     let command_target =
         resolve_agent_command_target(request, parsed.target_terminal_session_id.as_deref())?;
-    let (decision, approval_reason) = decide_agent_command_execution(settings, &assessment);
+    let (decision, approval_reason) = if request.agent_kind == AiAgentKind::Nyaterm {
+        decide_agent_command_execution(settings, &assessment)
+    } else {
+        decide_external_agent_command_execution(&request.permission_mode)
+    };
+
+    if request.agent_kind != AiAgentKind::Nyaterm
+        && request.permission_mode == AiPermissionMode::Observer
+    {
+        append_agent_command_audit(
+            app,
+            request,
+            "ai.external_agent_observer_block",
+            &command,
+            assessment.effective_risk.clone(),
+            false,
+            true,
+        );
+        return Err(AppError::Config(
+            "Observer permission mode does not allow terminal writes".to_string(),
+        ));
+    }
 
     if decision == ApprovalDecision::NeedsApproval {
         let approval_step = AgentStepPayload {
@@ -1678,6 +1714,22 @@ mod tests {
         settings.agent_command_execution_mode = AgentCommandExecutionMode::Auto;
         assert_eq!(
             decide_agent_command_execution(&settings, &assessment).0,
+            ApprovalDecision::Auto
+        );
+    }
+
+    #[test]
+    fn external_agent_permission_modes_are_explicit() {
+        assert_eq!(
+            decide_external_agent_command_execution(&AiPermissionMode::Observer).0,
+            ApprovalDecision::NeedsApproval
+        );
+        assert_eq!(
+            decide_external_agent_command_execution(&AiPermissionMode::Confirm).0,
+            ApprovalDecision::NeedsApproval
+        );
+        assert_eq!(
+            decide_external_agent_command_execution(&AiPermissionMode::Auto).0,
             ApprovalDecision::Auto
         );
     }

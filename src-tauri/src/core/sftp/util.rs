@@ -23,6 +23,16 @@ pub struct FileEntry {
     pub raw_path_token: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryChild {
+    pub name: String,
+    pub path: String,
+    pub is_symlink: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_path_token: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RemotePathRef {
     display_path: String,
@@ -88,6 +98,15 @@ pub struct RemoteFileAttributeUpdate {
 pub struct RemoteTextFile {
     pub path: String,
     pub content: String,
+    pub size: u64,
+    pub mtime: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteBinaryFile {
+    pub path: String,
+    pub content_bytes: Vec<u8>,
     pub size: u64,
     pub mtime: u64,
 }

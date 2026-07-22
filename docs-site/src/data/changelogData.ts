@@ -10,6 +10,135 @@ export type ChangelogRelease = {
 
 const changelogReleasesEn: ChangelogRelease[] = [
   {
+    version: '[1.1.16] - 2026-07-21',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          '**temporary-link:** Consolidate temporary connection handling and extend protocol support for one-off sessions.',
+          '**file-explorer:** Add file copy operations, backend file-operation support, raw path-token handling, directory navigation caching, and file preview flows.',
+          '**quick-commands:** Add a script editor for quick commands and support copying commands.',
+          '**terminal:** Add customizable timestamp formats, SSH keep-alive mode settings, disconnected output flushing, improved command-suggestion keyboard navigation, and disconnected tab indicators.',
+          '**settings:** Add app-language saving so language changes persist through the backend.',
+          '**icons:** Add Kubernetes, macOS, and Android icon assets, and improve remote system icon auto-detection after session start.',
+          '**zmodem:** Add upload timestamp preservation and safer conflict prompts for unverified destinations.',
+          '**saved-connections:** Add keyboard navigation, connection element registration, and move-to-group actions.',
+          '**ai:** Add Codex and Claude Code integration, run-mode selection, model filtering, custom provider settings, command target context, and dynamic tool-call tracking.',
+          '**clipboard:** Improve clipboard writing on Windows and fallback behavior.',
+          '**cloud-sync:** Add connection success handling and improve portable snapshot handling for sync and backup modes.',
+          '**theme:** Add a theme designer dialog and enhanced theme management.',
+          '**i18n:** Add Traditional Chinese localization and language handling.',
+          '**session-targets:** Enhance Send Command target structure and compatibility.',
+          '**tunnel:** Add tunnel runtime state management and connection tracking.',
+          '**tray:** Add macOS tray icon support.',
+          '**monitoring:** Add an Ascend NPU monitoring panel and settings.',
+          '**header:** Add remote stats support and header status mode.',
+        ],
+      },
+      {
+        title: 'Changed',
+        items: [
+          '**header:** Streamline session icon handling.',
+          '**ssh:** Rename and update suppressed output handling helpers.',
+          '**terminal:** Update local PTY environment configuration for cross-platform compatibility.',
+          '**sftp:** Normalize remote directory paths and improve path joining.',
+          '**settings:** Rename macOS IME compatibility to a general IME compatibility setting.',
+          '**ai:** Remove redundant Markdown rendering from the agent step view.',
+        ],
+      },
+      {
+        title: 'Fixed',
+        items: [
+          '**clipboard:** Keep the arboard clipboard alive and enable Wayland support.',
+          '**context:** Refactor startup restore logic for tab sessions.',
+          '**panel:** Improve pointer-event handling in saved connection items and group nodes.',
+          '**cloud-sync:** Initialize OpenDAL transport for all providers and upgrade OpenDAL to 0.58.',
+          '**build:** Use `ring` instead of `aws-lc-rs` for the russh crypto backend.',
+          '**terminal:** Fix GBK encoding support and duplicate input with Fcitx IME on Linux.',
+          '**icons:** Improve remote system distribution matching.',
+        ],
+      },
+      {
+        title: 'Performance',
+        items: [
+          '**terminal:** Improve terminal output handling, performance mode behavior, and WebGL resource management.',
+        ],
+      },
+      {
+        title: 'Documentation',
+        items: [
+          '**i18n:** Add SSH keep-alive descriptions and update localization for new workflows.',
+          '**images:** Update product images for dark and light themes.',
+        ],
+      },
+    ],
+  },
+  {
+    version: '[1.1.15] - 2026-07-14',
+    sections: [
+      {
+        title: 'Fixed',
+        items: ['**app:** Remove macOS-specific tab close handling and streamline effect dependencies.'],
+      },
+      {
+        title: 'CI',
+        items: ['**gitee:** Improve the release workflow trigger and tag resolution.'],
+      },
+    ],
+  },
+  {
+    version: '[1.1.14] - 2026-07-14',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          '**telnet:** Add auto-login and startup command support.',
+          '**tabs:** Add tab locking to prevent accidental closure.',
+          '**terminal:** Add a remote color OSC guard for serial sessions, terminal zoom settings, enhanced theming and layout adjustments, and standardized input behavior.',
+          '**remote-stats:** Integrate remote system statistics and connection icon auto-detection.',
+          '**ai:** Add reasoning-effort selection to model controls.',
+          '**connections:** Add multi-select delete support and restore the last opened connection and expanded group state.',
+          '**webview:** Prevent reserved shortcuts from being intercepted by webview content.',
+          '**fonts:** Add JetBrainsMono Nerd Font Mono and update font defaults.',
+          '**xterm:** Isolate the xterm WebGL texture atlas for NyaTerm.',
+          '**build:** Add unlock rescue scripts and a post-install xterm WebGL patch.',
+          '**docker:** Add Docker sudo password handling.',
+          '**security-auth:** Add saved-password authentication support, credential unlock actions, credential reordering, Tab-key credential selection, and active-session-aware OTP management.',
+          '**appearance:** Add window transparency controls and improved font handling.',
+          '**i18n:** Add Korean localization.',
+          '**sftp:** Add SFTP settings and a remote file browser.',
+          '**header:** Add an unsplit action.',
+        ],
+      },
+      {
+        title: 'Fixed',
+        items: [
+          '**terminal:** Improve clipboard behavior in the terminal context menu, prevent stale macOS trackpad selection, and support Ctrl printable terminal keys.',
+          '**stats:** Ensure disk data files are created and populated correctly.',
+          '**panel:** Fix progress calculation for multiple units.',
+          '**network:** Limit connection options to SSH connections.',
+          '**ssh:** Ensure the post-login timer only arms during the normal phase.',
+        ],
+      },
+      {
+        title: 'Performance',
+        items: [
+          '**terminal:** Improve output handling and flow control.',
+          '**zmodem:** Add upload and download drain mechanisms.',
+        ],
+      },
+      {
+        title: 'Documentation',
+        items: [
+          '**readme:** Update contributor image links.',
+          '**installation:** Add direct Windows portable download links.',
+          '**images:** Add monitoring and import images for the docs site.',
+          '**changelog:** Update changelog entries through `1.1.13`.',
+        ],
+      },
+    ],
+  },
+  {
     version: '[1.1.13] - 2026-07-06',
     sections: [
       {
@@ -1519,6 +1648,127 @@ const changelogReleasesEn: ChangelogRelease[] = [
 ];
 
 const changelogReleasesZhCN: ChangelogRelease[] = [
+  {
+    version: '[1.1.16] - 2026-07-21',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**temporary-link:** 整合临时连接处理流程，并增强一次性会话的协议支持。',
+          '**file-explorer:** 新增文件复制、后端文件操作支持、raw path token 处理、目录导航缓存和文件预览流程。',
+          '**quick-commands:** 新增快捷命令脚本编辑器，并支持复制快捷命令。',
+          '**terminal:** 新增可配置时间戳格式、SSH keep-alive 模式、断开状态输出刷新、命令建议键盘导航优化和断开标签指示。',
+          '**settings:** 新增应用语言保存能力，使语言切换可通过后端持久化。',
+          '**icons:** 新增 Kubernetes、macOS、Android 图标资源，并改进会话启动后的远程系统图标自动识别。',
+          '**zmodem:** 新增上传时保留时间戳选项，并为未验证目标提供更安全的冲突提示。',
+          '**saved-connections:** 新增键盘导航、连接元素注册和移动到分组操作。',
+          '**ai:** 新增 Codex 与 Claude Code 集成、运行模式选择、模型过滤、自定义 provider、命令目标上下文和动态工具调用跟踪。',
+          '**clipboard:** 改进 Windows 剪贴板写入和 fallback 机制。',
+          '**cloud-sync:** 新增连接成功处理，并改进同步 / 备份模式的 portable snapshot 处理。',
+          '**theme:** 新增主题设计器对话框并增强主题管理。',
+          '**i18n:** 新增繁体中文本地化和语言处理。',
+          '**session-targets:** 增强发送命令目标结构和兼容性。',
+          '**tunnel:** 新增隧道运行态管理和连接跟踪。',
+          '**tray:** 新增 macOS 托盘图标支持。',
+          '**monitoring:** 新增 Ascend NPU 监控面板和设置。',
+          '**header:** 新增远程状态支持和 header 状态模式。',
+        ],
+      },
+      {
+        title: '变更',
+        items: [
+          '**header:** 简化会话图标处理。',
+          '**ssh:** 重命名并更新 suppressed output 处理辅助函数。',
+          '**terminal:** 更新本地 PTY 环境配置，提升跨平台兼容性。',
+          '**sftp:** 规范化远程目录路径并改进路径拼接。',
+          '**settings:** 将 macOS IME 兼容设置重命名为通用 IME 兼容设置。',
+          '**ai:** 移除 AgentStepView 中冗余的 Markdown 渲染。',
+        ],
+      },
+      {
+        title: '修复',
+        items: [
+          '**clipboard:** 保持 arboard 剪贴板存活并启用 Wayland 支持。',
+          '**context:** 重构标签会话的启动恢复逻辑。',
+          '**panel:** 改进已保存连接项和分组节点的 pointer-event 处理。',
+          '**cloud-sync:** 为所有 provider 初始化 OpenDAL transport，并升级 OpenDAL 到 0.58。',
+          '**build:** russh crypto backend 改用 `ring`，替代 `aws-lc-rs`。',
+          '**terminal:** 修复 GBK 编码支持和 Linux Fcitx IME 重复输入问题。',
+          '**icons:** 改进远程系统发行版匹配。',
+        ],
+      },
+      {
+        title: '性能',
+        items: ['**terminal:** 改进终端输出处理、性能模式行为和 WebGL 资源管理。'],
+      },
+      {
+        title: '文档',
+        items: ['**i18n:** 新增 SSH keep-alive 描述，并更新新工作流本地化文案。', '**images:** 更新明暗主题产品图片。'],
+      },
+    ],
+  },
+  {
+    version: '[1.1.15] - 2026-07-14',
+    sections: [
+      {
+        title: '修复',
+        items: ['**app:** 移除 macOS 特定的标签关闭处理，并简化 effect 依赖。'],
+      },
+      {
+        title: 'CI',
+        items: ['**gitee:** 优化 Gitee release workflow 的触发和 tag 解析。'],
+      },
+    ],
+  },
+  {
+    version: '[1.1.14] - 2026-07-14',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**telnet:** 新增自动登录和启动命令支持。',
+          '**tabs:** 新增标签锁定，避免意外关闭。',
+          '**terminal:** 新增串口远程颜色 OSC 防护、终端缩放设置、终端主题与布局增强，以及标准化输入行为。',
+          '**remote-stats:** 集成远程系统状态和连接图标自动识别。',
+          '**ai:** 为模型控件新增 reasoning effort 选择。',
+          '**connections:** 新增批量删除支持，并恢复上次打开连接和分组展开状态。',
+          '**webview:** 支持阻止 webview 内容拦截保留快捷键。',
+          '**fonts:** 新增 JetBrainsMono Nerd Font Mono 并更新字体默认值。',
+          '**xterm:** 为 NyaTerm 隔离 xterm WebGL texture atlas。',
+          '**build:** 新增解锁救援脚本和 xterm WebGL post-install patch。',
+          '**docker:** 新增 Docker sudo 密码处理。',
+          '**security-auth:** 新增已保存密码认证、凭据解锁动作、凭据重排、Tab 键凭据选择，以及感知活动会话的 OTP 管理。',
+          '**appearance:** 新增窗口透明度控制并改进字体处理。',
+          '**i18n:** 新增韩语本地化。',
+          '**sftp:** 新增 SFTP 设置和远程文件浏览器。',
+          '**header:** 新增取消分屏动作。',
+        ],
+      },
+      {
+        title: '修复',
+        items: [
+          '**terminal:** 改进终端右键菜单剪贴板行为，避免 macOS trackpad 产生 stale selection，并支持 Ctrl printable 终端按键。',
+          '**stats:** 确保磁盘数据文件被正确创建和填充。',
+          '**panel:** 修复多单元进度计算。',
+          '**network:** 将连接选项限制为仅 SSH 连接。',
+          '**ssh:** 确保 post-login timer 只在 normal 阶段启动。',
+        ],
+      },
+      {
+        title: '性能',
+        items: ['**terminal:** 改进输出处理和流控。', '**zmodem:** 新增上传和下载 drain 机制。'],
+      },
+      {
+        title: '文档',
+        items: [
+          '**readme:** 更新贡献者图片链接。',
+          '**installation:** 新增 Windows portable 直链。',
+          '**images:** 为文档站新增监控和导入图片。',
+          '**changelog:** 更新 changelog 到 `1.1.13`。',
+        ],
+      },
+    ],
+  },
   {
     version: '[1.1.13] - 2026-07-06',
     sections: [

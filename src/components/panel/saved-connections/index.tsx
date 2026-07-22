@@ -133,11 +133,13 @@ export default function SavedConnections({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
+  const [keyboardActiveConnectionId, setKeyboardActiveConnectionId] = useState<string | null>(null);
   const searchExpandedBaseRef = useRef<Set<string> | null>(null);
   const searchAutoExpandedGroupIdsRef = useRef<Set<string>>(new Set());
   const previousKeywordRef = useRef("");
   const restoredLastOpenedConnectionIdRef = useRef<string | null>(null);
   const lastSelectedConnectionIdRef = useRef<string | null>(null);
+  const connectionElementRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const sortMode = (appSettings.ui.saved_connections_sort_mode || "default") as SortMode;
   const remoteStatsEnabled = appSettings.ui.show_remote_stats ?? true;
 
@@ -379,6 +381,33 @@ export default function SavedConnections({
     return [...orderedVisible, ...hiddenSelected];
   }, [connectionById, selectedConnectionIds, visibleConnectionIdSet, visibleConnectionIds]);
 
+  useEffect(() => {
+    if (!keyword || visibleConnectionIds.length === 0) {
+      setKeyboardActiveConnectionId(null);
+      return;
+    }
+
+    setKeyboardActiveConnectionId((currentId) =>
+      currentId && visibleConnectionIdSet.has(currentId) ? currentId : visibleConnectionIds[0],
+    );
+  }, [keyword, visibleConnectionIdSet, visibleConnectionIds]);
+
+  useEffect(() => {
+    if (!keyword || !keyboardActiveConnectionId) return;
+
+    connectionElementRefs.current
+      .get(keyboardActiveConnectionId)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [keyboardActiveConnectionId, keyword]);
+
+  const registerConnectionElement = useCallback((id: string, element: HTMLDivElement | null) => {
+    if (element) {
+      connectionElementRefs.current.set(id, element);
+    } else {
+      connectionElementRefs.current.delete(id);
+    }
+  }, []);
+
   const requestDeleteConnection = useCallback(
     (conn: SavedConnection) => {
       if (selectedConnectionIds.has(conn.id) && selectedConnections.length > 1) {
@@ -520,6 +549,10 @@ export default function SavedConnections({
 
   const handleConnectionSelectionStart = (conn: SavedConnection, event: React.MouseEvent) => {
     if (event.button !== 0) return;
+
+    if (keyword) {
+      setKeyboardActiveConnectionId(conn.id);
+    }
 
     const additive = event.ctrlKey || event.metaKey;
     setSelectedConnectionIds((prev) => {
@@ -663,6 +696,41 @@ export default function SavedConnections({
     }
 
     openConnections([conn]);
+  };
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!keyword || visibleConnectionIds.length === 0) return;
+    if (event.nativeEvent.isComposing || event.key === "Process") return;
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      setKeyboardActiveConnectionId((currentId) => {
+        const currentIndex = currentId ? visibleConnectionIds.indexOf(currentId) : -1;
+        if (event.key === "ArrowDown") {
+          return visibleConnectionIds[(currentIndex + 1) % visibleConnectionIds.length];
+        }
+
+        return visibleConnectionIds[
+          (currentIndex - 1 + visibleConnectionIds.length) % visibleConnectionIds.length
+        ];
+      });
+      return;
+    }
+
+    if (event.key !== "Enter") return;
+
+    const activeId =
+      keyboardActiveConnectionId && visibleConnectionIdSet.has(keyboardActiveConnectionId)
+        ? keyboardActiveConnectionId
+        : visibleConnectionIds[0];
+    const activeConnection = connectionById.get(activeId);
+    if (!activeConnection) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    handleConnectOnly(activeConnection);
   };
 
   const handleCopyConnection = async (conn: SavedConnection) => {
@@ -1362,6 +1430,7 @@ export default function SavedConnections({
     dragTarget,
     expandedGroups,
     selectedConnectionIds,
+    keyboardActiveConnectionId,
     savedConnections,
     savedGroups,
     toggleGroup,
@@ -1373,6 +1442,7 @@ export default function SavedConnections({
     requestMoveSelectedConnectionsToGroup,
     handleConnectionSelectionStart,
     handleConnectionContextMenu,
+    registerConnectionElement,
     onEditConnection,
     onNewConnection,
     requestDeleteConnection,
@@ -1423,6 +1493,7 @@ export default function SavedConnections({
               type="text"
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
               placeholder={t("savedConnections.filter")}
               autoCapitalize="none"
               autoCorrect="off"

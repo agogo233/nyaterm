@@ -618,6 +618,10 @@ async fn exec_command_on_with_stdin(
 
 #[async_trait::async_trait]
 impl RemoteFs for ScpEnhancedBackend {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn backend_name(&self) -> &'static str {
         "scp-enhanced"
     }
@@ -874,6 +878,31 @@ impl RemoteFs for ScpEnhancedBackend {
         Ok(RemoteTextFile {
             path: path.to_string(),
             content,
+            size: props.size,
+            mtime: props.mtime,
+        })
+    }
+
+    async fn read_file_bytes(&self, path: &str, max_bytes: u64) -> AppResult<RemoteBinaryFile> {
+        let props = self.stat(path).await?;
+        if props.is_dir {
+            return Err(AppError::Config(
+                "Directories cannot be previewed".to_string(),
+            ));
+        }
+        if props.size > max_bytes {
+            return Err(AppError::Config(format!(
+                "File is too large to preview ({} bytes > {} bytes)",
+                props.size, max_bytes
+            )));
+        }
+
+        let cmd = format!("head -c {} -- {}", props.size, sh_quote(path));
+        let bytes = self.exec_ok(&cmd).await?;
+
+        Ok(RemoteBinaryFile {
+            path: path.to_string(),
+            content_bytes: bytes,
             size: props.size,
             mtime: props.mtime,
         })

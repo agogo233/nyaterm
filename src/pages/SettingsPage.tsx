@@ -27,6 +27,7 @@ import {
   MdTerminal,
   MdTranslate,
 } from "react-icons/md";
+import { RiGeminiLine } from "react-icons/ri";
 import { TbCubeSpark } from "react-icons/tb";
 import { toast } from "sonner";
 import ChildWindowHeader from "@/components/layout/ChildWindowHeader";
@@ -266,7 +267,7 @@ export default function SettingsPage() {
     {
       id: "ai-agents",
       label: t("ai.localAgents"),
-      icon: "ai",
+      icon: "agent",
       Component: AiAgentsTab,
     },
     {
@@ -294,6 +295,7 @@ export default function SettingsPage() {
     mouse: MdMouse,
     keyboard: MdKeyboard,
     ai: MdAutoAwesome,
+    agent: RiGeminiLine,
     model: TbCubeSpark,
     rules: FiBook,
   };

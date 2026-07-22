@@ -9,6 +9,7 @@ import {
   MdAutoAwesome,
   MdBolt,
   MdClose,
+  MdContentCopy,
   MdDelete,
   MdEdit,
   MdFormatListBulleted,
@@ -22,6 +23,7 @@ import {
   MdViewList,
   MdVisibility,
 } from "react-icons/md";
+import { toast } from "sonner";
 import DeleteQuickCommandCategoryDialog from "@/components/dialog/quick-commands/DeleteQuickCommandCategoryDialog";
 import DeleteQuickCommandDialog from "@/components/dialog/quick-commands/DeleteQuickCommandDialog";
 import QuickCommandsImportDialog from "@/components/dialog/quick-commands/QuickCommandsImportDialog";
@@ -49,6 +51,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApp } from "@/context/AppContext";
 import { openAIAssistant } from "@/lib/aiEvents";
+import { writeClipboardText } from "@/lib/clipboard";
 import { invoke } from "@/lib/invoke";
 import { cn } from "@/lib/utils";
 import type {
@@ -268,6 +271,18 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
     setAiPopoverOpen(false);
     openAIAssistant({ action: "generate_command", userInput });
   }, [aiPrompt]);
+
+  const handleCopyCommand = useCallback(
+    async (command: string) => {
+      try {
+        await writeClipboardText(command);
+        toast.success(t("common.copied"));
+      } catch {
+        toast.error(t("quickCommands.copyFailed"));
+      }
+    },
+    [t],
+  );
 
   const handleImported = useCallback(
     (_result: QuickCommandImportResult) => {
@@ -720,12 +735,27 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
                     </div>
                   )}
 
-                  <pre
-                    className="custom-scrollbar terminal-scroll max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-border/40 bg-background/50 p-2.5 font-mono text-[0.6875rem] text-foreground/80"
-                    title={cmd.command}
-                  >
-                    {cmd.command}
-                  </pre>
+                  <div className="relative">
+                    <pre
+                      className="custom-scrollbar terminal-scroll max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-border/40 bg-background/50 p-2.5 pr-9 font-mono text-[0.6875rem] text-foreground/80"
+                      title={cmd.command}
+                    >
+                      {cmd.command}
+                    </pre>
+                    <button
+                      type="button"
+                      className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-[var(--df-primary)]"
+                      aria-label={t("quickCommands.copyCommand")}
+                      title={t("quickCommands.copyCommand")}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void handleCopyCommand(cmd.command);
+                      }}
+                    >
+                      <MdContentCopy className="text-[0.8rem]" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </TooltipContent>
@@ -734,7 +764,14 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
         </ContextMenu>
       );
     },
-    [getCommandCategoryName, handleCommandClick, renderCommandIcon, renderContextMenuContent, t],
+    [
+      getCommandCategoryName,
+      handleCommandClick,
+      handleCopyCommand,
+      renderCommandIcon,
+      renderContextMenuContent,
+      t,
+    ],
   );
   return (
     <TooltipProvider delayDuration={500}>

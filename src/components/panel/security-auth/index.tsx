@@ -62,17 +62,17 @@ export default function SecurityAuthPanel({ activeSessionId = null }: SecurityAu
         >
           <div className="px-3 pt-3">
             <TabsList className="grid h-8 w-full grid-cols-4">
-              <TabsTrigger value="keys" className="text-xs">
-                {t("securityAuth.keys")}
+              <TabsTrigger value="keys" className="min-w-0 px-1 text-xs">
+                <span className="truncate">{t("securityAuth.keys")}</span>
               </TabsTrigger>
-              <TabsTrigger value="passwords" className="text-xs">
-                {t("securityAuth.passwords")}
+              <TabsTrigger value="passwords" className="min-w-0 px-1 text-xs">
+                <span className="truncate">{t("securityAuth.passwords")}</span>
               </TabsTrigger>
-              <TabsTrigger value="otp" className="text-xs">
-                {t("securityAuth.otp")}
+              <TabsTrigger value="otp" className="min-w-0 px-1 text-xs">
+                <span className="truncate">{t("securityAuth.otp")}</span>
               </TabsTrigger>
-              <TabsTrigger value="credentials" className="text-xs">
-                {t("securityAuth.credentials")}
+              <TabsTrigger value="credentials" className="min-w-0 px-1 text-xs">
+                <span className="truncate">{t("securityAuth.credentials")}</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -101,10 +101,7 @@ export default function SecurityAuthPanel({ activeSessionId = null }: SecurityAu
               onUnlockSecrets={() => setSecretsUnlocked(true)}
             />
           </TabsContent>
-          <TabsContent
-            value="otp"
-            className="mt-3 min-h-0 overflow-y-auto px-3 pb-3 terminal-scroll"
-          >
+          <TabsContent value="otp" className="mt-3 flex min-h-0 flex-1 overflow-hidden">
             <OtpManagementTab activeSessionId={activeSessionId} onCountChange={setOtpCount} />
           </TabsContent>
         </Tabs>

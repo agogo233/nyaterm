@@ -29,6 +29,7 @@ const MAX_HEADER_ESCAPED: usize = 128;
 const MAX_SUBPACKET_ESCAPED: usize = SUBPACKET_MAX_SIZE * 2 + 2 + 8;
 const WIRE_BUF_SIZE: usize = MAX_HEADER_ESCAPED + MAX_SUBPACKET_ESCAPED;
 const RECEIVER_EVENT_QUEUE_CAP: usize = 4;
+const DEFAULT_FILE_MODE: u32 = 0o100644;
 
 /// The ZMODEM protocol subpacket type
 #[repr(u8)]
@@ -411,6 +412,8 @@ pub struct Sender {
     state: SendState,
     file_name: String,
     file_size: u32,
+    file_mtime: u32,
+    file_mode: u32,
     has_file: bool,
     /// ZF0-ZF3 management / conversion options for ZFILE subpackets.
     /// Bytes: [conversion, management, transport, extended_len].
@@ -439,6 +442,8 @@ impl Sender {
             state: SendState::WaitReceiverInit,
             file_name: String::new(),
             file_size: 0,
+            file_mtime: 0,
+            file_mode: DEFAULT_FILE_MODE,
             has_file: false,
             file_options: [1, 0, 0, 0], // ZF0=ZCBIN (binary mode)
             pending_request: None,
@@ -463,6 +468,24 @@ impl Sender {
     ///
     /// * [`Write`](crate::Error::Write) when the write I/O fails with the serial port
     pub fn start_file(&mut self, file_name: &[u8], file_size: u32) -> Result<(), Error> {
+        self.start_file_with_metadata(file_name, file_size, 0, DEFAULT_FILE_MODE)
+    }
+
+    /// Starts sending a file with the provided metadata.
+    ///
+    /// `mtime` is encoded as octal text in the ZFILE payload for compatibility
+    /// with lrzsz, while `file_size` stays decimal.
+    ///
+    /// # Errors
+    ///
+    /// * [`Write`](crate::Error::Write) when the write I/O fails with the serial port
+    pub fn start_file_with_metadata(
+        &mut self,
+        file_name: &[u8],
+        file_size: u32,
+        mtime: u32,
+        mode: u32,
+    ) -> Result<(), Error> {
         if matches!(self.state, SendState::Done | SendState::WaitFinish)
             || (!matches!(
                 self.state,
@@ -477,6 +500,8 @@ impl Sender {
             .extend_from_slice(file_name)
             .map_err(|_| Error::OutOfMemory)?;
         self.file_size = file_size;
+        self.file_mtime = mtime;
+        self.file_mode = mode;
         self.has_file = true;
         self.pending_request = None;
         self.frame_remaining = 0;
@@ -671,10 +696,22 @@ impl Sender {
 
     fn queue_zfile(&mut self) -> Result<(), Error> {
         let file_size = self.file_size;
+        let file_mtime = self.file_mtime;
+        let file_mode = self.file_mode;
         let file_name = &self.file_name;
         let file_options = self.file_options;
         let mut writer = BufferWriter::new(&mut self.outgoing);
-        if write_zfile(&mut writer, &mut self.buf, file_name, file_size, file_options)?.is_none() {
+        if write_zfile(
+            &mut writer,
+            &mut self.buf,
+            file_name,
+            file_size,
+            file_mtime,
+            file_mode,
+            file_options,
+        )?
+        .is_none()
+        {
             return Err(Error::OutOfMemory);
         }
         Ok(())
@@ -1210,7 +1247,10 @@ impl Receiver {
     }
 
     /// Handles reading a single byte for the `SubpacketState::Reading` state.
-    fn receive_subpacket_data_byte(&mut self, port: &mut SliceReader<'_>) -> Result<Option<()>, Error> {
+    fn receive_subpacket_data_byte(
+        &mut self,
+        port: &mut SliceReader<'_>,
+    ) -> Result<Option<()>, Error> {
         let handle_followup = |this: &mut Self, byte: u8| -> Result<Option<()>, Error> {
             if let Ok(packet) = SubpacketType::try_from(byte) {
                 this.crc.update(packet as u8, this.data_encoding);
@@ -1443,6 +1483,8 @@ fn write_zfile<P>(
     buf: &mut Buffer<SUBPACKET_MAX_SIZE>,
     name: &[u8],
     size: u32,
+    mtime: u32,
+    mode: u32,
     file_options: [u8; 4],
 ) -> Result<Option<()>, Error>
 where
@@ -1453,7 +1495,7 @@ where
         .map_err(|_| Error::OutOfMemory)?;
     buf.push(b'\0').map_err(|_| Error::OutOfMemory)?;
 
-    write!(buf, "{size}\0").map_err(|_| Error::OutOfMemory)?;
+    write!(buf, "{size} {mtime:o} {mode:o} 0 0 0\0").map_err(|_| Error::OutOfMemory)?;
 
     if Header::new(Encoding::ZBIN32, Frame::ZFILE, &file_options)
         .write(port)?

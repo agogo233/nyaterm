@@ -730,11 +730,23 @@ pub async fn zmodem_accept_download(
 
 #[tauri::command]
 pub async fn zmodem_accept_upload(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
     file_paths: Vec<String>,
     conflict_mode: Option<String>,
 ) -> AppResult<()> {
+    let transfer_settings = match config::load_app_settings(&app) {
+        Ok(settings) => settings.transfer,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "Failed to load transfer settings for ZMODEM upload; using defaults"
+            );
+            config::TransferSettings::default()
+        }
+    };
+
     state
         .send_command(
             &session_id,
@@ -744,6 +756,7 @@ pub async fn zmodem_accept_upload(
                     .map(std::path::PathBuf::from)
                     .collect(),
                 conflict_mode: ZmodemUploadConflictMode::from_wire(conflict_mode.as_deref()),
+                preserve_timestamps: transfer_settings.preserve_timestamps,
             },
         )
         .await
@@ -778,6 +791,16 @@ pub async fn attach_session(
 ) -> AppResult<()> {
     state
         .send_command(&session_id, SessionCommand::Attach)
+        .await
+}
+
+#[tauri::command]
+pub async fn detach_session_renderer(
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+) -> AppResult<()> {
+    state
+        .send_command(&session_id, SessionCommand::DetachRenderer)
         .await
 }
 

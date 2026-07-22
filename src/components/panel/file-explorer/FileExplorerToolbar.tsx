@@ -56,6 +56,7 @@ interface FileExplorerToolbarProps {
   isFileSearchActive: boolean;
   isFileSearchExpanded: boolean;
   showHiddenFiles: boolean;
+  showTransferActions: boolean;
   fileSearchQuery: string;
   fileSearchInputRef: RefObject<HTMLInputElement | null>;
   onNewFile: () => void;
@@ -77,6 +78,7 @@ export function FileExplorerToolbar({
   isFileSearchActive,
   isFileSearchExpanded,
   showHiddenFiles,
+  showTransferActions,
   fileSearchQuery,
   fileSearchInputRef,
   onNewFile,
@@ -118,46 +120,50 @@ export function FileExplorerToolbar({
         <MdCreateNewFolder className="h-4 w-4" />
       </ToolbarIconButton>
 
-      <ToolbarDivider />
+      {showTransferActions && (
+        <>
+          <ToolbarDivider />
 
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                aria-label={t("fileExplorer.upload")}
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground"
-              >
-                <MdUpload className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="top">{t("fileExplorer.upload")}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="start" className="min-w-44">
-          <DropdownMenuItem onClick={onUploadFiles}>
-            <MdUpload className="mr-2 h-4 w-4" />
-            {t("fileExplorer.upload")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onUploadFolder}>
-            <MdDriveFolderUpload className="mr-2 h-4 w-4" />
-            {t("fileExplorer.uploadFolder")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ToolbarIconButton
-        label={t("fileExplorer.downloadSelected")}
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground"
-        onClick={onDownloadSelected}
-        disabled={selectedCount === 0}
-      >
-        <MdDownload className="h-4 w-4" />
-      </ToolbarIconButton>
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={t("fileExplorer.upload")}
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground"
+                  >
+                    <MdUpload className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t("fileExplorer.upload")}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="start" className="min-w-44">
+              <DropdownMenuItem onClick={onUploadFiles}>
+                <MdUpload className="mr-2 h-4 w-4" />
+                {t("fileExplorer.upload")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onUploadFolder}>
+                <MdDriveFolderUpload className="mr-2 h-4 w-4" />
+                {t("fileExplorer.uploadFolder")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <ToolbarIconButton
+            label={t("fileExplorer.downloadSelected")}
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground"
+            onClick={onDownloadSelected}
+            disabled={selectedCount === 0}
+          >
+            <MdDownload className="h-4 w-4" />
+          </ToolbarIconButton>
+        </>
+      )}
       <ToolbarIconButton
         label={t("fileExplorer.delete")}
         variant="ghost"

@@ -37,6 +37,34 @@ impl Default for AiBackendKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiAgentKind {
+    Nyaterm,
+    Codex,
+    ClaudeCode,
+}
+
+impl Default for AiAgentKind {
+    fn default() -> Self {
+        Self::Nyaterm
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiPermissionMode {
+    Observer,
+    Confirm,
+    Auto,
+}
+
+impl Default for AiPermissionMode {
+    fn default() -> Self {
+        Self::Confirm
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AiMode {
     Ask,
@@ -148,7 +176,15 @@ pub struct CodexIntegrationSettings {
     #[serde(default)]
     pub executable_path: Option<String>,
     #[serde(default)]
+    pub runtime: Option<String>,
+    #[serde(default)]
     pub default_model: Option<String>,
+    #[serde(default)]
+    pub config_directory: Option<String>,
+    #[serde(default)]
+    pub permission_mode: AiPermissionMode,
+    #[serde(default)]
+    pub tool_integration_mode: Option<String>,
     #[serde(default)]
     pub thread_mode: CodexThreadMode,
     #[serde(default)]
@@ -160,9 +196,45 @@ impl Default for CodexIntegrationSettings {
         Self {
             enabled: false,
             executable_path: None,
+            runtime: Some("app_server".to_string()),
             default_model: None,
+            config_directory: None,
+            permission_mode: AiPermissionMode::Confirm,
+            tool_integration_mode: Some("nyaterm_mcp".to_string()),
             thread_mode: CodexThreadMode::Persistent,
             remote_terminal_agent_enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeCodeIntegrationSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub executable_path: Option<String>,
+    #[serde(default)]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub config_directory: Option<String>,
+    #[serde(default)]
+    pub permission_mode: AiPermissionMode,
+    #[serde(default)]
+    pub tool_integration_mode: Option<String>,
+}
+
+impl Default for ClaudeCodeIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            executable_path: None,
+            runtime: Some("stream_json_cli".to_string()),
+            default_model: None,
+            config_directory: None,
+            permission_mode: AiPermissionMode::Confirm,
+            tool_integration_mode: Some("nyaterm_mcp".to_string()),
         }
     }
 }
@@ -214,6 +286,10 @@ pub struct AiSettings {
     #[serde(default = "default_mode")]
     pub default_mode: AiMode,
     #[serde(default)]
+    pub default_agent_kind: AiAgentKind,
+    #[serde(default)]
+    pub external_agent_permission_mode: AiPermissionMode,
+    #[serde(default)]
     pub default_reasoning_effort: AiReasoningEffort,
     #[serde(default)]
     pub default_model_id: Option<String>,
@@ -241,10 +317,12 @@ pub struct AiSettings {
     pub agent_smart_auto_execute_max_risk: RiskLevel,
     #[serde(default)]
     pub codex: CodexIntegrationSettings,
+    #[serde(default)]
+    pub claude_code: ClaudeCodeIntegrationSettings,
 }
 
 fn default_schema_version() -> u32 {
-    4
+    5
 }
 
 fn default_true() -> bool {
@@ -495,7 +573,7 @@ impl Default for AiSettings {
             .map(|item| item.id.clone());
 
         Self {
-            schema_version: 4,
+            schema_version: 5,
             enabled: true,
             context_line_limit: default_context_line_limit(),
             redaction_enabled: true,
@@ -506,6 +584,8 @@ impl Default for AiSettings {
             active_profile_id: default_active_profile_id(),
             provider_profiles: default_provider_profiles(),
             default_mode: default_mode(),
+            default_agent_kind: AiAgentKind::Nyaterm,
+            external_agent_permission_mode: AiPermissionMode::Confirm,
             default_reasoning_effort: AiReasoningEffort::Auto,
             default_model_id,
             models,
@@ -520,6 +600,7 @@ impl Default for AiSettings {
             agent_command_execution_mode: AgentCommandExecutionMode::ConfirmEach,
             agent_smart_auto_execute_max_risk: default_agent_smart_auto_execute_max_risk(),
             codex: CodexIntegrationSettings::default(),
+            claude_code: ClaudeCodeIntegrationSettings::default(),
         }
     }
 }
@@ -578,7 +659,7 @@ pub fn merge_masked_ai_settings(current: &AiSettings, mut next: AiSettings) -> A
 pub fn normalize_ai_settings(settings: &mut AiSettings) -> bool {
     let original = serde_json::to_string(settings).unwrap_or_default();
 
-    settings.schema_version = 4;
+    settings.schema_version = 5;
     if settings.request_user_agent.trim().is_empty() {
         settings.request_user_agent = default_request_user_agent();
     }
@@ -748,7 +829,7 @@ mod tests {
         settings.active_profile_id = "deepseek".to_string();
 
         assert!(normalize_ai_settings(&mut settings));
-        assert_eq!(settings.schema_version, 4);
+        assert_eq!(settings.schema_version, 5);
         assert!(!settings.provider_credentials.is_empty());
         assert!(
             settings
@@ -797,7 +878,7 @@ mod tests {
 
         assert!(normalize_ai_settings(&mut settings));
 
-        assert_eq!(settings.schema_version, 4);
+        assert_eq!(settings.schema_version, 5);
         assert_eq!(settings.models[0].backend, AiBackendKind::Genai);
         assert!(!settings.codex.enabled);
     }

@@ -9,7 +9,7 @@
 use serde::Serialize;
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 // ZMODEM protocol constants for header detection.
 const ZPAD: u8 = 0x2A; // '*'

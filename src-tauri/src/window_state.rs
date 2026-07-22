@@ -19,6 +19,7 @@ const SETTINGS_WINDOW_KEY: &str = "settings";
 const NEW_SESSION_WINDOW_KEY: &str = "new-session";
 const QUICK_COMMAND_WINDOW_KEY: &str = "quick-command";
 const FILE_EDITOR_WINDOW_KEY: &str = "file-editor";
+const FILE_PREVIEW_WINDOW_KEY: &str = "file-preview";
 const AUTO_UPLOAD_WINDOW_PREFIX: &str = "auto-upload-";
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 
@@ -107,6 +108,7 @@ pub enum ChildWindowStateKey {
     NewSession,
     QuickCommand,
     FileEditor,
+    FilePreview,
 }
 
 impl ChildWindowStateKey {
@@ -116,6 +118,7 @@ impl ChildWindowStateKey {
             Self::NewSession => NEW_SESSION_WINDOW_KEY,
             Self::QuickCommand => QUICK_COMMAND_WINDOW_KEY,
             Self::FileEditor => FILE_EDITOR_WINDOW_KEY,
+            Self::FilePreview => FILE_PREVIEW_WINDOW_KEY,
         }
     }
 
@@ -125,6 +128,7 @@ impl ChildWindowStateKey {
             Self::NewSession => (520.0, 620.0),
             Self::QuickCommand => (540.0, 640.0),
             Self::FileEditor => (980.0, 720.0),
+            Self::FilePreview => (1080.0, 760.0),
         }
     }
 
@@ -234,6 +238,9 @@ pub fn child_window_state_key_for_label(label: &str) -> Option<ChildWindowStateK
     }
     if label.starts_with(&format!("{FILE_EDITOR_WINDOW_KEY}-")) {
         return Some(ChildWindowStateKey::FileEditor);
+    }
+    if label.starts_with(&format!("{FILE_PREVIEW_WINDOW_KEY}-")) {
+        return Some(ChildWindowStateKey::FilePreview);
     }
 
     None
@@ -640,6 +647,10 @@ mod tests {
         assert_eq!(
             child_window_state_key_for_label("file-editor-abc"),
             Some(ChildWindowStateKey::FileEditor)
+        );
+        assert_eq!(
+            child_window_state_key_for_label("file-preview-abc"),
+            Some(ChildWindowStateKey::FilePreview)
         );
         assert_eq!(child_window_state_key_for_label("auto-upload-abc"), None);
         assert_eq!(child_window_state_key_for_label("main"), None);

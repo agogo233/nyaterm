@@ -158,6 +158,11 @@ export class KeywordHighlighter implements IDisposable {
     }
   }
 
+  public releaseCaches(): void {
+    this.clearAllDecorations();
+    this.lastViewportY = -1;
+  }
+
   public dispose(): void {
     this.clearAllDecorations();
     this.disposables.forEach((d) => {

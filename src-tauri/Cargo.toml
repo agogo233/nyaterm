@@ -1,6 +1,6 @@
 [package]
 name = "nyaterm"
-version = "1.1.15"
+version = "1.1.16"
 description = "A modern remote terminal workspace built with Tauri, React, and Rust."
 authors = ["Kang"]
 edition = "2024"
@@ -153,7 +153,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 rqrr = "0.9"
 serialport = "4"
 strip-ansi-escapes = "0.2"
-arboard = "3"
+arboard = { version = "3", features = ["wayland-data-control"] }
 opendal = { version = "0.58", default-features = false, features = [
     "executors-tokio",
     "reqwest-rustls-tls",

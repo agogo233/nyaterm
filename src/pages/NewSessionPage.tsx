@@ -558,7 +558,7 @@ export default function NewSessionPage() {
             ? normalizedSerialPortName
             : currentTab === "telnet"
               ? `${normalizedHost}:${telnetPort}`
-              : `${normalizedHost}:${sshPort}`;
+              : normalizedHost;
 
       const typeTag =
         currentTab === "ssh"

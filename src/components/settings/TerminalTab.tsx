@@ -33,9 +33,16 @@ const KEEP_ALIVE_MODE_DESCRIPTION_KEYS: Record<SshKeepAliveMode, string> = {
   disabled: "settings.keepAliveModeDisabledDescription",
 };
 
+const DEFAULT_TIMESTAMP_FORMAT = "[HH:mm:ss]";
+const MAX_TIMESTAMP_FORMAT_LENGTH = 64;
+
 function normalizeKeepAliveMode(value: string): SshKeepAliveMode {
   if (value === "strict" || value === "disabled") return value;
   return "compatible";
+}
+
+function clampTimestampFormat(value: string): string {
+  return Array.from(value).slice(0, MAX_TIMESTAMP_FORMAT_LENGTH).join("");
 }
 
 export function TerminalTab() {
@@ -212,19 +219,32 @@ export function TerminalTab() {
         </SettingRow>
 
         {appSettings.terminal.show_timestamps && (
-          <SettingRow
-            label={t("settings.showTimestampMilliseconds")}
-            desc={t("settings.showTimestampMillisecondsDesc")}
-          >
-            <SettingSwitch
-              checked={appSettings.terminal.show_timestamp_milliseconds ?? false}
-              onChange={(v) =>
-                updateAppSettings({
-                  terminal: { ...appSettings.terminal, show_timestamp_milliseconds: v },
-                })
-              }
-            />
-          </SettingRow>
+          <SettingInput
+            label={t("settings.timestampFormat")}
+            desc={t("settings.timestampFormatDesc")}
+            value={appSettings.terminal.timestamp_format ?? DEFAULT_TIMESTAMP_FORMAT}
+            placeholder={DEFAULT_TIMESTAMP_FORMAT}
+            controlClassName="max-w-sm"
+            className="font-mono"
+            maxLength={MAX_TIMESTAMP_FORMAT_LENGTH}
+            onChange={(event) =>
+              updateAppSettings({
+                terminal: {
+                  ...appSettings.terminal,
+                  timestamp_format: clampTimestampFormat(event.target.value),
+                },
+              })
+            }
+            onBlur={(event) => {
+              if (event.target.value.trim()) return;
+              updateAppSettings({
+                terminal: {
+                  ...appSettings.terminal,
+                  timestamp_format: DEFAULT_TIMESTAMP_FORMAT,
+                },
+              });
+            }}
+          />
         )}
 
         <SettingRow

@@ -28,6 +28,7 @@ enum TransferState {
         files: Vec<PathBuf>,
         file_index: usize,
         current_file: Option<SendFile>,
+        preserve_timestamps: bool,
         stats: TransferStats,
     },
     /// Transfer finished or aborted.
@@ -291,6 +292,7 @@ impl ZmodemTransfer {
         &mut self,
         files: Vec<PathBuf>,
         conflict_mode: ZmodemUploadConflictMode,
+        preserve_timestamps: bool,
     ) -> Vec<ZmodemAction> {
         let buffered = match &mut self.state {
             TransferState::WaitingForUser { buffered } => std::mem::take(buffered),
@@ -313,6 +315,7 @@ impl ZmodemTransfer {
             files,
             file_index: 0,
             current_file: None,
+            preserve_timestamps,
             stats: TransferStats::new(),
         };
 
@@ -528,6 +531,7 @@ impl ZmodemTransfer {
             files,
             file_index,
             current_file,
+            preserve_timestamps,
             stats,
         } = &mut self.state
         else {
@@ -631,6 +635,7 @@ impl ZmodemTransfer {
                             files,
                             *file_index,
                             current_file,
+                            *preserve_timestamps,
                         ));
                         if let Some(sf) = current_file {
                             if self.progress_throttle.should_emit(0, true) {
@@ -670,6 +675,7 @@ impl ZmodemTransfer {
             files,
             file_index,
             current_file,
+            preserve_timestamps,
             ..
         } = &mut self.state
         else {
@@ -681,7 +687,13 @@ impl ZmodemTransfer {
         }
 
         self.progress_throttle.reset();
-        let mut actions = Self::start_file_for_sender(sender, files, *file_index, current_file);
+        let mut actions = Self::start_file_for_sender(
+            sender,
+            files,
+            *file_index,
+            current_file,
+            *preserve_timestamps,
+        );
         if let Some(sf) = current_file {
             if self.progress_throttle.should_emit(0, true) {
                 actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
@@ -700,6 +712,7 @@ impl ZmodemTransfer {
         files: &[PathBuf],
         index: usize,
         current_file: &mut Option<SendFile>,
+        preserve_timestamps: bool,
     ) -> Vec<ZmodemAction> {
         let path = &files[index];
         let file_name = path
@@ -729,8 +742,11 @@ impl ZmodemTransfer {
         let size = metadata.len();
         // zmodem2 uses u32 for file size
         let size_u32 = u32::try_from(size).unwrap_or(u32::MAX);
+        let mtime = zmodem_mtime_from_metadata(&metadata, preserve_timestamps);
 
-        if let Err(e) = sender.start_file(file_name.as_bytes(), size_u32) {
+        if let Err(e) =
+            sender.start_file_with_metadata(file_name.as_bytes(), size_u32, mtime, 0o100644)
+        {
             return vec![ZmodemAction::EmitEvent(ZmodemEvent::Failed {
                 reason: format!("start_file error: {e}"),
             })];
@@ -783,6 +799,22 @@ fn drain_sender_outgoing(sender: &mut zmodem2::Sender, actions: &mut Vec<ZmodemA
         actions.push(ZmodemAction::SendToRemote(out));
         sender.advance_outgoing(n);
     }
+}
+
+fn zmodem_mtime_from_metadata(metadata: &std::fs::Metadata, preserve_timestamps: bool) -> u32 {
+    if !preserve_timestamps {
+        return 0;
+    }
+
+    zmodem_mtime_from_system_time(metadata.modified())
+}
+
+fn zmodem_mtime_from_system_time(modified: std::io::Result<SystemTime>) -> u32 {
+    modified
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .and_then(|duration| u32::try_from(duration.as_secs()).ok())
+        .unwrap_or(0)
 }
 
 fn log_transfer_complete(direction: ZmodemDirection, file_count: u32, stats: &TransferStats) {

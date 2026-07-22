@@ -292,11 +292,11 @@ export function PasswordManagementTab({
       <div className={contentClassName}>
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Label className="font-medium text-sm">{t("passwordManager.title")}</Label>
+            <Label className="min-w-0 text-sm font-medium">{t("passwordManager.title")}</Label>
             <Button
               variant="ghost"
               size="sm"
-              className="text-primary h-7 shrink-0 px-2 text-xs"
+              className="h-7 shrink-0 px-2 text-xs text-primary"
               onClick={handleAdd}
               disabled={editingId !== null}
             >
@@ -308,9 +308,9 @@ export function PasswordManagementTab({
             {passwords.map((entry) => (
               <div
                 key={entry.id}
-                className="flex items-center gap-1.5 px-3 py-2.5 border-b last:border-0 hover:bg-accent transition-colors"
+                className="security-auth-action-row flex flex-wrap items-center gap-1.5 border-b px-3 py-2.5 transition-colors last:border-0 hover:bg-accent"
               >
-                <div className="min-w-0 flex-1">
+                <div className="min-w-24 flex-1">
                   <div className="truncate text-xs">{entry.name}</div>
                   {revealedIds.has(entry.id) ? (
                     <div className="mt-1 flex items-start gap-0.5">
@@ -323,7 +323,7 @@ export function PasswordManagementTab({
                     </div>
                   ) : null}
                 </div>
-                <div className="flex shrink-0 items-center">
+                <div className="security-auth-row-actions flex shrink-0 items-center">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="inline-flex">

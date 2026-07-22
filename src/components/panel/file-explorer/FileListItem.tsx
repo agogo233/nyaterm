@@ -18,7 +18,9 @@ import {
   MdKeyboardReturn,
   MdOpenInNew,
   MdRefresh,
+  MdSend,
   MdUpload,
+  MdVisibility,
 } from "react-icons/md";
 import { getFileIcon } from "@/components/icons";
 import { formatSize } from "@/lib/utils";
@@ -49,12 +51,22 @@ interface FileListItemProps {
   onContextMenuSelect: (entry: FileEntry, event: React.MouseEvent) => void;
   onItemClick: (entry: FileEntry) => void;
   onOpenDefault: (entry: FileEntry) => void;
+  onPreview: (entry: FileEntry) => void;
   onOpenInternal: (entry: FileEntry) => void;
   onOpenExternal: (entry: FileEntry) => void;
   onRefresh: () => void;
+  showTransferActions: boolean;
   onUpload: () => void;
   onUploadFolder: () => void;
   onDownload: (entry: FileEntry) => void;
+  showPeerSendAction?: boolean;
+  onSendToPeer?: (entry: FileEntry) => void;
+  sendTargetOptions?: Array<{
+    sessionId: string;
+    label: string;
+    meta: string;
+  }>;
+  onSendToTarget?: (entry: FileEntry, targetSessionId: string) => void;
   onRename: (entry: FileEntry) => void;
   onMove: (entry: FileEntry) => void;
   onDelete: (entry: FileEntry) => void;
@@ -99,12 +111,18 @@ export function FileListItem({
   onContextMenuSelect,
   onItemClick,
   onOpenDefault,
+  onPreview,
   onOpenInternal,
   onOpenExternal,
   onRefresh,
+  showTransferActions,
   onUpload,
   onUploadFolder,
   onDownload,
+  showPeerSendAction = false,
+  onSendToPeer,
+  sendTargetOptions = [],
+  onSendToTarget,
   onRename,
   onMove,
   onDelete,
@@ -212,7 +230,7 @@ export function FileListItem({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <li
-          className="grid h-[30px] items-center rounded transition-colors cursor-pointer select-none"
+          className="group relative grid h-[30px] items-center rounded transition-colors cursor-pointer select-none"
           style={{
             gridTemplateColumns: columnTemplate,
             width: rowWidth,
@@ -302,9 +320,26 @@ export function FileListItem({
                 disabled={inlineRename.isSubmitting}
               />
             ) : (
-              <span className="min-w-0 flex-1 truncate text-xs" onClick={handleNameClick}>
-                {entry.name}
-              </span>
+              <>
+                <span className="min-w-0 flex-1 truncate text-xs" onClick={handleNameClick}>
+                  {entry.name}
+                </span>
+                {showPeerSendAction && !isParentDirectoryEntry && onSendToPeer && (
+                  <button
+                    type="button"
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--df-text-dimmed)] opacity-0 transition-opacity hover:bg-[var(--df-bg-hover)] hover:text-[var(--df-primary)] group-hover:opacity-100 group-focus-within:opacity-100"
+                    aria-label={t("fileExplorer.sendToPeer")}
+                    title={t("fileExplorer.sendToPeer")}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onSendToPeer(entry);
+                    }}
+                  >
+                    <MdSend className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </>
             )}
           </div>
           <span
@@ -369,6 +404,12 @@ export function FileListItem({
               <MdFileOpen className="text-[0.875rem] text-muted-foreground mr-2" />
               {t("fileExplorer.cmOpen")}
             </ContextMenuItem>
+            {isFile && (
+              <ContextMenuItem onClick={() => onPreview(entry)}>
+                <MdVisibility className="text-[0.875rem] text-muted-foreground mr-2" />
+                {t("filePreview.preview")}
+              </ContextMenuItem>
+            )}
             {showOpenInternal && (
               <ContextMenuItem onClick={() => onOpenInternal(entry)}>
                 <MdEdit className="text-[0.875rem] text-muted-foreground mr-2" />
@@ -386,27 +427,55 @@ export function FileListItem({
               <MdRefresh className="text-[0.875rem] text-muted-foreground mr-2" />
               {t("fileExplorer.cmRefresh")}
             </ContextMenuItem>
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                <MdUpload className="text-[0.875rem] text-muted-foreground mr-2" />
-                {t("fileExplorer.cmUpload")}
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-48">
-                <ContextMenuItem onClick={onUpload}>
-                  <MdUpload className="text-[0.875rem] text-muted-foreground mr-2" />
-                  {t("fileExplorer.upload")}
+            {showTransferActions && (
+              <>
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger>
+                    <MdUpload className="text-[0.875rem] text-muted-foreground mr-2" />
+                    {t("fileExplorer.cmUpload")}
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="w-48">
+                    <ContextMenuItem onClick={onUpload}>
+                      <MdUpload className="text-[0.875rem] text-muted-foreground mr-2" />
+                      {t("fileExplorer.upload")}
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={onUploadFolder}>
+                      <MdDriveFolderUpload className="text-[0.875rem] text-muted-foreground mr-2" />
+                      {t("fileExplorer.uploadFolder")}
+                    </ContextMenuItem>
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+                <ContextMenuItem onClick={() => onDownload(entry)}>
+                  <MdDownload className="text-[0.875rem] text-muted-foreground mr-2" />
+                  {t("fileExplorer.cmDownload")}
                 </ContextMenuItem>
-                <ContextMenuItem onClick={onUploadFolder}>
-                  <MdDriveFolderUpload className="text-[0.875rem] text-muted-foreground mr-2" />
-                  {t("fileExplorer.uploadFolder")}
-                </ContextMenuItem>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            <ContextMenuItem onClick={() => onDownload(entry)}>
-              <MdDownload className="text-[0.875rem] text-muted-foreground mr-2" />
-              {t("fileExplorer.cmDownload")}
-            </ContextMenuItem>
-            <ContextMenuSeparator />
+                <ContextMenuSeparator />
+              </>
+            )}
+            {sendTargetOptions.length > 0 && onSendToTarget && (
+              <>
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger>
+                    <MdSend className="text-[0.875rem] text-muted-foreground mr-2" />
+                    {t("fileExplorer.sendToPeer")}
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="min-w-52">
+                    {sendTargetOptions.map((target) => (
+                      <ContextMenuItem
+                        key={target.sessionId}
+                        onClick={() => onSendToTarget(entry, target.sessionId)}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{target.label}</span>
+                        <span className="ml-2 shrink-0 text-[0.625rem] text-muted-foreground">
+                          {target.meta}
+                        </span>
+                      </ContextMenuItem>
+                    ))}
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+                <ContextMenuSeparator />
+              </>
+            )}
             <ContextMenuItem
               onClick={() => {
                 preventNextContextMenuAutoFocusRef.current = true;

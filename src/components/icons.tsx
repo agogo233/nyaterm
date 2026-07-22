@@ -1,7 +1,7 @@
 import type { ElementType } from "react";
 import type { IconType } from "react-icons";
 import { DiBingSmall, DiYahooSmall } from "react-icons/di";
-import { FaServer } from "react-icons/fa6";
+import { FaAws, FaServer } from "react-icons/fa6";
 import {
   MdApps,
   MdArticle,
@@ -24,14 +24,14 @@ import {
   MdTableChart,
   MdTerminal,
 } from "react-icons/md";
+import { RiOpenaiFill } from "react-icons/ri";
 import {
-  SiAmazonwebservices,
   SiApple,
   SiBaidu,
   SiBilibili,
   SiCentos,
   SiClaude,
-  SiCss3,
+  SiCss,
   SiDebian,
   SiDocker,
   SiDuckduckgo,
@@ -50,7 +50,6 @@ import {
   SiMysql,
   SiNginx,
   SiNodedotjs,
-  SiOpenai,
   SiPhp,
   SiPostgresql,
   SiPython,
@@ -118,7 +117,7 @@ export const QUICK_ICONS: Record<string, QuickIconDef> = {
   go: { icon: SiGo, color: "#00ADD8" },
   node: { icon: SiNodedotjs, color: "#339933" },
   php: { icon: SiPhp, color: "#777BB4" },
-  aws: { icon: SiAmazonwebservices, color: "#232F3E" },
+  aws: { icon: FaAws, color: "#232F3E" },
   gcp: { icon: SiGooglecloud, color: "#4285F4" },
 };
 
@@ -144,6 +143,7 @@ export const SYSTEM_ICONS: Record<string, QuickIconDef> = {
   mint: { icon: createLocalSvgIcon("/icons/os/linux-mint.svg"), color: "currentColor" },
   nixos: { icon: createLocalSvgIcon("/icons/os/Nixos.svg"), color: "currentColor" },
   h3c: { icon: createLocalSvgIcon("/icons/os/H3C.svg"), color: "currentColor" },
+  k8s: { icon: createLocalSvgIcon("/icons/os/K8s.svg"), color: "currentColor" },
   gentoo: { icon: createLocalSvgIcon("/icons/os/Gentoo.svg"), color: "currentColor" },
   raspberrypi: { icon: createLocalSvgIcon("/icons/os/Raspberrypi.svg"), color: "currentColor" },
   "alibaba-cloud-linux": {
@@ -395,7 +395,7 @@ export const SEARCH_ICONS: Record<string, QuickIconDef> = {
   gitlab: { icon: SiGitlab, color: "#FC6D26" },
   bing: { icon: DiBingSmall, color: "#008373" },
   yahoo: { icon: DiYahooSmall, color: "#410093" },
-  openai: { icon: SiOpenai, color: "#10A37F" },
+  openai: { icon: RiOpenaiFill, color: "#10A37F" },
   claude: { icon: SiClaude, color: "#d97757" },
   gemini: { icon: SiGooglegemini, color: "#4285F4" },
   default: { icon: MdSearch, color: "currentColor" },
@@ -423,7 +423,7 @@ export function getFileIcon(entry: FileEntry): { icon: ElementType; color: strin
     case "css":
     case "scss":
     case "less":
-      return { icon: SiCss3, color: "#38bdf8" }; // sky-400
+      return { icon: SiCss, color: "#38bdf8" }; // sky-400
     case "py":
     case "pyc":
       return { icon: SiPython, color: "#3776AB" }; // python-500

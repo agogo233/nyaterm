@@ -28,8 +28,8 @@ Windows 便携版解压后运行 `NyaTerm.exe` 即可。便携版不会使用自
 
 Windows 便携版直接下载：
 
-- [NyaTerm_1.1.13_windows_x64_portable.zip](https://github.com/nyakang/nyaterm/releases/download/v1.1.13/NyaTerm_1.1.13_windows_x64_portable.zip)（x64）
-- [NyaTerm_1.1.13_windows_arm64_portable.zip](https://github.com/nyakang/nyaterm/releases/download/v1.1.13/NyaTerm_1.1.13_windows_arm64_portable.zip)（ARM64）
+- [NyaTerm_1.1.16_windows_x64_portable.zip](https://github.com/nyakang/nyaterm/releases/download/v1.1.16/NyaTerm_1.1.16_windows_x64_portable.zip)（x64）
+- [NyaTerm_1.1.16_windows_arm64_portable.zip](https://github.com/nyakang/nyaterm/releases/download/v1.1.16/NyaTerm_1.1.16_windows_arm64_portable.zip)（ARM64）
 
 ### 从源码构建
 

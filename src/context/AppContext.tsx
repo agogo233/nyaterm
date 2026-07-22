@@ -263,7 +263,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     show_workspace_padding: false,
     show_line_numbers: false,
     show_timestamps: false,
-    show_timestamp_milliseconds: false,
+    timestamp_format: "[HH:mm:ss]",
     show_multi_line_paste_dialog: true,
     paste_image_as_path: true,
   },
@@ -1128,31 +1128,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // 5. Startup Restore Logic
   const hasRestored = useRef(false);
+  const pendingLockedStartupRestoreTabsRef = useRef<Tab[] | null>(null);
 
-  useEffect(() => {
-    if (hasRestored.current || !appSettingsLoaded.current) return;
-
-    hasRestored.current = true;
-    if (
-      isPrimaryMainWindow() &&
-      appSettings.general.startup_restore &&
-      appSettings.ui.open_tabs &&
-      appSettings.ui.open_tabs.length > 0
-    ) {
-      const restoredTabs = appSettings.ui.open_tabs
-        .map((tab, index) => restoreTabFromPersistence(tab, index))
-        .filter((tab): tab is Tab => tab !== null);
-
-      tabsRef.current = restoredTabs;
-      setTabs(restoredTabs);
-      if (restoredTabs.length > 0) {
-        setActiveTabId(restoredTabs[restoredTabs.length - 1].id);
-      }
-
-      restoredTabs.forEach((tab) => {
+  const restoreSessionsForTabs = useCallback(
+    (tabsToRestore: Tab[]) => {
+      tabsToRestore.forEach((tab) => {
         const panes = collectSessionPanes(tab.root);
 
         panes.forEach((pane) => {
+          if (!hasPane(tab.id, pane.id)) return;
+
           const cid = pane.connectionId;
           switch (pane.type) {
             case "SSH":
@@ -1210,16 +1195,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         });
       });
+    },
+    [handleRestoredSessionCreated, handleRestoredSessionFailed, hasPane, markPaneConnectionFailed],
+  );
+
+  useEffect(() => {
+    if (hasRestored.current || !appSettingsLoaded.current || !lockStateLoaded) return;
+
+    hasRestored.current = true;
+    if (
+      isPrimaryMainWindow() &&
+      appSettings.general.startup_restore &&
+      appSettings.ui.open_tabs &&
+      appSettings.ui.open_tabs.length > 0
+    ) {
+      const restoredTabs = appSettings.ui.open_tabs
+        .map((tab, index) => restoreTabFromPersistence(tab, index))
+        .filter((tab): tab is Tab => tab !== null);
+
+      tabsRef.current = restoredTabs;
+      setTabs(restoredTabs);
+      if (restoredTabs.length > 0) {
+        setActiveTabId(restoredTabs[restoredTabs.length - 1].id);
+      }
+
+      if (appSettings.security.enable_screen_lock && isLocked) {
+        pendingLockedStartupRestoreTabsRef.current = restoredTabs;
+      } else {
+        restoreSessionsForTabs(restoredTabs);
+      }
     }
 
     setStartupRestoreComplete(true);
-  }, [
-    appSettings,
-    handleRestoredSessionCreated,
-    handleRestoredSessionFailed,
-    markPaneConnectionFailed,
-    setActiveTabId,
-  ]);
+  }, [appSettings, isLocked, lockStateLoaded, restoreSessionsForTabs, setActiveTabId]);
+
+  useEffect(() => {
+    if (isLocked) return;
+
+    const pendingTabs = pendingLockedStartupRestoreTabsRef.current;
+    if (!pendingTabs) return;
+
+    pendingLockedStartupRestoreTabsRef.current = null;
+    restoreSessionsForTabs(pendingTabs);
+  }, [isLocked, restoreSessionsForTabs]);
 
   const contextValue = useMemo(
     () => ({

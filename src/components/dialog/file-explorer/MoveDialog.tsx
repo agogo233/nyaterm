@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdRefresh } from "react-icons/md";
 import { toast } from "sonner";
+import type { FileExplorerBackendKind } from "@/components/panel/file-explorer/model";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,6 +17,7 @@ import { invoke } from "@/lib/invoke";
 
 export interface MoveDialogData {
   sessionId: string;
+  backend: FileExplorerBackendKind;
   oldPath: string;
   oldRawPathToken?: string;
   name: string;
@@ -44,12 +46,20 @@ export default function MoveDialog({ data, onClose, onSuccess }: MoveDialogProps
 
     try {
       setIsSubmitting(true);
-      await invoke("rename_remote_file", {
-        sessionId: data.sessionId,
-        oldPath: data.oldPath,
-        newPath: dialogInput,
-        oldRawPathToken: data.oldRawPathToken,
-      });
+      if (data.backend === "local") {
+        await invoke("rename_local_file", {
+          sessionId: data.sessionId,
+          oldPath: data.oldPath,
+          newPath: dialogInput,
+        });
+      } else {
+        await invoke("rename_remote_file", {
+          sessionId: data.sessionId,
+          oldPath: data.oldPath,
+          newPath: dialogInput,
+          oldRawPathToken: data.oldRawPathToken,
+        });
+      }
       onSuccess();
       onClose();
     } catch (e) {

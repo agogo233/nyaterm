@@ -57,6 +57,16 @@ export const XTERM_PERFORMANCE_CONFIG = {
     /** Number of reveal frames to repaint after a hidden terminal becomes visible. */
     revealRefreshFrames: 2,
   },
+  lifecycle: {
+    /** Fully dispose hidden eligible terminals after this delay. */
+    deepHibernateDelayMs: 120_000,
+    /** Release hidden keyword/action caches before deep hibernation. */
+    hiddenCacheReleaseDelayMs: 30_000,
+    /** Maximum scrollback rows to serialize for reconnect/rebuild/hibernate snapshots. */
+    snapshotMaxLines: 3_000,
+    /** Maximum serialized snapshot size to keep in memory. */
+    snapshotMaxBytes: 2 * 1024 * 1024,
+  },
 } as const;
 
 export function getKeywordHighlightPerformanceConfig() {

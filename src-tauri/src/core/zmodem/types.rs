@@ -33,6 +33,7 @@ impl ZmodemUploadConflictMode {
 pub struct ZmodemPreparedUpload {
     pub files: Vec<PathBuf>,
     pub conflict_mode: ZmodemUploadConflictMode,
+    pub preserve_timestamps: bool,
 }
 
 /// Events emitted to the frontend via Tauri events.
@@ -70,7 +71,11 @@ pub fn start_zmodem_transfer(
     let mut transfer = ZmodemTransfer::new(direction, initial_bytes);
     let bootstrap_actions = match (direction, prepared_upload) {
         (ZmodemDirection::Upload, Some(upload)) => {
-            transfer.accept_upload(upload.files, upload.conflict_mode)
+            transfer.accept_upload(
+                upload.files,
+                upload.conflict_mode,
+                upload.preserve_timestamps,
+            )
         }
         _ => Vec::new(),
     };

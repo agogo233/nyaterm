@@ -2,8 +2,8 @@ use crate::config;
 use crate::core::SessionManager;
 use crate::core::ai::{
     self, AgentApprovalManager, AiAuditLog, AiChatRequest, AiMessage, AiSession, AiSessionScope,
-    AiStreamStart, AppendAiAuditRequest, CodexAccountStatus, CodexCliStatus, CodexLoginFlow,
-    CodexLoginStart,
+    AiStreamStart, AppendAiAuditRequest, ClaudeCodeAccountStatus, ClaudeCodeCliStatus,
+    ClaudeCodeRuntime, CodexAccountStatus, CodexCliStatus, CodexLoginFlow, CodexLoginStart,
 };
 use crate::error::AppResult;
 use std::sync::Arc;
@@ -66,6 +66,23 @@ pub async fn logout_codex(app: tauri::AppHandle) -> AppResult<()> {
     let settings = config::load_app_settings(&app)?;
     let manager = ai::manager_from_app(&app).await?;
     manager.logout(&settings.ai).await
+}
+
+#[tauri::command]
+pub async fn detect_claude_code_cli(app: tauri::AppHandle) -> AppResult<ClaudeCodeCliStatus> {
+    let settings = config::load_app_settings(&app)?;
+    Ok(ai::ClaudeCodeRuntime::detect_cli(settings.ai.claude_code.executable_path).await)
+}
+
+#[tauri::command]
+pub async fn get_claude_code_account_status(
+    app: tauri::AppHandle,
+) -> AppResult<ClaudeCodeAccountStatus> {
+    use tauri::Manager;
+
+    let settings = config::load_app_settings(&app)?;
+    let runtime = app.state::<Arc<ClaudeCodeRuntime>>().inner().clone();
+    runtime.auth_status(&settings.ai).await
 }
 
 #[tauri::command]

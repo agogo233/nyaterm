@@ -1,16 +1,7 @@
-import {
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  GripVertical,
-  KeyRound,
-  Pencil,
-  Plus,
-  Trash2,
-  UserRound,
-} from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, GripVertical, KeyRound, UserRound } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { MdAdd, MdDelete, MdEdit } from "react-icons/md";
 import { toast } from "sonner";
 import { CredentialDeleteDialog } from "@/components/dialog/security-auth/CredentialDeleteDialog";
 import { Button } from "@/components/ui/button";
@@ -103,8 +94,8 @@ function CredentialEditor({
 
   return (
     <div className="border-b bg-accent/25 p-3">
-      <div className="mb-3 flex items-start gap-3">
-        <div className="min-w-0 flex-1 space-y-1.5">
+      <div className="mb-3 flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1 basis-44 space-y-1.5">
           <Label className="text-[0.6875rem] text-muted-foreground">
             {t("credentialManager.nameLabel")}
           </Label>
@@ -116,7 +107,7 @@ function CredentialEditor({
             autoFocus
           />
         </div>
-        <div className="flex shrink-0 items-center gap-2 pt-6">
+        <div className="flex shrink-0 items-center gap-2 pt-0">
           <span className="text-[0.6875rem] text-muted-foreground">
             {t("credentialManager.enabled")}
           </span>
@@ -521,16 +512,16 @@ export function CredentialManagementTab({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 terminal-scroll">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label className="text-sm font-medium">{t("credentialManager.title")}</Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label className="min-w-0 text-sm font-medium">{t("credentialManager.title")}</Label>
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs text-primary"
+              className="h-7 shrink-0 px-2 text-xs text-primary"
               onClick={handleAdd}
               disabled={actionsDisabled}
             >
-              <Plus className="h-3.5 w-3.5" />
+              <MdAdd className="mr-1 text-base" />
               {t("credentialManager.add")}
             </Button>
           </div>
@@ -575,7 +566,7 @@ export function CredentialManagementTab({
                     />
                   ) : (
                     <div
-                      className={`flex items-center gap-1.5 border-b px-2 py-2.5 transition-colors last:border-0 hover:bg-accent ${
+                      className={`security-auth-action-row flex flex-wrap items-start gap-1.5 border-b px-2 py-2.5 transition-colors last:border-0 hover:bg-accent ${
                         draggingCredentialId === entry.id ? "opacity-50" : ""
                       }`}
                       style={rowStyle}
@@ -607,9 +598,9 @@ export function CredentialManagementTab({
                             : t("credentialManager.dragToSort")}
                         </TooltipContent>
                       </Tooltip>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-xs">{entry.name}</span>
+                      <div className="min-w-24 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="min-w-0 truncate text-xs">{entry.name}</span>
                           {!entry.enabled ? (
                             <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
                               {t("credentialManager.disabled")}
@@ -633,7 +624,7 @@ export function CredentialManagementTab({
                           </div>
                         ) : null}
                       </div>
-                      <div className="flex shrink-0 items-center">
+                      <div className="security-auth-row-actions flex shrink-0 items-center">
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="inline-flex">
@@ -675,12 +666,12 @@ export function CredentialManagementTab({
                                 variant="ghost"
                                 size="icon-sm"
                                 onClick={() => {
-                                  void handleEdit(entry);
+                                  runUnlockedAction(() => handleEdit(entry));
                                 }}
-                                disabled={!secretsUnlocked || actionsDisabled}
+                                disabled={actionsDisabled}
                                 aria-label={t("common.edit")}
                               >
-                                <Pencil className="h-4 w-4" />
+                                <MdEdit className="text-base" />
                               </Button>
                             </span>
                           </TooltipTrigger>
@@ -695,11 +686,13 @@ export function CredentialManagementTab({
                                 variant="ghost"
                                 size="icon-sm"
                                 className="text-destructive hover:bg-destructive/10"
-                                onClick={() => setDeletingEntry(entry)}
-                                disabled={!secretsUnlocked || actionsDisabled}
+                                onClick={() => {
+                                  runUnlockedAction(() => setDeletingEntry(entry));
+                                }}
+                                disabled={actionsDisabled}
                                 aria-label={t("common.delete")}
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <MdDelete className="text-base" />
                               </Button>
                             </span>
                           </TooltipTrigger>

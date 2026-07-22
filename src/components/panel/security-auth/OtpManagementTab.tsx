@@ -384,165 +384,169 @@ export function OtpManagementTab({ activeSessionId = null, onCountChange }: OtpM
   const actionsDisabled = editingId !== null || qrImporting;
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label className="text-sm font-medium">{t("otpManager.title")}</Label>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0 text-primary"
-              onClick={() => void handleImportQr()}
-              disabled={actionsDisabled}
-              title={t("otpManager.scanQr")}
-              aria-label={t("otpManager.scanQr")}
-            >
-              {qrImporting ? (
-                <MdRefresh className="text-base animate-spin" />
-              ) : (
-                <MdQrCodeScanner className="text-base" />
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0 text-primary"
-              onClick={handleAdd}
-              disabled={actionsDisabled}
-              title={t("otpManager.add")}
-              aria-label={t("otpManager.add")}
-            >
-              <MdAdd className="text-base" />
-            </Button>
-          </div>
-        </div>
-
-        <div className="overflow-hidden rounded-md border">
-          {isNew && editingId === "__new__" ? (
-            <OtpEditor
-              entry={editEntry}
-              onCancel={resetEdit}
-              onChange={handleChange}
-              onSave={handleSave}
-              saveDisabled={secretLoading || !editEntry.issuer?.trim() || !editEntry.secret}
-              secretLoading={secretLoading}
-              t={t}
-            />
-          ) : null}
-
-          {entries.map((entry) => {
-            const codeVisible = visibleOtpIds.has(entry.id);
-
-            return (
-              <div key={entry.id}>
-                {editingId === entry.id && !isNew ? (
-                  <OtpEditor
-                    entry={editEntry}
-                    onCancel={resetEdit}
-                    onChange={handleChange}
-                    onSave={handleSave}
-                    saveDisabled={secretLoading || !editEntry.issuer?.trim()}
-                    secretLoading={secretLoading}
-                    t={t}
-                  />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 terminal-scroll">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label className="min-w-0 text-sm font-medium">{t("otpManager.title")}</Label>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-primary"
+                onClick={() => void handleImportQr()}
+                disabled={actionsDisabled}
+                title={t("otpManager.scanQr")}
+                aria-label={t("otpManager.scanQr")}
+              >
+                {qrImporting ? (
+                  <MdRefresh className="text-base animate-spin" />
                 ) : (
-                  <div className="border-b px-3 py-3 last:border-0 transition-colors hover:bg-accent/35">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="truncate text-sm font-medium">{entry.issuer}</div>
-                          <span
-                            className={`shrink-0 font-mono text-[0.625rem] font-semibold uppercase tracking-[0.18em] ${otpTypeTagClass(entry.otp_type)}`}
-                          >
-                            [{entry.otp_type.toUpperCase()}]
-                          </span>
-                        </div>
-                        <div className="mt-1 truncate text-[0.6875rem] text-muted-foreground">
-                          {entry.username}
-                        </div>
+                  <MdQrCodeScanner className="text-base" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-primary"
+                onClick={handleAdd}
+                disabled={actionsDisabled}
+                title={t("otpManager.add")}
+                aria-label={t("otpManager.add")}
+              >
+                <MdAdd className="text-base" />
+              </Button>
+            </div>
+          </div>
 
-                        <div className="mt-2 grid grid-cols-4 items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-full p-0 text-muted-foreground hover:text-foreground"
-                            onClick={() => toggleCodeVisibility(entry.id)}
-                            disabled={editingId !== null}
-                            title={
-                              codeVisible ? t("otpManager.hideCodes") : t("otpManager.showCodes")
-                            }
-                            aria-label={
-                              codeVisible ? t("otpManager.hideCodes") : t("otpManager.showCodes")
-                            }
-                          >
-                            {codeVisible ? (
-                              <MdVisibilityOff className="text-sm" />
-                            ) : (
-                              <MdVisibility className="text-sm" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-full p-0 text-muted-foreground hover:text-foreground"
-                            onClick={() => {
-                              void handleEdit(entry);
-                            }}
-                            disabled={editingId !== null}
-                            title={t("common.edit")}
-                            aria-label={t("common.edit")}
-                          >
-                            <MdEdit className="text-sm" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-full p-0 text-muted-foreground hover:text-foreground"
-                            onClick={() => {
-                              void handleSendToTerminal(entry);
-                            }}
-                            disabled={editingId !== null || !activeSessionId}
-                            title={t("otp.sendToTerminal")}
-                            aria-label={t("otp.sendToTerminal")}
-                          >
-                            <MdSend className="text-sm" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-full p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => setDeletingEntry(entry)}
-                            disabled={editingId !== null}
-                            title={t("common.delete")}
-                            aria-label={t("common.delete")}
-                          >
-                            <MdDelete className="text-sm" />
-                          </Button>
+          <div className="overflow-hidden rounded-md border">
+            {isNew && editingId === "__new__" ? (
+              <OtpEditor
+                entry={editEntry}
+                onCancel={resetEdit}
+                onChange={handleChange}
+                onSave={handleSave}
+                saveDisabled={secretLoading || !editEntry.issuer?.trim() || !editEntry.secret}
+                secretLoading={secretLoading}
+                t={t}
+              />
+            ) : null}
+
+            {entries.map((entry) => {
+              const codeVisible = visibleOtpIds.has(entry.id);
+
+              return (
+                <div key={entry.id}>
+                  {editingId === entry.id && !isNew ? (
+                    <OtpEditor
+                      entry={editEntry}
+                      onCancel={resetEdit}
+                      onChange={handleChange}
+                      onSave={handleSave}
+                      saveDisabled={secretLoading || !editEntry.issuer?.trim()}
+                      secretLoading={secretLoading}
+                      t={t}
+                    />
+                  ) : (
+                    <div className="border-b px-3 py-3 last:border-0 transition-colors hover:bg-accent/35">
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center justify-between gap-3">
+                            <div className="min-w-0 truncate text-sm font-medium">
+                              {entry.issuer}
+                            </div>
+                            <span
+                              className={`shrink-0 font-mono text-[0.625rem] font-semibold uppercase tracking-[0.18em] ${otpTypeTagClass(entry.otp_type)}`}
+                            >
+                              [{entry.otp_type.toUpperCase()}]
+                            </span>
+                          </div>
+                          <div className="mt-1 truncate text-[0.6875rem] text-muted-foreground">
+                            {entry.username}
+                          </div>
+
+                          <div className="mt-2 grid grid-cols-4 items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-full p-0 text-muted-foreground hover:text-foreground"
+                              onClick={() => toggleCodeVisibility(entry.id)}
+                              disabled={editingId !== null}
+                              title={
+                                codeVisible ? t("otpManager.hideCodes") : t("otpManager.showCodes")
+                              }
+                              aria-label={
+                                codeVisible ? t("otpManager.hideCodes") : t("otpManager.showCodes")
+                              }
+                            >
+                              {codeVisible ? (
+                                <MdVisibilityOff className="text-sm" />
+                              ) : (
+                                <MdVisibility className="text-sm" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-full p-0 text-muted-foreground hover:text-foreground"
+                              onClick={() => {
+                                void handleEdit(entry);
+                              }}
+                              disabled={editingId !== null}
+                              title={t("common.edit")}
+                              aria-label={t("common.edit")}
+                            >
+                              <MdEdit className="text-sm" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-full p-0 text-muted-foreground hover:text-foreground"
+                              onClick={() => {
+                                void handleSendToTerminal(entry);
+                              }}
+                              disabled={editingId !== null || !activeSessionId}
+                              title={t("otp.sendToTerminal")}
+                              aria-label={t("otp.sendToTerminal")}
+                            >
+                              <MdSend className="text-sm" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-full p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => setDeletingEntry(entry)}
+                              disabled={editingId !== null}
+                              title={t("common.delete")}
+                              aria-label={t("common.delete")}
+                            >
+                              <MdDelete className="text-sm" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
+
+                      {codeVisible ? (
+                        <OtpCodePanel
+                          className="mt-3"
+                          otpEntryId={entry.id}
+                          otpType={entry.otp_type}
+                          period={entry.period}
+                          variant="list"
+                        />
+                      ) : null}
                     </div>
+                  )}
+                </div>
+              );
+            })}
 
-                    {codeVisible ? (
-                      <OtpCodePanel
-                        className="mt-3"
-                        otpEntryId={entry.id}
-                        otpType={entry.otp_type}
-                        period={entry.period}
-                        variant="list"
-                      />
-                    ) : null}
-                  </div>
-                )}
+            {entries.length === 0 && !isNew ? (
+              <div className="py-6 text-center text-xs text-muted-foreground">
+                {t("otpManager.noEntries")}
               </div>
-            );
-          })}
-
-          {entries.length === 0 && !isNew ? (
-            <div className="py-6 text-center text-xs text-muted-foreground">
-              {t("otpManager.noEntries")}
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
       </div>
 

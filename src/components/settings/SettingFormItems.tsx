@@ -222,10 +222,16 @@ export function SettingSwitch({
   checked,
   disabled,
   onChange,
+  ...switchProps
 }: {
   checked: boolean;
   disabled?: boolean;
   onChange: (v: boolean) => void;
-}) {
-  return <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} />;
+} & Omit<
+  React.ComponentProps<typeof Switch>,
+  "checked" | "disabled" | "onChange" | "onCheckedChange"
+>) {
+  return (
+    <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} {...switchProps} />
+  );
 }

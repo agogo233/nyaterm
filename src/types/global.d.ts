@@ -953,7 +953,7 @@ export interface TerminalSettings {
   show_workspace_padding: boolean;
   show_line_numbers: boolean;
   show_timestamps: boolean;
-  show_timestamp_milliseconds: boolean;
+  timestamp_format: string;
   show_multi_line_paste_dialog: boolean;
   paste_image_as_path: boolean;
 }
@@ -988,6 +988,8 @@ export interface DiagnosticsSettings {
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 export type AIMode = "ask" | "agent";
 export type AIAgentCommandExecutionMode = "confirm_each" | "smart" | "auto";
+export type AIAgentKind = "nyaterm" | "codex" | "claude_code";
+export type AIPermissionMode = "observer" | "confirm" | "auto";
 export type AIReasoningEffort = "auto" | "none" | "low" | "medium" | "high" | "xhigh";
 export type AIModelSource = "rust-genai" | "manual";
 export type AIBackendKind = "genai" | "codex";
@@ -1020,9 +1022,23 @@ export interface AIModelConfigItem {
 export interface CodexIntegrationSettings {
   enabled: boolean;
   executable_path?: string | null;
+  runtime?: string | null;
   default_model?: string | null;
+  config_directory?: string | null;
+  permission_mode?: AIPermissionMode;
+  tool_integration_mode?: string | null;
   thread_mode: CodexThreadMode;
   remote_terminal_agent_enabled: boolean;
+}
+
+export interface ClaudeCodeIntegrationSettings {
+  enabled: boolean;
+  executable_path?: string | null;
+  runtime?: string | null;
+  default_model?: string | null;
+  config_directory?: string | null;
+  permission_mode?: AIPermissionMode;
+  tool_integration_mode?: string | null;
 }
 
 export interface AIProviderProfile {
@@ -1063,6 +1079,8 @@ export interface AISettings {
   active_profile_id: string;
   provider_profiles: AIProviderProfile[];
   default_mode: AIMode;
+  default_agent_kind?: AIAgentKind;
+  external_agent_permission_mode?: AIPermissionMode;
   default_reasoning_effort?: AIReasoningEffort;
   default_model_id?: string | null;
   models: AIModelConfigItem[];
@@ -1077,6 +1095,7 @@ export interface AISettings {
   agent_command_execution_mode: AIAgentCommandExecutionMode;
   agent_smart_auto_execute_max_risk: RiskLevel;
   codex: CodexIntegrationSettings;
+  claude_code: ClaudeCodeIntegrationSettings;
 }
 
 export interface AIContext {
@@ -1160,11 +1179,13 @@ export interface AIMessage {
 
 export interface AISession {
   id: string;
+  agentKind?: AIAgentKind;
   scope?: AISessionScope;
   connectionId?: string | null;
   title: string;
   createdAt: string;
   updatedAt: string;
+  externalSessionId?: string | null;
   backendMetadata?: {
     backend: AIBackendKind;
     externalThreadId?: string | null;

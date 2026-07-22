@@ -820,8 +820,13 @@ mod tests {
             targets: vec![],
             target_contexts: vec![],
             mode: AiMode::Ask,
+            agent_kind: crate::config::AiAgentKind::Nyaterm,
+            permission_mode: crate::config::AiPermissionMode::Confirm,
             model_id: None,
             model_name: None,
+            default_target_session_id: None,
+            existing_external_session_id: None,
+            attachments: vec![],
             action: AiAction::GenerateCommand,
             user_input: "check disk usage".to_string(),
             context: AiContext {

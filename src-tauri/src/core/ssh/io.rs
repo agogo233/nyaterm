@@ -439,17 +439,10 @@ fn append_suppressed_visible(buffer: &mut String, visible: &str) {
     }
 }
 
-fn take_suppressed_fallback(buffer: &mut String, flushed_osc_buffer: String) -> String {
-    if buffer.is_empty() {
-        return flushed_osc_buffer;
-    }
-    if flushed_osc_buffer.is_empty() {
-        return std::mem::take(buffer);
-    }
-
-    let mut fallback = std::mem::take(buffer);
-    fallback.push_str(&flushed_osc_buffer);
-    fallback
+fn discard_suppressed_output(buffer: &mut String, flushed_osc_buffer: String) -> usize {
+    let discarded_len = buffer.len() + flushed_osc_buffer.len();
+    buffer.clear();
+    discarded_len
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -624,6 +617,9 @@ pub(super) async fn ssh_io_loop(
                     Some(SessionCommand::Attach) => {
                         output.attach();
                     }
+                    Some(SessionCommand::DetachRenderer) => {
+                        output.detach();
+                    }
                     Some(SessionCommand::Write { mut data, .. }) => {
                         if zmodem_transfer.is_some()
                             || zmodem_upload_drain.should_suppress(std::time::Instant::now())
@@ -675,9 +671,11 @@ pub(super) async fn ssh_io_loop(
                     Some(SessionCommand::ZmodemAcceptUpload {
                         files,
                         conflict_mode,
+                        preserve_timestamps,
                     }) => {
                         if let Some(ref mut transfer) = zmodem_transfer {
-                            let actions = transfer.accept_upload(files, conflict_mode);
+                            let actions =
+                                transfer.accept_upload(files, conflict_mode, preserve_timestamps);
                             handle_zmodem_actions(&app, &zmodem_event_name, &mut channel, actions).await;
                             if transfer.is_done() {
                                 zmodem_transfer = None;
@@ -877,19 +875,17 @@ pub(super) async fn ssh_io_loop(
             _ = &mut inject_deadline, if phase != IoPhase::Normal => {
                 let timeout_event = handle_injection_timeout(&mut phase);
                 let flushed = stripper.flush();
-                let fallback_visible = take_suppressed_fallback(
+                let discarded_visible_bytes = discard_suppressed_output(
                     &mut suppressed_visible_fallback,
                     flushed,
                 );
                 tracing::debug!(
                     session_id = %session_id,
                     shell = ?shell_kind,
-                    fallback_visible_bytes = fallback_visible.len(),
-                    "Injection timeout — falling back to passthrough mode"
+                    discarded_visible_bytes,
+                    "Injection timeout — discarding suppressed shell integration output"
                 );
-                if timeout_event == InjectionTimeoutEvent::FallbackToNormal && !fallback_visible.is_empty() {
-                    emit_visible_text(&output, &recording_mgr, &session_id, &fallback_visible);
-                }
+                let _ = timeout_event;
                 arm_post_login_timer(&phase, &pending_post_login, &mut post_login_deadline);
             }
             _ = async {
@@ -1045,8 +1041,8 @@ mod tests {
     use super::{
         INITIAL_INJECT_DELAY_MS, INJECT_TIMEOUT_SECS, InjectionEvent, InjectionTimeoutEvent,
         IoPhase, PendingStartupCommand, SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES,
-        append_suppressed_visible, build_startup_command_input, handle_injection_result,
-        handle_injection_timeout, should_send_initial_injection, take_suppressed_fallback,
+        append_suppressed_visible, build_startup_command_input, discard_suppressed_output,
+        handle_injection_result, handle_injection_timeout, should_send_initial_injection,
     };
     use crate::core::ssh::osc::OscResult;
     use std::pin::Pin;
@@ -1147,12 +1143,12 @@ mod tests {
     }
 
     #[test]
-    fn timeout_fallback_combines_suppressed_visible_and_buffered_osc_text() {
+    fn timeout_discard_clears_suppressed_visible_and_buffered_osc_text() {
         let mut buffer = "prompt".to_string();
 
-        let fallback = take_suppressed_fallback(&mut buffer, "tail".to_string());
+        let discarded_len = discard_suppressed_output(&mut buffer, "tail".to_string());
 
-        assert_eq!(fallback, "prompttail");
+        assert_eq!(discarded_len, "prompttail".len());
         assert!(buffer.is_empty());
     }
 

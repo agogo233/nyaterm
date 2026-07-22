@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdFolder, MdInsertDriveFile, MdRefresh } from "react-icons/md";
 import { toast } from "sonner";
+import {
+  type FileExplorerBackendKind,
+  getExplorerParentDirectory,
+} from "@/components/panel/file-explorer/model";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -18,6 +22,7 @@ import type { FileProperties } from "@/types/global";
 
 export interface PropertiesDialogData {
   sessionId: string;
+  backend: FileExplorerBackendKind;
   fullPath: string;
   rawPathToken?: string;
   name: string;
@@ -99,15 +104,24 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
   const initialOctal = properties ? parsePermissionsToOctal(properties.permissions) : "0644";
   const initialOwner = properties?.owner || properties?.uid || "";
   const initialGroup = properties?.group || properties?.gid || "";
+  const canEditAttributes = data.backend === "remote";
 
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
-    invoke<FileProperties>("get_file_properties", {
-      sessionId: data.sessionId,
-      path: data.fullPath,
-      rawPathToken: data.rawPathToken,
-    })
+    const request =
+      data.backend === "local"
+        ? invoke<FileProperties>("get_local_file_properties", {
+            sessionId: data.sessionId,
+            path: data.fullPath,
+          })
+        : invoke<FileProperties>("get_file_properties", {
+            sessionId: data.sessionId,
+            path: data.fullPath,
+            rawPathToken: data.rawPathToken,
+          });
+
+    request
       .then((props) => {
         if (isMounted) {
           setProperties(props);
@@ -126,10 +140,10 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
     return () => {
       isMounted = false;
     };
-  }, [data.sessionId, data.fullPath, data.rawPathToken]);
+  }, [data.backend, data.sessionId, data.fullPath, data.rawPathToken]);
 
   const handleSave = async () => {
-    if (!properties) return;
+    if (!properties || !canEditAttributes) return;
 
     const nextOwner = ownerInput.trim();
     const nextGroup = groupInput.trim();
@@ -194,9 +208,7 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
   };
 
   const getLocation = () => {
-    const idx = data.fullPath.lastIndexOf("/");
-    if (idx <= 0) return "/";
-    return data.fullPath.substring(0, idx + 1);
+    return getExplorerParentDirectory(data.fullPath, data.backend);
   };
 
   return (
@@ -271,8 +283,10 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
                       label: t("fileExplorer.owner"),
                       value: (
                         <span>
-                          {properties.owner}{" "}
-                          <span className="font-mono opacity-70">[{properties.uid}]</span>
+                          {properties.owner || "-"}{" "}
+                          {properties.uid && (
+                            <span className="font-mono opacity-70">[{properties.uid}]</span>
+                          )}
                         </span>
                       ),
                     },
@@ -281,8 +295,10 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
                       label: t("fileExplorer.group"),
                       value: (
                         <span>
-                          {properties.group}{" "}
-                          <span className="font-mono opacity-70">[{properties.gid}]</span>
+                          {properties.group || "-"}{" "}
+                          {properties.gid && (
+                            <span className="font-mono opacity-70">[{properties.gid}]</span>
+                          )}
                         </span>
                       ),
                     },
@@ -295,152 +311,164 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
                 </div>
               </div>
 
-              <div className="border-t" />
+              {canEditAttributes && <div className="border-t" />}
 
               {/* Ownership */}
-              <div>
-                <h3 className="text-xs font-semibold mb-3 tracking-wider uppercase text-muted-foreground">
-                  {t("fileExplorer.ownership")}
-                </h3>
-                <div className="space-y-3 text-xs">
-                  <label className="grid grid-cols-[5.5rem_1fr] items-center gap-3">
-                    <span className="text-muted-foreground">{t("fileExplorer.owner")}:</span>
-                    <Input
-                      className="h-8 text-xs"
-                      value={ownerInput}
-                      placeholder={properties.uid || t("fileExplorer.owner")}
-                      disabled={isSaving}
-                      onChange={(e) => setOwnerInput(e.target.value)}
-                    />
-                  </label>
-                  <label className="grid grid-cols-[5.5rem_1fr] items-center gap-3">
-                    <span className="text-muted-foreground">{t("fileExplorer.group")}:</span>
-                    <Input
-                      className="h-8 text-xs"
-                      value={groupInput}
-                      placeholder={properties.gid || t("fileExplorer.group")}
-                      disabled={isSaving}
-                      onChange={(e) => setGroupInput(e.target.value)}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="border-t" />
-
-              {/* Permissions */}
-              <div>
-                <h3 className="text-xs font-semibold mb-3 tracking-wider uppercase text-muted-foreground">
-                  {t("fileExplorer.permissions")}
-                </h3>
-                <div className="rounded-md border overflow-hidden bg-background">
-                  <table className="w-full text-xs text-left select-none">
-                    <thead className="bg-muted text-muted-foreground">
-                      <tr>
-                        <th className="font-normal px-3 py-2 w-16"></th>
-                        <th className="font-normal px-2 py-2 text-center w-14">R</th>
-                        <th className="font-normal px-2 py-2 text-center w-14">W</th>
-                        <th className="font-normal px-2 py-2 text-center w-14">X</th>
-                        <th className="font-normal px-2 py-2 text-center">
-                          {t("fileExplorer.special")}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[
-                        {
-                          label: t("fileExplorer.permUser"),
-                          idx: 1,
-                          sIdx: 0,
-                          sBit: 4,
-                          sLabel: "UID",
-                          alt: true,
-                        },
-                        {
-                          label: t("fileExplorer.permGroup"),
-                          idx: 2,
-                          sIdx: 0,
-                          sBit: 2,
-                          sLabel: "GID",
-                          alt: false,
-                        },
-                        {
-                          label: t("fileExplorer.permOther"),
-                          idx: 3,
-                          sIdx: 0,
-                          sBit: 1,
-                          sLabel: t("fileExplorer.permSticky"),
-                          alt: true,
-                        },
-                      ].map((row) => (
-                        <tr key={row.idx} className={`border-t ${row.alt ? "bg-muted/30" : ""}`}>
-                          <td className="px-3 py-2 text-muted-foreground">{row.label}</td>
-                          <td className="px-2 py-2 text-center">
-                            <Checkbox
-                              checked={hasBit(row.idx, 4)}
-                              onCheckedChange={(checked) => updateBit(row.idx, 4, checked === true)}
-                            />
-                          </td>
-                          <td className="px-2 py-2 text-center">
-                            <Checkbox
-                              checked={hasBit(row.idx, 2)}
-                              onCheckedChange={(checked) => updateBit(row.idx, 2, checked === true)}
-                            />
-                          </td>
-                          <td className="px-2 py-2 text-center">
-                            <Checkbox
-                              checked={hasBit(row.idx, 1)}
-                              onCheckedChange={(checked) => updateBit(row.idx, 1, checked === true)}
-                            />
-                          </td>
-                          <td className="px-2 py-2 text-center">
-                            <label className="flex items-center justify-center gap-1.5 cursor-pointer text-[0.625rem]">
-                              <Checkbox
-                                checked={hasBit(row.sIdx, row.sBit)}
-                                onCheckedChange={(checked) =>
-                                  updateBit(row.sIdx, row.sBit, checked === true)
-                                }
-                              />
-                              {row.sLabel}
-                            </label>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="flex items-center justify-between mt-4">
-                  <span className="text-xs text-muted-foreground">{t("fileExplorer.octal")}:</span>
-                  <div className="flex items-center">
-                    <span className="text-xs font-mono mr-2 opacity-50">0</span>
-                    <Input
-                      className="w-[60px] text-center font-mono text-xs h-7"
-                      style={{ letterSpacing: "2px" }}
-                      value={octal.substring(1)}
-                      onChange={(e) => {
-                        let val = e.target.value.replace(/[^0-7]/g, "");
-                        if (val.length > 3) val = val.substring(0, 3);
-                        setOctal(octal[0] + val.padStart(3, "0"));
-                      }}
-                    />
+              {canEditAttributes && (
+                <div>
+                  <h3 className="text-xs font-semibold mb-3 tracking-wider uppercase text-muted-foreground">
+                    {t("fileExplorer.ownership")}
+                  </h3>
+                  <div className="space-y-3 text-xs">
+                    <label className="grid grid-cols-[5.5rem_1fr] items-center gap-3">
+                      <span className="text-muted-foreground">{t("fileExplorer.owner")}:</span>
+                      <Input
+                        className="h-8 text-xs"
+                        value={ownerInput}
+                        placeholder={properties.uid || t("fileExplorer.owner")}
+                        disabled={isSaving}
+                        onChange={(e) => setOwnerInput(e.target.value)}
+                      />
+                    </label>
+                    <label className="grid grid-cols-[5.5rem_1fr] items-center gap-3">
+                      <span className="text-muted-foreground">{t("fileExplorer.group")}:</span>
+                      <Input
+                        className="h-8 text-xs"
+                        value={groupInput}
+                        placeholder={properties.gid || t("fileExplorer.group")}
+                        disabled={isSaving}
+                        onChange={(e) => setGroupInput(e.target.value)}
+                      />
+                    </label>
                   </div>
                 </div>
+              )}
 
-                {data.is_dir && (
-                  <label className="mt-4 flex items-start gap-2 text-xs">
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={recursive}
-                      disabled={isSaving}
-                      onCheckedChange={(checked) => setRecursive(checked === true)}
-                    />
-                    <span className="leading-5 text-muted-foreground">
-                      {t("fileExplorer.applyRecursively")}
+              {canEditAttributes && <div className="border-t" />}
+
+              {/* Permissions */}
+              {canEditAttributes && (
+                <div>
+                  <h3 className="text-xs font-semibold mb-3 tracking-wider uppercase text-muted-foreground">
+                    {t("fileExplorer.permissions")}
+                  </h3>
+                  <div className="rounded-md border overflow-hidden bg-background">
+                    <table className="w-full text-xs text-left select-none">
+                      <thead className="bg-muted text-muted-foreground">
+                        <tr>
+                          <th className="font-normal px-3 py-2 w-16"></th>
+                          <th className="font-normal px-2 py-2 text-center w-14">R</th>
+                          <th className="font-normal px-2 py-2 text-center w-14">W</th>
+                          <th className="font-normal px-2 py-2 text-center w-14">X</th>
+                          <th className="font-normal px-2 py-2 text-center">
+                            {t("fileExplorer.special")}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          {
+                            label: t("fileExplorer.permUser"),
+                            idx: 1,
+                            sIdx: 0,
+                            sBit: 4,
+                            sLabel: "UID",
+                            alt: true,
+                          },
+                          {
+                            label: t("fileExplorer.permGroup"),
+                            idx: 2,
+                            sIdx: 0,
+                            sBit: 2,
+                            sLabel: "GID",
+                            alt: false,
+                          },
+                          {
+                            label: t("fileExplorer.permOther"),
+                            idx: 3,
+                            sIdx: 0,
+                            sBit: 1,
+                            sLabel: t("fileExplorer.permSticky"),
+                            alt: true,
+                          },
+                        ].map((row) => (
+                          <tr key={row.idx} className={`border-t ${row.alt ? "bg-muted/30" : ""}`}>
+                            <td className="px-3 py-2 text-muted-foreground">{row.label}</td>
+                            <td className="px-2 py-2 text-center">
+                              <Checkbox
+                                checked={hasBit(row.idx, 4)}
+                                onCheckedChange={(checked) =>
+                                  updateBit(row.idx, 4, checked === true)
+                                }
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <Checkbox
+                                checked={hasBit(row.idx, 2)}
+                                onCheckedChange={(checked) =>
+                                  updateBit(row.idx, 2, checked === true)
+                                }
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <Checkbox
+                                checked={hasBit(row.idx, 1)}
+                                onCheckedChange={(checked) =>
+                                  updateBit(row.idx, 1, checked === true)
+                                }
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <label className="flex items-center justify-center gap-1.5 cursor-pointer text-[0.625rem]">
+                                <Checkbox
+                                  checked={hasBit(row.sIdx, row.sBit)}
+                                  onCheckedChange={(checked) =>
+                                    updateBit(row.sIdx, row.sBit, checked === true)
+                                  }
+                                />
+                                {row.sLabel}
+                              </label>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center justify-between mt-4">
+                    <span className="text-xs text-muted-foreground">
+                      {t("fileExplorer.octal")}:
                     </span>
-                  </label>
-                )}
-              </div>
+                    <div className="flex items-center">
+                      <span className="text-xs font-mono mr-2 opacity-50">0</span>
+                      <Input
+                        className="w-[60px] text-center font-mono text-xs h-7"
+                        style={{ letterSpacing: "2px" }}
+                        value={octal.substring(1)}
+                        onChange={(e) => {
+                          let val = e.target.value.replace(/[^0-7]/g, "");
+                          if (val.length > 3) val = val.substring(0, 3);
+                          setOctal(octal[0] + val.padStart(3, "0"));
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {data.is_dir && (
+                    <label className="mt-4 flex items-start gap-2 text-xs">
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={recursive}
+                        disabled={isSaving}
+                        onCheckedChange={(checked) => setRecursive(checked === true)}
+                      />
+                      <span className="leading-5 text-muted-foreground">
+                        {t("fileExplorer.applyRecursively")}
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )}
             </>
           ) : null}
         </div>
@@ -454,17 +482,19 @@ export default function PropertiesDialog({ data, onClose, onSuccess }: Propertie
             onClick={onClose}
             disabled={isSaving}
           >
-            {t("dialog.cancel")}
+            {canEditAttributes ? t("dialog.cancel") : t("common.close")}
           </Button>
-          <Button
-            size="sm"
-            className="text-xs"
-            onClick={handleSave}
-            disabled={isSaving || loading || !!error}
-          >
-            {isSaving && <MdRefresh className="text-[0.875rem] animate-spin" />}
-            {t("dialog.save")}
-          </Button>
+          {canEditAttributes && (
+            <Button
+              size="sm"
+              className="text-xs"
+              onClick={handleSave}
+              disabled={isSaving || loading || !!error}
+            >
+              {isSaving && <MdRefresh className="text-[0.875rem] animate-spin" />}
+              {t("dialog.save")}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,6 +1,7 @@
 import type { SshConfig } from "@/types/global";
 
 export interface TemporarySshLinkConfig extends SshConfig {
+  protocol: "ssh";
   backspace_mode: string;
   x11_forwarding: boolean;
   x11_display: string;
@@ -9,12 +10,33 @@ export interface TemporarySshLinkConfig extends SshConfig {
   post_login: null;
 }
 
-export type TemporarySshLinkParseResult =
-  | { ok: true; config: TemporarySshLinkConfig }
+export interface TemporaryTelnetLinkConfig {
+  protocol: "telnet";
+  name: string;
+  host: string;
+  port: number;
+}
+
+export interface TemporarySerialLinkConfig {
+  protocol: "serial";
+  name: string;
+  portName: string;
+  baudRate: number;
+}
+
+export type TemporaryLinkProtocol = TemporaryLinkConfig["protocol"];
+export type TemporaryLinkConfig =
+  | TemporarySshLinkConfig
+  | TemporaryTelnetLinkConfig
+  | TemporarySerialLinkConfig;
+
+export type TemporaryLinkParseResult =
+  | { ok: true; config: TemporaryLinkConfig }
   | { ok: false; errorKey: string };
 
 const DEFAULT_USERNAME = "root";
-const DEFAULT_PORT = 22;
+const DEFAULT_SSH_PORT = 22;
+const DEFAULT_TELNET_PORT = 23;
 const UNSUPPORTED_OPTIONS = new Set([
   "-J",
   "-L",
@@ -40,7 +62,14 @@ const UNSUPPORTED_LONG_OPTIONS = new Set([
   "identityfile",
 ]);
 
-export function parseTemporarySshLink(input: string): TemporarySshLinkParseResult {
+export function parseTemporaryLink(
+  protocol: Exclude<TemporaryLinkProtocol, "serial">,
+  input: string,
+): TemporaryLinkParseResult {
+  return protocol === "telnet" ? parseTemporaryTelnetLink(input) : parseTemporarySshLink(input);
+}
+
+export function parseTemporarySshLink(input: string): TemporaryLinkParseResult {
   const text = input.trim();
   if (!text) return { ok: false, errorKey: "temporarySsh.empty" };
 
@@ -118,16 +147,75 @@ export function parseTemporarySshLink(input: string): TemporarySshLinkParseResul
   return buildConfig(hostSpec, username, port);
 }
 
-function parseSshUrl(text: string): TemporarySshLinkParseResult | null {
+export function parseTemporaryTelnetLink(input: string): TemporaryLinkParseResult {
+  const text = input.trim();
+  if (!text) return { ok: false, errorKey: "temporarySsh.empty" };
+
+  const urlResult = parseTelnetUrl(text);
+  if (urlResult) return urlResult;
+
+  const tokens = tokenizeShellLike(text);
+  if (!tokens.length) return { ok: false, errorKey: "temporarySsh.empty" };
+
+  const commandTokens = tokens[0]?.toLowerCase() === "telnet" ? tokens.slice(1) : tokens;
+  let hostSpec: string | null = null;
+  let port: number | null = null;
+
+  for (let i = 0; i < commandTokens.length; i += 1) {
+    const token = commandTokens[i];
+    if (!token) continue;
+
+    if (token === "--") {
+      hostSpec = findHostSpec(commandTokens.slice(i + 1)) ?? hostSpec;
+      break;
+    }
+
+    if (token.startsWith("-")) {
+      continue;
+    }
+
+    if (!hostSpec) {
+      hostSpec = token;
+      continue;
+    }
+
+    if (port === null) {
+      if (!/^\d+$/.test(token)) return { ok: false, errorKey: "temporarySsh.invalidPort" };
+      port = Number(token);
+    }
+  }
+
+  if (!hostSpec) return { ok: false, errorKey: "temporarySsh.missingHost" };
+  return buildTelnetConfig(hostSpec, port);
+}
+
+function parseSshUrl(text: string): TemporaryLinkParseResult | null {
   if (!/^ssh:\/\//i.test(text)) return null;
 
   try {
     const url = new URL(text);
     if (url.password) return { ok: false, errorKey: "temporarySsh.inlinePassword" };
     if (!url.hostname) return { ok: false, errorKey: "temporarySsh.missingHost" };
-    const port = url.port ? Number(url.port) : DEFAULT_PORT;
+    const port = url.port ? Number(url.port) : DEFAULT_SSH_PORT;
     if (!isValidPort(port)) return { ok: false, errorKey: "temporarySsh.invalidPort" };
     return createConfig(url.hostname, decodeURIComponent(url.username || DEFAULT_USERNAME), port);
+  } catch {
+    return { ok: false, errorKey: "temporarySsh.invalidInput" };
+  }
+}
+
+function parseTelnetUrl(text: string): TemporaryLinkParseResult | null {
+  if (!/^telnet:\/\//i.test(text)) return null;
+
+  try {
+    const url = new URL(text);
+    if (url.username || url.password) {
+      return { ok: false, errorKey: "temporarySsh.inlinePassword" };
+    }
+    if (!url.hostname) return { ok: false, errorKey: "temporarySsh.missingHost" };
+    const port = url.port ? Number(url.port) : DEFAULT_TELNET_PORT;
+    if (!isValidPort(port)) return { ok: false, errorKey: "temporarySsh.invalidPort" };
+    return createTelnetConfig(url.hostname, port);
   } catch {
     return { ok: false, errorKey: "temporarySsh.invalidInput" };
   }
@@ -137,7 +225,7 @@ function buildConfig(
   hostSpec: string,
   explicitUsername: string | null,
   explicitPort: number | null,
-): TemporarySshLinkParseResult {
+): TemporaryLinkParseResult {
   if (hostSpec.includes("://") && !/^ssh:\/\//i.test(hostSpec)) {
     return { ok: false, errorKey: "temporarySsh.invalidInput" };
   }
@@ -165,7 +253,34 @@ function buildConfig(
   return createConfig(
     parsedTarget.host,
     username || DEFAULT_USERNAME,
-    explicitPort ?? parsedTarget.port ?? DEFAULT_PORT,
+    explicitPort ?? parsedTarget.port ?? DEFAULT_SSH_PORT,
+  );
+}
+
+function buildTelnetConfig(
+  hostSpec: string,
+  explicitPort: number | null,
+): TemporaryLinkParseResult {
+  if (hostSpec.includes("://") && !/^telnet:\/\//i.test(hostSpec)) {
+    return { ok: false, errorKey: "temporarySsh.invalidInput" };
+  }
+
+  if (hostSpec.includes("@")) {
+    return { ok: false, errorKey: "temporarySsh.inlinePassword" };
+  }
+
+  const parsedTarget = parseHostPort(hostSpec);
+  if (!parsedTarget.host) return { ok: false, errorKey: "temporarySsh.missingHost" };
+  if (parsedTarget.port !== null && !isValidPort(parsedTarget.port)) {
+    return { ok: false, errorKey: "temporarySsh.invalidPort" };
+  }
+  if (explicitPort !== null && !isValidPort(explicitPort)) {
+    return { ok: false, errorKey: "temporarySsh.invalidPort" };
+  }
+
+  return createTelnetConfig(
+    parsedTarget.host,
+    explicitPort ?? parsedTarget.port ?? DEFAULT_TELNET_PORT,
   );
 }
 
@@ -173,13 +288,14 @@ function createConfig(
   host: string,
   username: string,
   port: number,
-): Extract<TemporarySshLinkParseResult, { ok: true }> {
+): Extract<TemporaryLinkParseResult, { ok: true }> {
   const normalizedHost = host.replace(/^\[(.*)\]$/, "$1");
   const name = `${username}@${normalizedHost}:${port}`;
 
   return {
     ok: true,
     config: {
+      protocol: "ssh",
       name,
       host: normalizedHost,
       port,
@@ -192,6 +308,34 @@ function createConfig(
       proxy_jump: null,
       post_login: null,
     },
+  };
+}
+
+function createTelnetConfig(
+  host: string,
+  port: number,
+): Extract<TemporaryLinkParseResult, { ok: true }> {
+  const normalizedHost = host.replace(/^\[(.*)\]$/, "$1");
+  return {
+    ok: true,
+    config: {
+      protocol: "telnet",
+      name: `telnet://${normalizedHost}:${port}`,
+      host: normalizedHost,
+      port,
+    },
+  };
+}
+
+export function createTemporarySerialLinkConfig(
+  portName: string,
+  baudRate: number,
+): TemporarySerialLinkConfig {
+  return {
+    protocol: "serial",
+    name: `${portName} @ ${baudRate}`,
+    portName,
+    baudRate,
   };
 }
 

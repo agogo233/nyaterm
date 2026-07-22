@@ -29,6 +29,24 @@ pub async fn list_remote_dir(
 }
 
 #[tauri::command]
+pub async fn list_remote_child_directories(
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    path: String,
+    raw_path_token: Option<String>,
+    show_hidden_files: bool,
+) -> AppResult<Vec<sftp::DirectoryChild>> {
+    sftp::list_remote_child_directories(
+        state.inner().clone(),
+        &session_id,
+        &path,
+        raw_path_token.as_deref(),
+        show_hidden_files,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn delete_remote_file(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
@@ -135,6 +153,16 @@ pub async fn read_remote_file_text(
     max_bytes: u64,
 ) -> AppResult<sftp::RemoteTextFile> {
     sftp::read_remote_file_text(state.inner().clone(), &session_id, &path, max_bytes).await
+}
+
+#[tauri::command]
+pub async fn read_remote_file_bytes(
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    path: String,
+    max_bytes: u64,
+) -> AppResult<sftp::RemoteBinaryFile> {
+    sftp::read_remote_file_bytes(state.inner().clone(), &session_id, &path, max_bytes).await
 }
 
 #[tauri::command]
@@ -257,6 +285,15 @@ pub async fn upload_local_directory(
         duplicate_strategy_override,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn copy_file_entry(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    request: sftp::CopyFileEntryRequest,
+) -> AppResult<()> {
+    sftp::copy_file_entry(app, state.inner().clone(), request).await
 }
 
 #[tauri::command]

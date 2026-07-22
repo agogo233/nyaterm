@@ -36,9 +36,11 @@ import type {
   AICustomActionConfig,
   AIModelConfigItem,
   AIModelDiscovery,
+  AIPermissionMode,
   AIProviderCredential,
   AIProviderKind,
   AISettings,
+  ClaudeCodeIntegrationSettings,
   CodexIntegrationSettings,
 } from "@/types/global";
 import {
@@ -100,6 +102,8 @@ interface CodexCliStatus {
   path?: string | null;
   version?: string | null;
   error?: string | null;
+  source?: string | null;
+  checkedPaths?: string[];
 }
 
 interface CodexAccountStatus {
@@ -118,15 +122,48 @@ interface CodexLoginStart {
   userCode?: string | null;
 }
 
+interface ClaudeCodeCliStatus {
+  installed: boolean;
+  path?: string | null;
+  version?: string | null;
+  error?: string | null;
+  source?: string | null;
+  checkedPaths?: string[];
+}
+
+interface ClaudeCodeAccountStatus {
+  connected: boolean;
+  authMode?: string | null;
+  message?: string | null;
+}
+
 function normalizeCodexSettings(
   value?: Partial<CodexIntegrationSettings>,
 ): CodexIntegrationSettings {
   return {
     enabled: value?.enabled ?? false,
     executable_path: value?.executable_path ?? null,
+    runtime: value?.runtime ?? "app_server",
     default_model: value?.default_model ?? null,
+    config_directory: value?.config_directory ?? null,
+    permission_mode: value?.permission_mode ?? "confirm",
+    tool_integration_mode: value?.tool_integration_mode ?? "nyaterm_mcp",
     thread_mode: value?.thread_mode ?? "persistent",
     remote_terminal_agent_enabled: value?.remote_terminal_agent_enabled ?? false,
+  };
+}
+
+function normalizeClaudeCodeSettings(
+  value?: Partial<ClaudeCodeIntegrationSettings>,
+): ClaudeCodeIntegrationSettings {
+  return {
+    enabled: value?.enabled ?? false,
+    executable_path: value?.executable_path ?? null,
+    runtime: value?.runtime ?? "stream_json_cli",
+    default_model: value?.default_model ?? null,
+    config_directory: value?.config_directory ?? null,
+    permission_mode: value?.permission_mode ?? "confirm",
+    tool_integration_mode: value?.tool_integration_mode ?? "nyaterm_mcp",
   };
 }
 
@@ -252,8 +289,12 @@ export function AiAgentsTab() {
   const { appSettings, updateAppSettings } = useApp();
   const ai = appSettings.ai;
   const codex = normalizeCodexSettings(ai.codex);
+  const claudeCode = normalizeClaudeCodeSettings(ai.claude_code);
   const [cliStatus, setCliStatus] = useState<CodexCliStatus | null>(null);
   const [accountStatus, setAccountStatus] = useState<CodexAccountStatus | null>(null);
+  const [claudeCliStatus, setClaudeCliStatus] = useState<ClaudeCodeCliStatus | null>(null);
+  const [claudeAccountStatus, setClaudeAccountStatus] =
+    useState<ClaudeCodeAccountStatus | null>(null);
   const [deviceLogin, setDeviceLogin] = useState<CodexLoginStart | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -262,41 +303,115 @@ export function AiAgentsTab() {
     [ai.models],
   );
 
-  const update = useCallback(
+  const updateCodex = useCallback(
     (patch: Partial<CodexIntegrationSettings>) =>
       updateAppSettings({ ai: { ...ai, codex: { ...codex, ...patch } } }),
     [ai, codex, updateAppSettings],
   );
 
-  const detect = useCallback(async () => {
-    setBusy(true);
-    try {
-      const status = await invoke<CodexCliStatus>("detect_codex_cli");
-      setCliStatus(status);
-      if (status.installed && status.path && !codex.executable_path) {
-        update({ executable_path: status.path });
-      }
-      if (status.installed) toast.success(t("ai.codexDetected"));
-      else toast.error(status.error || t("ai.codexNotInstalled"));
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }, [codex.executable_path, t, update]);
+  const updateClaudeCode = useCallback(
+    (patch: Partial<ClaudeCodeIntegrationSettings>) =>
+      updateAppSettings({ ai: { ...ai, claude_code: { ...claudeCode, ...patch } } }),
+    [ai, claudeCode, updateAppSettings],
+  );
 
-  const refreshAccount = useCallback(async () => {
-    setBusy(true);
-    try {
-      const status = await invoke<CodexAccountStatus>("get_codex_account_status");
-      setAccountStatus(status);
-      toast.success(t("ai.codexStatusRefreshed"));
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }, [t]);
+  const detect = useCallback(
+    async (options?: { silent?: boolean }) => {
+      setBusy(true);
+      try {
+        const status = await invoke<CodexCliStatus>("detect_codex_cli");
+        setCliStatus(status);
+        if (
+          status.installed &&
+          status.path &&
+          status.path !== codex.executable_path &&
+          (!codex.executable_path || !options?.silent)
+        ) {
+          updateCodex({ executable_path: status.path });
+        }
+        if (!options?.silent) {
+          if (status.installed) toast.success(t("ai.codexDetected"));
+          else toast.error(status.error || t("ai.codexNotInstalled"));
+        }
+      } catch (error) {
+        if (!options?.silent) {
+          toast.error(getErrorMessage(error));
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [codex.executable_path, t, updateCodex],
+  );
+
+  const detectClaudeCode = useCallback(
+    async (options?: { silent?: boolean }) => {
+      setBusy(true);
+      try {
+        const status = await invoke<ClaudeCodeCliStatus>("detect_claude_code_cli");
+        setClaudeCliStatus(status);
+        if (
+          status.installed &&
+          status.path &&
+          status.path !== claudeCode.executable_path &&
+          (!claudeCode.executable_path || !options?.silent)
+        ) {
+          updateClaudeCode({ executable_path: status.path });
+        }
+        if (!options?.silent) {
+          if (status.installed) toast.success(t("ai.claudeCodeDetected"));
+          else toast.error(status.error || t("ai.claudeCodeNotInstalled"));
+        }
+      } catch (error) {
+        if (!options?.silent) {
+          toast.error(getErrorMessage(error));
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [claudeCode.executable_path, t, updateClaudeCode],
+  );
+
+  const refreshAccount = useCallback(
+    async (options?: { silent?: boolean }) => {
+      setBusy(true);
+      try {
+        const status = await invoke<CodexAccountStatus>("get_codex_account_status");
+        setAccountStatus(status);
+        if (!options?.silent) {
+          toast.success(t("ai.codexStatusRefreshed"));
+        }
+      } catch (error) {
+        if (!options?.silent) {
+          toast.error(getErrorMessage(error));
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [t],
+  );
+
+  const refreshClaudeAccount = useCallback(
+    async (options?: { silent?: boolean }) => {
+      setBusy(true);
+      try {
+        const status = await invoke<ClaudeCodeAccountStatus>("get_claude_code_account_status");
+        setClaudeAccountStatus(status);
+        if (!options?.silent) {
+          toast.success(t("ai.claudeCodeStatusRefreshed"));
+        }
+      } catch (error) {
+        if (!options?.silent) {
+          toast.error(getErrorMessage(error));
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [t],
+  );
 
   const startLogin = useCallback(
     async (flow: "browser" | "deviceCode") => {
@@ -334,9 +449,11 @@ export function AiAgentsTab() {
   useEffect(() => {
     if (bootstrappedRef.current) return;
     bootstrappedRef.current = true;
-    void detect();
-    if (codex.enabled) void refreshAccount();
-  }, [codex.enabled, detect, refreshAccount]);
+    void detect({ silent: true });
+    void detectClaudeCode({ silent: true });
+    if (codex.enabled) void refreshAccount({ silent: true });
+    if (claudeCode.enabled) void refreshClaudeAccount({ silent: true });
+  }, [claudeCode.enabled, codex.enabled, detect, detectClaudeCode, refreshAccount, refreshClaudeAccount]);
 
   const connectedLabel = accountStatus?.connected
     ? t("ai.codexConnected")
@@ -355,46 +472,44 @@ export function AiAgentsTab() {
         contentClassName="space-y-4"
       >
         <div className="rounded-md border border-border/70 bg-background/75 p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
               <div className="text-sm font-medium">OpenAI Codex</div>
               <div className="mt-1 text-xs text-muted-foreground">{t("ai.codexDesc")}</div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <Badge variant={cliStatus?.installed ? "default" : "outline"}>
                 {cliStatus?.installed ? t("ai.installed") : t("ai.notInstalled")}
               </Badge>
               <Badge variant={accountStatus?.connected ? "default" : "outline"}>
                 {connectedLabel}
               </Badge>
+              <SettingSwitch
+                aria-label={t("ai.codexEnabled")}
+                checked={codex.enabled}
+                onChange={(enabled) => updateCodex({ enabled })}
+              />
             </div>
           </div>
 
           <div className="space-y-4">
-            <SettingRow label={t("ai.codexEnabled")}>
-              <SettingSwitch checked={codex.enabled} onChange={(enabled) => update({ enabled })} />
-            </SettingRow>
-            <SettingRow label={t("ai.codexRemoteAgent")}>
-              <SettingSwitch
-                checked={codex.remote_terminal_agent_enabled}
-                onChange={(remote_terminal_agent_enabled) =>
-                  update({ remote_terminal_agent_enabled })
-                }
-              />
-            </SettingRow>
             <SettingFieldGrid>
               <SettingInput
                 label={t("ai.codexPath")}
                 value={codex.executable_path ?? ""}
                 placeholder="codex"
-                onChange={(event) => update({ executable_path: event.target.value || null })}
+                onChange={(event) =>
+                  updateCodex({ executable_path: event.target.value || null })
+                }
                 fieldClassName="lg:col-span-2"
               />
               <SettingSelect
                 label={t("ai.codexThreadMode")}
                 value={codex.thread_mode}
                 onValueChange={(thread_mode) =>
-                  update({ thread_mode: thread_mode as CodexIntegrationSettings["thread_mode"] })
+                  updateCodex({
+                    thread_mode: thread_mode as CodexIntegrationSettings["thread_mode"],
+                  })
                 }
               >
                 <SelectItem value="persistent">{t("ai.codexThreadPersistent")}</SelectItem>
@@ -404,7 +519,7 @@ export function AiAgentsTab() {
                 label={t("ai.codexDefaultModel")}
                 value={codex.default_model ?? "__none__"}
                 onValueChange={(value) =>
-                  update({ default_model: value === "__none__" ? null : value })
+                  updateCodex({ default_model: value === "__none__" ? null : value })
                 }
               >
                 <SelectItem value="__none__">{t("ai.useModelPicker")}</SelectItem>
@@ -413,6 +528,17 @@ export function AiAgentsTab() {
                     {model.name}
                   </SelectItem>
                 ))}
+              </SettingSelect>
+              <SettingSelect
+                label={t("ai.permissionMode")}
+                value={codex.permission_mode ?? "confirm"}
+                onValueChange={(permission_mode) =>
+                  updateCodex({ permission_mode: permission_mode as AIPermissionMode })
+                }
+              >
+                <SelectItem value="observer">{t("ai.permissionObserver")}</SelectItem>
+                <SelectItem value="confirm">{t("ai.permissionConfirm")}</SelectItem>
+                <SelectItem value="auto">{t("ai.permissionAuto")}</SelectItem>
               </SettingSelect>
             </SettingFieldGrid>
 
@@ -465,6 +591,103 @@ export function AiAgentsTab() {
               <Button size="sm" variant="outline" disabled={busy} onClick={() => void logout()}>
                 <MdLogout />
                 {t("ai.codexLogout")}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-border/70 bg-background/75 p-4">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">Claude Code</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {t("ai.claudeCodeDesc")}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Badge variant={claudeCliStatus?.installed ? "default" : "outline"}>
+                {claudeCliStatus?.installed ? t("ai.installed") : t("ai.notInstalled")}
+              </Badge>
+              <Badge variant={claudeAccountStatus?.connected ? "default" : "outline"}>
+                {claudeAccountStatus?.connected
+                  ? t("ai.claudeCodeConnected")
+                  : t("ai.claudeCodeNotLoggedIn")}
+              </Badge>
+              <SettingSwitch
+                aria-label={t("ai.claudeCodeEnabled")}
+                checked={claudeCode.enabled}
+                onChange={(enabled) => updateClaudeCode({ enabled })}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <SettingFieldGrid>
+              <SettingInput
+                label={t("ai.claudeCodePath")}
+                value={claudeCode.executable_path ?? ""}
+                placeholder="claude"
+                onChange={(event) =>
+                  updateClaudeCode({ executable_path: event.target.value || null })
+                }
+                fieldClassName="lg:col-span-2"
+              />
+              <SettingInput
+                label={t("ai.claudeCodeConfigDirectory")}
+                value={claudeCode.config_directory ?? ""}
+                placeholder="~/.claude"
+                onChange={(event) =>
+                  updateClaudeCode({ config_directory: event.target.value || null })
+                }
+              />
+              <SettingInput
+                label={t("ai.claudeCodeDefaultModel")}
+                value={claudeCode.default_model ?? ""}
+                placeholder="sonnet"
+                onChange={(event) =>
+                  updateClaudeCode({ default_model: event.target.value || null })
+                }
+              />
+              <SettingSelect
+                label={t("ai.permissionMode")}
+                value={claudeCode.permission_mode ?? "confirm"}
+                onValueChange={(permission_mode) =>
+                  updateClaudeCode({ permission_mode: permission_mode as AIPermissionMode })
+                }
+              >
+                <SelectItem value="observer">{t("ai.permissionObserver")}</SelectItem>
+                <SelectItem value="confirm">{t("ai.permissionConfirm")}</SelectItem>
+                <SelectItem value="auto">{t("ai.permissionAuto")}</SelectItem>
+              </SettingSelect>
+            </SettingFieldGrid>
+
+            <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+              <div>
+                {t("ai.claudeCodeVersion")}: {claudeCliStatus?.version || "-"}
+              </div>
+              <div>
+                {t("ai.claudeCodeAuthMode")}: {claudeAccountStatus?.authMode || "-"}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void detectClaudeCode()}
+              >
+                <MdRefresh className={busy ? "animate-spin" : ""} />
+                {t("ai.detect")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void refreshClaudeAccount()}
+              >
+                <MdRefresh className={busy ? "animate-spin" : ""} />
+                {t("ai.refreshStatus")}
               </Button>
             </div>
           </div>

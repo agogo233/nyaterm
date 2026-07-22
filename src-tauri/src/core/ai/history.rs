@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::config::{AiAgentKind, AiBackendKind};
 use crate::error::{AppError, AppResult};
 use crate::storage::{self, SettingsDocKey};
 
@@ -30,6 +31,16 @@ const AI_HISTORY_MAX_MESSAGES: usize = 2_000;
 const AI_AUDIT_MAX_LOGS: usize = 2_000;
 
 fn normalize_session_scope(session: &mut AiSession) {
+    if session.agent_kind == AiAgentKind::Nyaterm
+        && let Some(metadata) = session.backend_metadata.as_ref()
+        && metadata.backend == AiBackendKind::Codex
+    {
+        session.agent_kind = AiAgentKind::Codex;
+        if session.external_session_id.is_none() {
+            session.external_session_id = metadata.external_thread_id.clone();
+        }
+    }
+
     if session.scope.r#type == AiSessionScopeType::Unbound && session.scope.target_id.is_none() {
         if let Some(connection_id) = session.connection_id.as_ref() {
             if !connection_id.trim().is_empty()
@@ -128,6 +139,7 @@ pub(super) fn save_user_message(
         } else {
             history.sessions.push(AiSession {
                 id: session_id.clone(),
+                agent_kind: request.agent_kind.clone(),
                 scope,
                 connection_id,
                 title: if title.is_empty() {
@@ -137,6 +149,7 @@ pub(super) fn save_user_message(
                 },
                 created_at: now.clone(),
                 updated_at: now.clone(),
+                external_session_id: request.existing_external_session_id.clone(),
                 backend_metadata: None,
             });
         }
@@ -163,6 +176,12 @@ pub(super) fn validate_session_scope(
     let Some(existing) = history.sessions.iter().find(|item| item.id == session_id) else {
         return Ok(());
     };
+
+    if existing.agent_kind != request.agent_kind {
+        return Err(AppError::Config(
+            "AI session belongs to another agent type".to_string(),
+        ));
+    }
 
     if existing.scope.r#type == AiSessionScopeType::Unbound {
         return Ok(());
@@ -213,6 +232,28 @@ pub(super) fn get_session_backend_metadata(
         .into_iter()
         .find(|session| session.id == session_id)
         .and_then(|session| session.backend_metadata))
+}
+
+pub(super) fn set_session_external_session_id(
+    app: &AppHandle,
+    session_id: &str,
+    agent_kind: AiAgentKind,
+    external_session_id: String,
+) -> AppResult<()> {
+    let _ = app;
+    let session_id = session_id.to_string();
+    storage::update_settings_doc::<AiHistoryFile, _, _>(SettingsDocKey::AiHistory, |history| {
+        normalize_history(history);
+        if let Some(session) = history
+            .sessions
+            .iter_mut()
+            .find(|item| item.id == session_id)
+        {
+            session.agent_kind = agent_kind;
+            session.external_session_id = Some(external_session_id);
+        }
+        Ok(())
+    })
 }
 
 pub(super) fn set_session_backend_metadata(
@@ -342,6 +383,30 @@ mod tests {
     }
 
     #[test]
+    fn migrates_legacy_codex_thread_metadata_to_external_session() {
+        let mut session = AiSession {
+            id: "s1".to_string(),
+            agent_kind: AiAgentKind::Nyaterm,
+            scope: AiSessionScope::default(),
+            connection_id: None,
+            title: "legacy".to_string(),
+            created_at: "2026-04-28T00:00:00Z".to_string(),
+            updated_at: "2026-04-28T00:00:00Z".to_string(),
+            external_session_id: None,
+            backend_metadata: Some(AiSessionBackendMetadata {
+                backend: AiBackendKind::Codex,
+                external_thread_id: Some("thread-123".to_string()),
+                codex_terminal_tools_version: None,
+            }),
+        };
+
+        normalize_session_scope(&mut session);
+
+        assert_eq!(session.agent_kind, AiAgentKind::Codex);
+        assert_eq!(session.external_session_id.as_deref(), Some("thread-123"));
+    }
+
+    #[test]
     fn trims_ai_history_to_session_and_message_limits() {
         let mut history = AiHistoryFile::default();
         for session_idx in 0..220 {
@@ -353,11 +418,13 @@ mod tests {
             );
             history.sessions.push(AiSession {
                 id: session_id.clone(),
+                agent_kind: AiAgentKind::Nyaterm,
                 scope: AiSessionScope::default(),
                 connection_id: None,
                 title: session_id.clone(),
                 created_at: updated_at.clone(),
                 updated_at,
+                external_session_id: None,
                 backend_metadata: None,
             });
             for message_idx in 0..10 {

@@ -4,6 +4,108 @@ All notable changes to this project will be documented in this file.
 
 This changelog is inferred from release bump commits in git history (for example `chore: bump version to vX.Y.Z`) and grouped by Conventional Commit type.
 
+## [1.1.16] - 2026-07-21
+
+### Added
+
+- **temporary-link:** Consolidate temporary connection handling and extend protocol support for one-off sessions.
+- **file-explorer:** Add file copy operations, backend file-operation support, raw path-token handling, directory navigation caching, and file preview flows.
+- **quick-commands:** Add a script editor for quick commands and support copying commands.
+- **terminal:** Add customizable timestamp formats, SSH keep-alive mode settings, disconnected output flushing, improved command-suggestion keyboard navigation, and disconnected tab indicators.
+- **settings:** Add app-language saving so language changes persist through the backend.
+- **icons:** Add Kubernetes, macOS, and Android icon assets, and improve remote system icon auto-detection after session start.
+- **zmodem:** Add upload timestamp preservation and safer conflict prompts for unverified destinations.
+- **saved-connections:** Add keyboard navigation, connection element registration, and move-to-group actions.
+- **ai:** Add Codex and Claude Code integration, run-mode selection, model filtering, custom provider settings, command target context, and dynamic tool-call tracking.
+- **clipboard:** Improve clipboard writing on Windows and fallback behavior.
+- **cloud-sync:** Add connection success handling and improve portable snapshot handling for sync and backup modes.
+- **theme:** Add a theme designer dialog and enhanced theme management.
+- **i18n:** Add Traditional Chinese localization and language handling.
+- **session-targets:** Enhance Send Command target structure and compatibility.
+- **tunnel:** Add tunnel runtime state management and connection tracking.
+- **tray:** Add macOS tray icon support.
+- **monitoring:** Add an Ascend NPU monitoring panel and settings.
+- **header:** Add remote stats support and header status mode.
+
+### Changed
+
+- **header:** Streamline session icon handling.
+- **ssh:** Rename and update suppressed output handling helpers.
+- **terminal:** Update local PTY environment configuration for cross-platform compatibility.
+- **sftp:** Normalize remote directory paths and improve path joining.
+- **settings:** Rename macOS IME compatibility to a general IME compatibility setting.
+- **ai:** Remove redundant Markdown rendering from the agent step view.
+
+### Fixed
+
+- **clipboard:** Keep the arboard clipboard alive and enable Wayland support.
+- **context:** Refactor startup restore logic for tab sessions.
+- **panel:** Improve pointer-event handling in saved connection items and group nodes.
+- **cloud-sync:** Initialize OpenDAL transport for all providers and upgrade OpenDAL to 0.58.
+- **build:** Use `ring` instead of `aws-lc-rs` for the russh crypto backend.
+- **terminal:** Fix GBK encoding support and duplicate input with Fcitx IME on Linux.
+- **icons:** Improve remote system distribution matching.
+
+### Performance
+
+- **terminal:** Improve terminal output handling, performance mode behavior, and WebGL resource management.
+
+### Documentation
+
+- **i18n:** Add SSH keep-alive descriptions and update localization for new workflows.
+- **images:** Update product images for dark and light themes.
+
+## [1.1.15] - 2026-07-14
+
+### Fixed
+
+- **app:** Remove macOS-specific tab close handling and streamline effect dependencies.
+
+### CI
+
+- **gitee:** Improve the release workflow trigger and tag resolution.
+
+## [1.1.14] - 2026-07-14
+
+### Added
+
+- **telnet:** Add auto-login and startup command support.
+- **tabs:** Add tab locking to prevent accidental closure.
+- **terminal:** Add a remote color OSC guard for serial sessions, terminal zoom settings, enhanced theming and layout adjustments, and standardized input behavior.
+- **remote-stats:** Integrate remote system statistics and connection icon auto-detection.
+- **ai:** Add reasoning-effort selection to model controls.
+- **connections:** Add multi-select delete support and restore the last opened connection and expanded group state.
+- **webview:** Prevent reserved shortcuts from being intercepted by webview content.
+- **fonts:** Add JetBrainsMono Nerd Font Mono and update font defaults.
+- **xterm:** Isolate the xterm WebGL texture atlas for NyaTerm.
+- **build:** Add unlock rescue scripts and a post-install xterm WebGL patch.
+- **docker:** Add Docker sudo password handling.
+- **security-auth:** Add saved-password authentication support, credential unlock actions, credential reordering, Tab-key credential selection, and active-session-aware OTP management.
+- **appearance:** Add window transparency controls and improved font handling.
+- **i18n:** Add Korean localization.
+- **sftp:** Add SFTP settings and a remote file browser.
+- **header:** Add an unsplit action.
+
+### Fixed
+
+- **terminal:** Improve clipboard behavior in the terminal context menu, prevent stale macOS trackpad selection, and support Ctrl printable terminal keys.
+- **stats:** Ensure disk data files are created and populated correctly.
+- **panel:** Fix progress calculation for multiple units.
+- **network:** Limit connection options to SSH connections.
+- **ssh:** Ensure the post-login timer only arms during the normal phase.
+
+### Performance
+
+- **terminal:** Improve output handling and flow control.
+- **zmodem:** Add upload and download drain mechanisms.
+
+### Documentation
+
+- **readme:** Update contributor image links.
+- **installation:** Add direct Windows portable download links.
+- **images:** Add monitoring and import images for the docs site.
+- **changelog:** Update changelog entries through `1.1.13`.
+
 ## [1.1.13] - 2026-07-06
 
 ### Added

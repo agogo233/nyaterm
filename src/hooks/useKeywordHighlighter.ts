@@ -1,5 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { XTERM_PERFORMANCE_CONFIG } from "@/lib/xtermPerformance";
 import { KeywordHighlighter } from "../lib/keywordHighlighter";
 import { getBuiltinRules } from "../lib/keywordHighlightPresets";
 import type { AppSettings, KeywordHighlightRule } from "../types/global";
@@ -22,6 +23,7 @@ export function useKeywordHighlighter(
   suspended = false,
 ): void {
   const highlighterRef = useRef<KeywordHighlighter | null>(null);
+  const cacheReleaseTimerRef = useRef<number | null>(null);
   const [highlighterInstance, setHighlighterInstance] = useState<KeywordHighlighter | null>(null);
   const enabled = terminalSettings.keyword_highlights_enabled ?? false;
 
@@ -88,5 +90,25 @@ export function useKeywordHighlighter(
 
   useEffect(() => {
     highlighterInstance?.setSuspended(suspended);
+    if (!highlighterInstance) return;
+
+    if (cacheReleaseTimerRef.current !== null) {
+      window.clearTimeout(cacheReleaseTimerRef.current);
+      cacheReleaseTimerRef.current = null;
+    }
+
+    if (suspended) {
+      cacheReleaseTimerRef.current = window.setTimeout(() => {
+        cacheReleaseTimerRef.current = null;
+        highlighterInstance.releaseCaches();
+      }, XTERM_PERFORMANCE_CONFIG.lifecycle.hiddenCacheReleaseDelayMs);
+    }
+
+    return () => {
+      if (cacheReleaseTimerRef.current !== null) {
+        window.clearTimeout(cacheReleaseTimerRef.current);
+        cacheReleaseTimerRef.current = null;
+      }
+    };
   }, [highlighterInstance, suspended]);
 }

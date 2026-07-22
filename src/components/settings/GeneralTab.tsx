@@ -4,6 +4,7 @@ import { SelectItem } from "@/components/ui/select";
 import { useApp } from "@/context/AppContext";
 import { useConfigTransfer } from "@/hooks/useConfigTransfer";
 import { AVAILABLE_LANGUAGES } from "@/i18n";
+import { invoke } from "@/lib/invoke";
 import {
   SettingFieldGrid,
   SettingRow,
@@ -27,6 +28,7 @@ export function GeneralTab() {
           onValueChange={(lng) => {
             i18n.changeLanguage(lng);
             updateUi({ language: lng });
+            void invoke("save_app_language", { language: lng }).catch(() => {});
           }}
         >
           {AVAILABLE_LANGUAGES.map((lng) => (

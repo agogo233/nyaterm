@@ -399,12 +399,12 @@ export function KeyManagementTab({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 terminal-scroll">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label className="font-medium text-sm">{t("settings.keyManagement")}</Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label className="min-w-0 text-sm font-medium">{t("settings.keyManagement")}</Label>
             <Button
               variant="ghost"
               size="sm"
-              className="text-primary h-7 px-2 text-xs"
+              className="h-7 shrink-0 px-2 text-xs text-primary"
               onClick={handleAdd}
               disabled={editingId !== null}
             >
@@ -465,47 +465,49 @@ export function KeyManagementTab({
                     t={t}
                   />
                 ) : (
-                  <div className="flex items-center gap-2 px-3 py-2.5 border-b last:border-0 hover:bg-accent transition-colors">
-                    <span className="flex-1 text-xs truncate">{key.name}</span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => {
-                              runUnlockedAction(() => handleViewPrivateKey(key));
-                            }}
-                            disabled={editingId !== null || privateKeyLoading}
-                            aria-label={t("settings.viewPrivateKey")}
-                          >
-                            <KeyRound className="h-4 w-4" />
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        {lockedHint ?? t("settings.viewPrivateKey")}
-                      </TooltipContent>
-                    </Tooltip>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        void handleEdit(key);
-                      }}
-                      disabled={editingId !== null}
-                    >
-                      <MdEdit className="text-base" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-destructive hover:bg-destructive/10"
-                      onClick={() => setDeletingKey(key)}
-                      disabled={editingId !== null}
-                    >
-                      <MdDelete className="text-base" />
-                    </Button>
+                  <div className="security-auth-action-row flex flex-wrap items-start gap-2 border-b px-3 py-2.5 transition-colors last:border-0 hover:bg-accent">
+                    <span className="min-w-24 flex-1 truncate text-xs leading-8">{key.name}</span>
+                    <div className="security-auth-row-actions flex shrink-0 items-center">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => {
+                                runUnlockedAction(() => handleViewPrivateKey(key));
+                              }}
+                              disabled={editingId !== null || privateKeyLoading}
+                              aria-label={t("settings.viewPrivateKey")}
+                            >
+                              <KeyRound className="h-4 w-4" />
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {lockedHint ?? t("settings.viewPrivateKey")}
+                        </TooltipContent>
+                      </Tooltip>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => {
+                          void handleEdit(key);
+                        }}
+                        disabled={editingId !== null}
+                      >
+                        <MdEdit className="text-base" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:bg-destructive/10"
+                        onClick={() => setDeletingKey(key)}
+                        disabled={editingId !== null}
+                      >
+                        <MdDelete className="text-base" />
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

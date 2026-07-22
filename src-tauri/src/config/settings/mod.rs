@@ -11,11 +11,12 @@ mod transfer;
 mod translation;
 
 pub use ai::{
-    AI_REQUEST_USER_AGENT_DEFAULT, AgentCommandExecutionMode, AiBackendKind, AiCustomActionConfig,
-    AiMode, AiModelConfigItem, AiModelSource, AiProviderCredential, AiProviderKind,
-    AiProviderProfile, AiReasoningEffort, AiSettings, CodexIntegrationSettings, CodexThreadMode,
-    RiskLevel, ai_model_id_for_credential, ai_model_id_for_provider, decrypt_ai_settings,
-    encrypt_ai_settings, mask_ai_settings, merge_masked_ai_settings, normalize_ai_settings,
+    AI_REQUEST_USER_AGENT_DEFAULT, AgentCommandExecutionMode, AiAgentKind, AiBackendKind,
+    AiCustomActionConfig, AiMode, AiModelConfigItem, AiModelSource, AiPermissionMode,
+    AiProviderCredential, AiProviderKind, AiProviderProfile, AiReasoningEffort, AiSettings,
+    ClaudeCodeIntegrationSettings, CodexIntegrationSettings, CodexThreadMode, RiskLevel,
+    ai_model_id_for_credential, ai_model_id_for_provider, decrypt_ai_settings, encrypt_ai_settings,
+    mask_ai_settings, merge_masked_ai_settings, normalize_ai_settings,
 };
 pub use appearance::{AppearanceSettings, TerminalColorsConfig, ThemeColorsConfig, ThemeConfig};
 pub use diagnostics::{DiagnosticsLogLevel, DiagnosticsSettings};
@@ -118,6 +119,12 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
         }
     }
     if normalize_ai_settings(&mut settings.ai) {
+        migrated = true;
+    }
+    if migrate_terminal_timestamp_format(&raw_settings, &mut settings.terminal) {
+        migrated = true;
+    }
+    if settings.terminal.normalize_timestamp_format() {
         migrated = true;
     }
     if settings.appearance.normalize_terminal_font_family() {
@@ -381,6 +388,33 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
     Ok(settings)
 }
 
+fn migrate_terminal_timestamp_format(
+    raw_settings: &serde_json::Value,
+    terminal: &mut TerminalSettings,
+) -> bool {
+    let Some(raw_terminal) = raw_settings
+        .get("terminal")
+        .and_then(|terminal| terminal.as_object())
+    else {
+        return false;
+    };
+
+    if raw_terminal.contains_key("timestamp_format") {
+        return false;
+    }
+
+    terminal.timestamp_format = if raw_terminal
+        .get("show_timestamp_milliseconds")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        terminal::TIMESTAMP_FORMAT_WITH_MILLISECONDS.to_string()
+    } else {
+        terminal::DEFAULT_TIMESTAMP_FORMAT.to_string()
+    };
+    true
+}
+
 fn persist_migrated_app_settings(app: &AppHandle, settings: &AppSettings) {
     let mut persisted = settings.clone();
     let Ok(cloud_sync) = encrypt_cloud_sync_settings(persisted.cloud_sync.clone()) else {
@@ -398,4 +432,63 @@ fn persist_migrated_app_settings(app: &AppHandle, settings: &AppSettings) {
 pub fn save_app_settings(app: &AppHandle, config: &AppSettings) -> AppResult<()> {
     let _ = app;
     storage::save_settings_doc(SettingsDocKey::AppSettings, config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TerminalSettings, migrate_terminal_timestamp_format};
+
+    #[test]
+    fn migrates_legacy_timestamp_milliseconds_to_format() {
+        let raw_settings = serde_json::json!({
+            "terminal": {
+                "show_timestamps": true,
+                "show_timestamp_milliseconds": true
+            }
+        });
+        let mut terminal = TerminalSettings::default();
+
+        assert!(migrate_terminal_timestamp_format(
+            &raw_settings,
+            &mut terminal
+        ));
+        assert_eq!(terminal.timestamp_format, "[HH:mm:ss.SSS]");
+    }
+
+    #[test]
+    fn migrates_legacy_timestamp_seconds_to_format() {
+        let raw_settings = serde_json::json!({
+            "terminal": {
+                "show_timestamps": true,
+                "show_timestamp_milliseconds": false
+            }
+        });
+        let mut terminal = TerminalSettings::default();
+
+        assert!(migrate_terminal_timestamp_format(
+            &raw_settings,
+            &mut terminal
+        ));
+        assert_eq!(terminal.timestamp_format, "[HH:mm:ss]");
+    }
+
+    #[test]
+    fn keeps_existing_timestamp_format() {
+        let raw_settings = serde_json::json!({
+            "terminal": {
+                "timestamp_format": "HH:mm:ss",
+                "show_timestamp_milliseconds": true
+            }
+        });
+        let mut terminal = TerminalSettings {
+            timestamp_format: "HH:mm:ss".to_string(),
+            ..TerminalSettings::default()
+        };
+
+        assert!(!migrate_terminal_timestamp_format(
+            &raw_settings,
+            &mut terminal
+        ));
+        assert_eq!(terminal.timestamp_format, "HH:mm:ss");
+    }
 }

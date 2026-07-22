@@ -15,7 +15,7 @@ import { useApp } from "@/context/AppContext";
 import { invoke } from "@/lib/invoke";
 import { filterEnqueueUploadRequests } from "@/lib/transferDuplicateResolution";
 
-export type TransferDirection = "upload" | "download";
+export type TransferDirection = "upload" | "download" | "copy";
 export type TransferKind = "file" | "directory";
 export type TransferSource = "sftp" | "zmodem";
 export type TransferStatus =
@@ -43,6 +43,20 @@ export interface EnqueueDownloadRequest {
   kind: TransferKind;
 }
 
+export interface CopyEndpointRequest {
+  sessionId: string;
+  kind: "local" | "remote";
+  path: string;
+}
+
+export interface EnqueueCopyRequest {
+  fileName: string;
+  kind: TransferKind;
+  source: CopyEndpointRequest;
+  target: CopyEndpointRequest;
+  duplicateStrategyOverride?: string;
+}
+
 interface QueuedTransferRequest {
   sessionId: string;
   fileName: string;
@@ -50,6 +64,8 @@ interface QueuedTransferRequest {
   remotePath: string;
   kind: TransferKind;
   direction: TransferDirection;
+  sourceEndpoint?: CopyEndpointRequest;
+  targetEndpoint?: CopyEndpointRequest;
   duplicateStrategyOverride?: string;
 }
 
@@ -72,6 +88,12 @@ export interface TransferItem {
   localPath: string;
   direction: TransferDirection;
   kind: TransferKind;
+  sourceSessionId?: string;
+  sourceKind?: "local" | "remote";
+  sourcePath?: string;
+  targetSessionId?: string;
+  targetKind?: "local" | "remote";
+  targetPath?: string;
   parentId?: string;
   status: TransferStatus;
   size: number;
@@ -97,6 +119,7 @@ interface TransferContextValue {
   retryTransfer: (item: TransferItem) => Promise<void>;
   enqueueUploads: (uploads: EnqueueUploadRequest[]) => string[];
   enqueueDownloads: (downloads: EnqueueDownloadRequest[]) => string[];
+  enqueueCopies: (copies: EnqueueCopyRequest[]) => string[];
   upsertExternalTransferProgress: (progress: ExternalTransferProgress) => void;
   completeExternalTransfer: (id: string) => void;
   failExternalTransfer: (id: string, reason: string) => void;
@@ -412,13 +435,22 @@ export function TransferProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void queueRevision;
+    const copyConcurrency = Math.max(
+      1,
+      Math.min(
+        getBackgroundTransferConcurrency(appSettings.transfer.download_threads),
+        getBackgroundTransferConcurrency(appSettings.transfer.upload_threads),
+      ),
+    );
     const maxRunningByDirection: Record<TransferDirection, number> = {
       download: getBackgroundTransferConcurrency(appSettings.transfer.download_threads),
       upload: getBackgroundTransferConcurrency(appSettings.transfer.upload_threads),
+      copy: copyConcurrency,
     };
     const runningByDirection: Record<TransferDirection, number> = {
       download: 0,
       upload: 0,
+      copy: 0,
     };
 
     for (const transfer of transferMap.values()) {
@@ -504,7 +536,21 @@ export function TransferProvider({ children }: { children: ReactNode }) {
 
       void (async () => {
         try {
-          if (request.direction === "upload" && request.kind === "directory") {
+          if (request.direction === "copy") {
+            if (!request.sourceEndpoint || !request.targetEndpoint) {
+              throw new Error("Copy transfer is missing source or target endpoint");
+            }
+            await invoke("copy_file_entry", {
+              request: {
+                source: request.sourceEndpoint,
+                target: request.targetEndpoint,
+                fileName: request.fileName,
+                isDirectory: request.kind === "directory",
+                transferId: nextQueued.id,
+                duplicateStrategyOverride: request.duplicateStrategyOverride,
+              },
+            });
+          } else if (request.direction === "upload" && request.kind === "directory") {
             await invoke("upload_local_directory", {
               sessionId: request.sessionId,
               localPath: request.localPath,
@@ -767,6 +813,22 @@ export function TransferProvider({ children }: { children: ReactNode }) {
       remotePath: item.remotePath,
       kind: item.kind,
       direction: item.direction,
+      sourceEndpoint:
+        item.direction === "copy" && item.sourceSessionId && item.sourceKind && item.sourcePath
+          ? {
+              sessionId: item.sourceSessionId,
+              kind: item.sourceKind,
+              path: item.sourcePath,
+            }
+          : undefined,
+      targetEndpoint:
+        item.direction === "copy" && item.targetSessionId && item.targetKind && item.targetPath
+          ? {
+              sessionId: item.targetSessionId,
+              kind: item.targetKind,
+              path: item.targetPath,
+            }
+          : undefined,
     });
     setTransferMap((prev) => {
       const next = new Map(prev);
@@ -810,6 +872,12 @@ export function TransferProvider({ children }: { children: ReactNode }) {
           localPath: transfer.localPath,
           direction: transfer.direction,
           kind: transfer.kind,
+          sourceSessionId: transfer.sourceEndpoint?.sessionId,
+          sourceKind: transfer.sourceEndpoint?.kind,
+          sourcePath: transfer.sourceEndpoint?.path,
+          targetSessionId: transfer.targetEndpoint?.sessionId,
+          targetKind: transfer.targetEndpoint?.kind,
+          targetPath: transfer.targetEndpoint?.path,
           status: "queued",
           size: 0,
           bytesTransferred: 0,
@@ -847,6 +915,24 @@ export function TransferProvider({ children }: { children: ReactNode }) {
     (downloads: EnqueueDownloadRequest[]) =>
       enqueueTransfers(
         downloads.map((download) => ({ ...download, direction: "download" as const })),
+      ),
+    [enqueueTransfers],
+  );
+
+  const enqueueCopies = useCallback(
+    (copies: EnqueueCopyRequest[]) =>
+      enqueueTransfers(
+        copies.map((copy) => ({
+          sessionId: copy.target.sessionId,
+          fileName: copy.fileName,
+          localPath: copy.target.kind === "local" ? copy.target.path : copy.source.path,
+          remotePath: copy.target.kind === "remote" ? copy.target.path : copy.source.path,
+          kind: copy.kind,
+          direction: "copy" as const,
+          sourceEndpoint: copy.source,
+          targetEndpoint: copy.target,
+          duplicateStrategyOverride: copy.duplicateStrategyOverride,
+        })),
       ),
     [enqueueTransfers],
   );
@@ -950,6 +1036,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
       retryTransfer,
       enqueueUploads,
       enqueueDownloads,
+      enqueueCopies,
       upsertExternalTransferProgress,
       completeExternalTransfer,
       failExternalTransfer,
@@ -965,6 +1052,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
       retryTransfer,
       enqueueUploads,
       enqueueDownloads,
+      enqueueCopies,
       upsertExternalTransferProgress,
       completeExternalTransfer,
       failExternalTransfer,

@@ -220,6 +220,7 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
     isPointerDragEnabled,
     dragTarget,
     selectedConnectionIds,
+    keyboardActiveConnectionId,
     savedConnections,
     savedGroups,
     handleConnect,
@@ -229,6 +230,7 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
     requestMoveConnectionToGroup,
     handleConnectionSelectionStart,
     handleConnectionContextMenu,
+    registerConnectionElement,
     onEditConnection,
     requestDeleteConnection,
     setRenamingConn,
@@ -252,16 +254,23 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
   const iconDef = resolveConnectionIcon(conn.icon);
   const ConnIcon = iconDef.icon;
   const isSelected = selectedConnectionIds.has(conn.id);
+  const isKeyboardActive = keyboardActiveConnectionId === conn.id;
   const connectLabel =
     isSelected && selectedConnectionIds.size > 1
       ? t("savedConnections.connectSelected")
       : t("savedConnections.connect");
   const directConnectLabel = t("savedConnections.connect");
-  const iconStyle = { color: isSelected ? "var(--df-primary)" : iconDef.color };
+  const iconStyle = { color: isSelected || isKeyboardActive ? "var(--df-primary)" : iconDef.color };
   const indentLeft = indented ? `${8 + depth * 16 + 16}px` : "0.5rem";
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsOpenTimerRef = useRef<number | null>(null);
   const suppressDetailsUntilLeaveRef = useRef(false);
+  const registerSelf = useCallback(
+    (element: HTMLDivElement | null) => {
+      registerConnectionElement(conn.id, element);
+    },
+    [conn.id, registerConnectionElement],
+  );
 
   const clearDetailsOpenTimer = useCallback(() => {
     if (detailsOpenTimerRef.current) {
@@ -305,6 +314,7 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
+          ref={registerSelf}
           data-saved-drop-type="connection"
           data-saved-drop-id={conn.id}
           className="relative min-w-full w-max"
@@ -382,7 +392,10 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
               ...(indented ? { paddingLeft: `${8 + depth * 16 + 16}px` } : undefined),
               backgroundColor: isSelected
                 ? "color-mix(in srgb, var(--df-primary) 10%, transparent)"
-                : undefined,
+                : isKeyboardActive
+                  ? "color-mix(in srgb, var(--df-primary) 7%, transparent)"
+                  : undefined,
+              boxShadow: isKeyboardActive ? "inset 0 0 0 1px var(--df-primary)" : undefined,
             }}
             onMouseDown={(e) => {
               closeAndSuppressDetails();
@@ -407,7 +420,10 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
                   <ConnIcon className="text-sm shrink-0" style={iconStyle} />
                   <span
                     className="shrink-0 whitespace-nowrap text-xs font-medium"
-                    style={{ color: isSelected ? "var(--df-primary)" : "var(--df-text)" }}
+                    style={{
+                      color:
+                        isSelected || isKeyboardActive ? "var(--df-primary)" : "var(--df-text)",
+                    }}
                   >
                     {conn.name}
                   </span>

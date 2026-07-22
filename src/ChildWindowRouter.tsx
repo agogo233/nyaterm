@@ -13,6 +13,7 @@ const NewSessionPage = lazy(() => import("./pages/NewSessionPage"));
 const QuickCommandPage = lazy(() => import("./pages/QuickCommandPage"));
 const AutoUploadPage = lazy(() => import("./pages/FileUploadPage"));
 const RemoteFileEditorPage = lazy(() => import("./pages/RemoteFileEditorPage"));
+const FilePreviewPage = lazy(() => import("./pages/FilePreviewPage"));
 
 const PAGES: Record<string, React.ComponentType> = {
   settings: SettingsPage,
@@ -20,6 +21,7 @@ const PAGES: Record<string, React.ComponentType> = {
   "quick-command": QuickCommandPage,
   "auto-upload": AutoUploadPage,
   "file-editor": RemoteFileEditorPage,
+  "file-preview": FilePreviewPage,
 };
 
 export default function ChildWindowRouter({ windowType }: { windowType: string }) {

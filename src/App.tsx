@@ -73,7 +73,7 @@ import {
   type TerminalWindowNode,
   updateTerminalWindowSplitRatio,
 } from "./lib/tabWindows";
-import type { TemporarySshLinkConfig } from "./lib/temporarySshLink";
+import type { TemporaryLinkConfig } from "./lib/temporaryLink";
 import {
   captureTerminalReconnectContent,
   preserveTerminalReconnectContent,
@@ -175,11 +175,44 @@ async function createSessionForConnection(
   }
 }
 
-async function createTemporarySshSession(config: TemporarySshLinkConfig, createRequestId?: string) {
-  return invoke<string>("create_temporary_ssh_session", {
-    config,
-    createRequestId,
-  });
+async function createTemporarySession(config: TemporaryLinkConfig, createRequestId?: string) {
+  switch (config.protocol) {
+    case "telnet":
+      return invoke<string>("create_telnet_session", {
+        connectionId: null,
+        host: config.host,
+        port: config.port,
+        name: config.name,
+        createRequestId,
+        startupCommand: null,
+      });
+    case "serial":
+      return invoke<string>("create_serial_session", {
+        connectionId: null,
+        portName: config.portName,
+        baudRate: config.baudRate,
+        name: config.name,
+        createRequestId,
+      });
+    default: {
+      const { protocol: _protocol, ...sshConfig } = config;
+      return invoke<string>("create_temporary_ssh_session", {
+        config: sshConfig,
+        createRequestId,
+      });
+    }
+  }
+}
+
+function getTemporaryLinkSessionType(config: TemporaryLinkConfig): SessionType {
+  switch (config.protocol) {
+    case "telnet":
+      return "Telnet";
+    case "serial":
+      return "Serial";
+    default:
+      return "SSH";
+  }
 }
 
 function buildStartupCommandPayload(startupCommand?: StartupCommandRequest) {
@@ -2319,12 +2352,12 @@ function App() {
   }, [isLocked]);
 
   const handleTemporarySshConnect = useCallback(
-    async (config: TemporarySshLinkConfig) => {
-      const pending = addPendingTab(config.name, "SSH");
+    async (config: TemporaryLinkConfig) => {
+      const pending = addPendingTab(config.name, getTemporaryLinkSessionType(config));
       const { tabId, createRequestId } = pending;
 
       try {
-        const sessionId = await createTemporarySshSession(config, createRequestId);
+        const sessionId = await createTemporarySession(config, createRequestId);
         if (!hasTab(tabId)) {
           await closeStaleCreatedSession(sessionId);
           return;
@@ -2338,8 +2371,8 @@ function App() {
         const errorMessage = getErrorMessage(error);
         logger.error({
           domain: "session.lifecycle",
-          event: "temporary_ssh.open_failed",
-          message: "Temporary SSH connection failed",
+          event: "temporary_link.open_failed",
+          message: "Temporary connection failed",
           error,
         });
         markTabConnectionFailed(tabId, errorMessage);

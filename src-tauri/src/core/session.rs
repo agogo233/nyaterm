@@ -99,6 +99,8 @@ fn default_remote_file_browser_enabled() -> bool {
 pub enum SessionCommand {
     /// Frontend listener is ready — flush buffered output and start emitting.
     Attach,
+    /// Frontend renderer has been hibernated; keep the session alive but stop emitting output.
+    DetachRenderer,
     /// Input to send to the terminal.
     Write { data: Vec<u8>, automated: bool },
     /// Temporarily stop reading output from the underlying terminal source.
@@ -125,6 +127,7 @@ pub enum SessionCommand {
     ZmodemAcceptUpload {
         files: Vec<std::path::PathBuf>,
         conflict_mode: ZmodemUploadConflictMode,
+        preserve_timestamps: bool,
     },
     /// ZMODEM: user cancelled the ZMODEM transfer.
     ZmodemCancel,

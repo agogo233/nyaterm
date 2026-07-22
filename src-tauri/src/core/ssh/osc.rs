@@ -95,10 +95,6 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
                 " __nyaterm_prompt(){{",
                 " __nyaterm_prune_history;",
                 " __nyaterm_emit_command;",
-                " if [ -n \"${{NYATERM_READY_PENDING:-}}\" ]; then",
-                " unset NYATERM_READY_PENDING;",
-                " printf '{}';",
-                " fi;",
                 " printf '\\033]7;file://%s%s\\007' \"$(__nyaterm_host)\" \"$PWD\";",
                 " }};",
                 " __nyaterm_install_prompt(){{",
@@ -116,7 +112,10 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
                 " fi;",
                 " }};",
                 " __nyaterm_install_prompt;",
-                " printf '' 2>/dev/null\n",
+                " if [ -n \"${{NYATERM_READY_PENDING:-}}\" ]; then",
+                " unset NYATERM_READY_PENDING;",
+                " printf '{}';",
+                " fi\n",
             ),
             ready_osc,
         )),
@@ -128,10 +127,6 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
                 " export NYATERM_INJ=1;",
                 " __nyaterm_host(){{ hostname 2>/dev/null || printf localhost; }};",
                 " __nyaterm_emit(){{",
-                " if [ -n \"${{NYATERM_READY_PENDING:-}}\" ]; then",
-                " unset NYATERM_READY_PENDING;",
-                " printf '{}';",
-                " fi;",
                 " printf '\\033]7;file://%s%s\\007' \"$(__nyaterm_host)\" \"$PWD\";",
                 " }};",
                 " __nyaterm_preexec(){{",
@@ -145,7 +140,10 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
                 " [[ \" ${{precmd_functions[*]}} \" == *\" __nyaterm_emit \"* ]] || precmd_functions+=(__nyaterm_emit);",
                 " [[ \" ${{preexec_functions[*]}} \" == *\" __nyaterm_preexec \"* ]] || preexec_functions+=(__nyaterm_preexec);",
                 " fc -P 2>/dev/null\n",
-                " printf '' 2>/dev/null\n",
+                " if [ -n \"${{NYATERM_READY_PENDING:-}}\" ]; then",
+                " unset NYATERM_READY_PENDING;",
+                " printf '{}';",
+                " fi\n",
             ),
             ready_osc,
         )),
@@ -156,10 +154,6 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
                 " set -g NYATERM_READY_PENDING 1;",
                 " set -gx NYATERM_INJ 1;",
                 " function __nyaterm_emit --on-event fish_prompt;",
-                " if set -q NYATERM_READY_PENDING;",
-                " set -e NYATERM_READY_PENDING;",
-                " printf '{}';",
-                " end;",
                 " printf '\\033]7;file://%s%s\\007' (hostname) $PWD;",
                 " end;",
                 " function __nyaterm_preexec --on-event fish_preexec;",
@@ -171,7 +165,10 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
                 " end;",
                 " end;",
                 " set -e fish_private_mode 2>/dev/null\n",
-                " printf '' 2>/dev/null\n",
+                " if set -q NYATERM_READY_PENDING;",
+                " set -e NYATERM_READY_PENDING;",
+                " printf '{}';",
+                " end\n",
             ),
             ready_osc,
         )),
@@ -189,15 +186,15 @@ pub fn activation_script(shell: ShellKind, ready_marker: &str) -> Option<String>
 
     match shell {
         ShellKind::Bash => Some(format!(
-            " NYATERM_PRUNE_HISTORY=1; NYATERM_READY_PENDING=1; export NYATERM_INJ=1; export NYATERM_READY_MARKER=\"$(printf '{}')\"; [ -r \"$HOME/.config/nyaterm/shell-integration.bash\" ] && . \"$HOME/.config/nyaterm/shell-integration.bash\"; __nyaterm_install_prompt 2>/dev/null; printf '' 2>/dev/null\n",
+            " NYATERM_PRUNE_HISTORY=1; NYATERM_READY_PENDING=1; export NYATERM_INJ=1; export NYATERM_READY_MARKER=\"$(printf '{}')\"; [ -r \"$HOME/.config/nyaterm/shell-integration.bash\" ] && . \"$HOME/.config/nyaterm/shell-integration.bash\"; __nyaterm_install_prompt 2>/dev/null; if [ -n \"${{NYATERM_READY_PENDING:-}}\" ]; then unset NYATERM_READY_PENDING; printf '%s' \"${{NYATERM_READY_MARKER-}}\"; fi\n",
             ready_printf
         )),
         ShellKind::Zsh => Some(format!(
-            " fc -p /dev/null 2>/dev/null\n NYATERM_READY_PENDING=1; export NYATERM_INJ=1; export NYATERM_READY_MARKER=\"$(printf '{}')\"; [ -r \"$HOME/.config/nyaterm/shell-integration.zsh\" ] && . \"$HOME/.config/nyaterm/shell-integration.zsh\"; __nyaterm_install_prompt 2>/dev/null; fc -P 2>/dev/null\n printf '' 2>/dev/null\n",
+            " fc -p /dev/null 2>/dev/null\n NYATERM_READY_PENDING=1; export NYATERM_INJ=1; export NYATERM_READY_MARKER=\"$(printf '{}')\"; [ -r \"$HOME/.config/nyaterm/shell-integration.zsh\" ] && . \"$HOME/.config/nyaterm/shell-integration.zsh\"; __nyaterm_install_prompt 2>/dev/null; fc -P 2>/dev/null\n if [ -n \"${{NYATERM_READY_PENDING:-}}\" ]; then unset NYATERM_READY_PENDING; printf '%s' \"${{NYATERM_READY_MARKER-}}\"; fi\n",
             ready_printf
         )),
         ShellKind::Fish => Some(format!(
-            " set fish_private_mode 1 2>/dev/null\n set -g NYATERM_READY_PENDING 1; set -gx NYATERM_INJ 1; set -gx NYATERM_READY_MARKER (printf '{}'); if test -r \"$HOME/.config/nyaterm/shell-integration.fish\"; source \"$HOME/.config/nyaterm/shell-integration.fish\"; end; __nyaterm_install_prompt 2>/dev/null; set -e fish_private_mode 2>/dev/null\n printf '' 2>/dev/null\n",
+            " set fish_private_mode 1 2>/dev/null\n set -g NYATERM_READY_PENDING 1; set -gx NYATERM_INJ 1; set -gx NYATERM_READY_MARKER (printf '{}'); if test -r \"$HOME/.config/nyaterm/shell-integration.fish\"; source \"$HOME/.config/nyaterm/shell-integration.fish\"; end; __nyaterm_install_prompt 2>/dev/null; set -e fish_private_mode 2>/dev/null\n if set -q NYATERM_READY_PENDING; set -e NYATERM_READY_PENDING; printf '%s' \"$NYATERM_READY_MARKER\"; end\n",
             ready_printf
         )),
         ShellKind::PosixSh | ShellKind::Unknown => None,
@@ -577,8 +574,9 @@ fn parse_command_payload(payload: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        MANAGED_BLOCK_END, MANAGED_BLOCK_START, OscStripper, ShellKind, build_ready_marker,
-        injection_script, persistent_script, rc_managed_block, replace_managed_block,
+        MANAGED_BLOCK_END, MANAGED_BLOCK_START, OscStripper, ShellKind, activation_script,
+        build_ready_marker, injection_script, persistent_script, rc_managed_block,
+        replace_managed_block,
     };
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -629,33 +627,32 @@ mod tests {
     }
 
     #[test]
-    fn interactive_shell_ready_marker_is_emitted_from_prompt_hook() {
+    fn interactive_shell_ready_marker_is_emitted_after_hook_installation() {
         let ready_marker = build_ready_marker("session-1");
         let ready_pos = |script: &str| script.find("NyaTermReady:session-1").expect("ready marker");
-        let tail_printf_pos = |script: &str| {
-            script
-                .rfind("printf '' 2>/dev/null\n")
-                .expect("empty trailing printf")
+        let assert_no_empty_tail_printf = |script: &str| {
+            assert!(!script.contains("printf '' 2>/dev/null"));
         };
 
         let bash = injection_script(ShellKind::Bash, &ready_marker).expect("bash injection script");
         assert!(bash.find("__nyaterm_prompt(){{").expect("bash prompt hook") < ready_pos(&bash));
         assert!(
-            ready_pos(&bash)
-                < bash
-                    .find("printf '\\033]7;file://%s%s\\007'")
-                    .expect("bash cwd emit")
+            bash.find(" __nyaterm_install_prompt;")
+                .expect("bash prompt install")
+                < ready_pos(&bash)
         );
-        assert!(ready_pos(&bash) < tail_printf_pos(&bash));
+        assert!(bash.contains("printf '\\033]7;file://%s%s\\007'"));
+        assert_no_empty_tail_printf(&bash);
 
         let zsh = injection_script(ShellKind::Zsh, &ready_marker).expect("zsh injection script");
         assert!(zsh.find("__nyaterm_emit(){{").expect("zsh prompt hook") < ready_pos(&zsh));
         assert!(
             zsh.find(" fc -P 2>/dev/null\n")
                 .expect("zsh history restore")
-                < tail_printf_pos(&zsh)
+                < ready_pos(&zsh)
         );
-        assert!(ready_pos(&zsh) < tail_printf_pos(&zsh));
+        assert!(zsh.contains("printf '\\033]7;file://%s%s\\007'"));
+        assert_no_empty_tail_printf(&zsh);
 
         let fish = injection_script(ShellKind::Fish, &ready_marker).expect("fish injection script");
         assert!(
@@ -666,12 +663,26 @@ mod tests {
         assert!(
             fish.find(" set -e fish_private_mode 2>/dev/null\n")
                 .expect("fish private mode cleanup")
-                < tail_printf_pos(&fish)
+                < ready_pos(&fish)
         );
-        assert!(ready_pos(&fish) < tail_printf_pos(&fish));
+        assert!(fish.contains("printf '\\033]7;file://%s%s\\007'"));
+        assert_no_empty_tail_printf(&fish);
 
+        assert!(bash.contains("NyaTermCommand:%s"));
         assert!(zsh.contains("NyaTermCommand:%s"));
         assert!(fish.contains("NyaTermCommand:%s"));
+    }
+
+    #[test]
+    fn activation_scripts_emit_ready_without_empty_tail_printf() {
+        let ready_marker = build_ready_marker("session-1");
+
+        for shell in [ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish] {
+            let script = activation_script(shell, &ready_marker).expect("activation script");
+
+            assert!(script.contains("NyaTermReady:session-1"));
+            assert!(!script.contains("printf '' 2>/dev/null"));
+        }
     }
 
     #[test]

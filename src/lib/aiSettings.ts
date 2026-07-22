@@ -590,7 +590,7 @@ function credentialFromProfile(profile: AIProviderProfile): AIProviderCredential
 }
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
-  schema_version: 4,
+  schema_version: 5,
   enabled: false,
   context_line_limit: 200,
   redaction_enabled: true,
@@ -601,6 +601,8 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   active_profile_id: "openai",
   provider_profiles: DEFAULT_PROVIDER_PROFILES,
   default_mode: "ask",
+  default_agent_kind: "nyaterm",
+  external_agent_permission_mode: "confirm",
   default_reasoning_effort: "auto",
   default_model_id: null,
   models: [],
@@ -617,9 +619,22 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   codex: {
     enabled: false,
     executable_path: null,
+    runtime: "app_server",
     default_model: null,
+    config_directory: null,
+    permission_mode: "confirm",
+    tool_integration_mode: "nyaterm_mcp",
     thread_mode: "persistent",
     remote_terminal_agent_enabled: false,
+  },
+  claude_code: {
+    enabled: false,
+    executable_path: null,
+    runtime: "stream_json_cli",
+    default_model: null,
+    config_directory: null,
+    permission_mode: "confirm",
+    tool_integration_mode: "nyaterm_mcp",
   },
 };
 
