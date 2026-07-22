@@ -413,23 +413,23 @@ jobs:
           script: |
             const tag = context.ref.replace('refs/tags/', '');
             const version = tag.replace(/^v/, '');
-  
+
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-  
+
             const { data: release } = await github.rest.repos.getReleaseByTag({
               owner,
               repo,
               tag,
             });
-  
+
             const assets = release.assets || [];
-  
+
             function mapSigToPlatforms(name) {
               const baseName = name.replace(/\.sig$/, '');
               const lower = name.toLowerCase();
               const keys = [];
-  
+
               if (lower.endsWith('.app.tar.gz.sig')) {
                 if (lower.includes('macos_x64') || lower.includes('x64') || lower.includes('x86_64')) {
                   keys.push('darwin-x86_64');
@@ -455,10 +455,10 @@ jobs:
                   keys.push('windows-aarch64');
                 }
               }
-  
+
               return { keys, baseName };
             }
-  
+
             async function downloadAssetText(asset) {
               const response = await fetch(asset.url, {
                 headers: {
@@ -469,35 +469,35 @@ jobs:
                 },
                 redirect: 'follow',
               });
-  
+
               if (!response.ok) {
                 const body = await response.text().catch(() => '');
                 throw new Error(
                   `Failed to download ${asset.name}: HTTP ${response.status} ${response.statusText} ${body.slice(0, 300)}`
                 );
               }
-  
+
               return (await response.text()).trim();
             }
-  
+
             const platforms = {};
             const sigAssets = assets.filter(asset => asset.name.endsWith('.sig'));
-  
+
             for (const sigAsset of sigAssets) {
               const { keys, baseName } = mapSigToPlatforms(sigAsset.name);
-  
+
               if (keys.length === 0) {
                 console.log(`Skip non-updater signature asset: ${sigAsset.name}`);
                 continue;
               }
-  
+
               const binaryAsset = assets.find(asset => asset.name === baseName);
-  
+
               if (!binaryAsset) {
                 console.log(`Warning: no binary asset found for ${baseName}`);
                 continue;
               }
-  
+
               let signature;
               try {
                 signature = await downloadAssetText(sigAsset);
@@ -505,7 +505,7 @@ jobs:
                 console.log(`Warning: ${error.message}`);
                 continue;
               }
-  
+
               for (const key of keys) {
                 platforms[key] = {
                   signature,
@@ -513,33 +513,48 @@ jobs:
                 };
               }
             }
-  
+
             if (Object.keys(platforms).length === 0) {
               core.setFailed('No updater platforms generated. Check release asset names and .sig download permissions.');
               return;
             }
-  
+
+            const requiredPortablePlatforms = [
+              'windows-x86_64-portable',
+              'windows-aarch64-portable',
+            ];
+
+            for (const platform of requiredPortablePlatforms) {
+              const item = platforms[platform];
+
+              if (!item?.url || !item?.signature) {
+                throw new Error(
+                  `latest.json is missing signed portable target: ${platform}`
+                );
+              }
+            }
+
             const latestJson = {
               version,
               notes: release.body || '',
               pub_date: release.published_at || new Date().toISOString(),
               platforms,
             };
-  
+
             const existing = assets.find(asset => asset.name === 'latest.json');
-  
+
             if (existing) {
               console.log('Deleting existing latest.json');
-  
+
               await github.rest.repos.deleteReleaseAsset({
                 owner,
                 repo,
                 asset_id: existing.id,
               });
             }
-  
+
             const content = JSON.stringify(latestJson, null, 2);
-  
+
             await github.rest.repos.uploadReleaseAsset({
               owner,
               repo,
@@ -551,7 +566,7 @@ jobs:
                 'content-length': Buffer.byteLength(content),
               },
             });
-  
+
             console.log(`Uploaded latest.json with ${Object.keys(platforms).length} platform key(s).`);
 
   cleanup-sigs:
@@ -767,6 +782,25 @@ jobs:
             throw new Error('latest.json does not contain platforms');
           }
 
+          function verifySignedPortableTargets(source) {
+            const requiredPortablePlatforms = [
+              'windows-x86_64-portable',
+              'windows-aarch64-portable',
+            ];
+
+            for (const platform of requiredPortablePlatforms) {
+              const item = manifest.platforms?.[platform];
+
+              if (!item?.url || !item?.signature) {
+                throw new Error(
+                  `${source} is missing signed portable target: ${platform}`
+                );
+              }
+            }
+          }
+
+          verifySignedPortableTargets('latest.json');
+
           for (const [platform, item] of Object.entries(manifest.platforms)) {
             if (!item.url) {
               throw new Error(`Missing url for platforms.${platform}`);
@@ -783,6 +817,8 @@ jobs:
 
             item.url = `${baseUrl}/releases/${tag}/${encodeURIComponent(filename)}`;
           }
+
+          verifySignedPortableTargets('r2-latest.json');
 
           fs.writeFileSync(outputPath, JSON.stringify(manifest, null, 2) + '\n');
 
@@ -868,33 +904,46 @@ jobs:
         run: |
           set -euo pipefail
 
-          curl -fsSL "${DOWNLOAD_BASE_URL}/latest.json" | node -e "
-            let input = '';
-            process.stdin.on('data', chunk => input += chunk);
-            process.stdin.on('end', () => {
-              const json = JSON.parse(input);
-              const requiredPortablePlatforms = [
-                'windows-x86_64-portable',
-                'windows-aarch64-portable',
-              ];
+          verify_manifest() {
+            local source="$1"
 
-              for (const platform of requiredPortablePlatforms) {
-                const item = json.platforms?.[platform];
-                if (!item?.url || !item?.signature) {
-                  throw new Error(
-                    'R2 latest.json is missing a signed portable target: ' + platform
-                  );
-                }
+            node -e "
+              const source = process.argv[1];
+              let input = '';
+              process.stdin.on('data', chunk => input += chunk);
+              process.stdin.on('end', () => {
+                const json = JSON.parse(input);
+                const requiredPortablePlatforms = [
+                  'windows-x86_64-portable',
+                  'windows-aarch64-portable',
+                ];
                 const portableUrlPrefix = process.env.DOWNLOAD_BASE_URL +
                   '/releases/' + process.env.GITHUB_REF_NAME + '/';
-                if (!item.url.startsWith(portableUrlPrefix)) {
-                  throw new Error(
-                    'R2 latest.json portable target does not use the versioned R2 URL: ' + platform
-                  );
-                }
-              }
 
-              console.log('R2 latest.json version:', json.version);
-              console.log('Platforms:', Object.keys(json.platforms || {}).join(', '));
-            });
-          "
+                for (const platform of requiredPortablePlatforms) {
+                  const item = json.platforms?.[platform];
+                  if (!item?.url || !item?.signature) {
+                    throw new Error(
+                      source + ' is missing a signed portable target: ' + platform
+                    );
+                  }
+                  if (!item.url.startsWith(portableUrlPrefix)) {
+                    throw new Error(
+                      source + ' portable target does not use the versioned R2 URL: ' + platform
+                    );
+                  }
+                }
+
+                console.log(source + ' version:', json.version);
+                console.log('Platforms:', Object.keys(json.platforms || {}).join(', '));
+              });
+            " "$source"
+          }
+
+          curl -fsSL "${DOWNLOAD_BASE_URL}/releases/${GITHUB_REF_NAME}/latest.json" \
+            | verify_manifest "Versioned R2 latest.json"
+
+          aws s3 cp "s3://${R2_BUCKET}/latest.json" - \
+            --endpoint-url "$R2_ENDPOINT" \
+            --no-progress \
+            | verify_manifest "R2 latest.json"
