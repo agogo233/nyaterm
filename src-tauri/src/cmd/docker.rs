@@ -26,9 +26,9 @@ const DOCKER_TIMEOUT: Duration = Duration::from_secs(20);
 const DOCKER_LOG_TIMEOUT: Duration = Duration::from_secs(30);
 const COMPOSE_PS_JSON_BEGIN: &str = "COMPOSE_PS_JSON_BEGIN";
 const COMPOSE_PS_JSON_END: &str = "COMPOSE_PS_JSON_END";
-const DOCKER_PLAIN: &str = "docker";
-const DOCKER_SUDO_NON_INTERACTIVE: &str = "sudo -n docker";
-const DOCKER_SUDO_STDIN_TERMINAL: &str = "sudo -S -p \"\" docker";
+const DOCKER_PLAIN: &str = "PATH=/usr/local/bin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin:$PATH docker";
+const DOCKER_SUDO_NON_INTERACTIVE: &str = "sudo -n env PATH=/usr/local/bin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin:$PATH docker";
+const DOCKER_SUDO_STDIN_TERMINAL: &str = "sudo -S -p \"\" env PATH=/usr/local/bin:/var/packages/ContainerManager/target/usr/bin:/var/packages/Docker/target/usr/bin:$PATH docker";
 
 pub struct DockerSudoManager {
     pending: Mutex<HashMap<String, oneshot::Sender<Option<String>>>>,
@@ -1426,9 +1426,9 @@ mod tests {
         assert_eq!(
             attempts,
             [
-                "docker ps -a",
-                "sudo -n docker ps -a",
-                "sudo -S -p \"\" docker ps -a",
+                format!("{DOCKER_PLAIN} ps -a"),
+                format!("{DOCKER_SUDO_NON_INTERACTIVE} ps -a"),
+                format!("{DOCKER_SUDO_STDIN_TERMINAL} ps -a"),
             ]
         );
     }
@@ -1437,7 +1437,7 @@ mod tests {
     fn sudo_password_prefix_is_safe_inside_sh_c_scripts() {
         let command = docker_overview_script(DOCKER_SUDO_STDIN_TERMINAL);
 
-        assert!(command.contains("sudo -S -p \"\" docker info"));
+        assert!(command.contains(&format!("{DOCKER_SUDO_STDIN_TERMINAL} info")));
         assert!(!command.contains("sudo -S -p '' docker"));
     }
 
@@ -1464,7 +1464,10 @@ mod tests {
             },
             |docker| format!("{docker} logs -f 'abc'"),
         );
-        assert_eq!(prepared.command, "sudo -S -p \"\" docker logs -f 'abc'");
+        assert_eq!(
+            prepared.command,
+            format!("{DOCKER_SUDO_STDIN_TERMINAL} logs -f 'abc'")
+        );
         assert_eq!(prepared.stdin.as_deref(), Some("secret\n"));
         assert!(!prepared.command.contains("secret"));
     }
