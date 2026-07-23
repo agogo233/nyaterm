@@ -225,6 +225,7 @@ mod tests {
             ai: config::AiSettings::default(),
             ui: PortableUiSettings {
                 language: Some("en".to_string()),
+                header_status_visible: true,
                 show_remote_stats: false,
                 remote_stats_interval: 3,
                 show_gpu_monitor: false,

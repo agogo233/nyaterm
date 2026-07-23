@@ -38,6 +38,7 @@ import {
   MdUpdate,
   MdUpload,
   MdViewSidebar,
+  MdVisibilityOff,
   MdZoomIn,
   MdZoomOut,
 } from "react-icons/md";
@@ -48,13 +49,16 @@ import {
   VscChromeRestore,
 } from "react-icons/vsc";
 import packageJson from "@/../package.json";
+import HeaderStatusHideConfirmDialog from "@/components/dialog/app/HeaderStatusHideConfirmDialog";
 import QuitConfirmDialog from "@/components/dialog/app/QuitConfirmDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useApp } from "@/context/AppContext";
@@ -63,6 +67,7 @@ import { useConfigTransfer } from "@/hooks/useConfigTransfer";
 import type { RemoteStatsState } from "@/hooks/useRemoteStats";
 import { resolveDisplayKeys } from "@/hooks/useShortcutMap";
 import { AVAILABLE_LANGUAGES } from "@/i18n";
+import { HEADER_STATUS_MODES, normalizeHeaderStatusMode } from "@/lib/headerStatus";
 import { invoke } from "@/lib/invoke";
 import { logger } from "@/lib/logger";
 import { isMacOS } from "@/lib/platform";
@@ -72,7 +77,7 @@ import {
   resetTerminalFontSizeDelta,
 } from "@/lib/terminalFontSize";
 import { getActivePane, getTabDisplayName } from "@/lib/workspaceTabs";
-import type { HeaderStatusMode, SavedConnection, Tab } from "@/types/global";
+import type { SavedConnection, Tab } from "@/types/global";
 import ImportDialog from "../dialog/connections/ImportDialog";
 import { resolveConnectionIcon } from "../icons";
 import NyaTermLogo from "../NyaTermLogo";
@@ -165,14 +170,6 @@ function HeaderStatusDivider() {
       -
     </span>
   );
-}
-
-const HEADER_STATUS_MODES: HeaderStatusMode[] = ["session", "resources", "host"];
-
-function normalizeHeaderStatusMode(value?: string): HeaderStatusMode {
-  return HEADER_STATUS_MODES.includes(value as HeaderStatusMode)
-    ? (value as HeaderStatusMode)
-    : "session";
 }
 
 function formatPct(value: number): string {
@@ -275,6 +272,8 @@ export default function Header({
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [showHeaderStatusHideConfirm, setShowHeaderStatusHideConfirm] = useState(false);
+  const [currentMinute, setCurrentMinute] = useState(() => new Date());
   const { t, i18n } = useTranslation();
   const { handleExport, passwordAlert } = useConfigTransfer();
 
@@ -285,6 +284,7 @@ export default function Header({
   const activeDisplayName = activeTab ? getTabDisplayName(activeTab) : "NyaTerm";
   const terminalZoomEnabled = appSettings.interaction.terminal_zoom_enabled;
   const headerStatusMode = normalizeHeaderStatusMode(appSettings.ui.header_status_mode);
+  const headerStatusVisible = appSettings.ui.header_status_visible !== false;
 
   useEffect(() => {
     let mounted = true;
@@ -313,6 +313,31 @@ export default function Header({
       unlistenResized?.();
     };
   }, [appWindow]);
+
+  useEffect(() => {
+    if (!headerStatusVisible || headerStatusMode !== "datetime") {
+      return;
+    }
+
+    const updateCurrentMinute = () => setCurrentMinute(new Date());
+    updateCurrentMinute();
+
+    const now = new Date();
+    const nextMinuteDelay = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const timeoutId = setTimeout(() => {
+      updateCurrentMinute();
+      intervalId = setInterval(updateCurrentMinute, 60_000);
+    }, nextMinuteDelay);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [headerStatusMode, headerStatusVisible]);
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
@@ -606,6 +631,11 @@ export default function Header({
     appWindow.close().catch(() => {});
   };
 
+  const handleConfirmHideHeaderStatus = () => {
+    setShowHeaderStatusHideConfirm(false);
+    updateUi({ header_status_visible: false });
+  };
+
   const hasActiveStatsSession = Boolean(
     activePane && activePane.type === "SSH" && !activePane.connecting && !activePane.connectError,
   );
@@ -685,6 +715,23 @@ export default function Header({
       };
     }
 
+    if (headerStatusMode === "datetime") {
+      const text = new Intl.DateTimeFormat(i18n.language, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(currentMinute);
+
+      return {
+        icon: <MdAccessTime />,
+        text,
+        title: text,
+      };
+    }
+
     const stats = remoteStats?.stats;
     if (remoteStatusFallback || !stats) {
       return {
@@ -741,8 +788,8 @@ export default function Header({
           <HeaderStatusDivider />
           <HeaderStatusPart icon={<MdMemory />} iconColor="#a78bfa">
             RAM{" "}
-            <span style={memoryColor ? { color: memoryColor } : undefined}>{memoryUsedText}</span>
-            /{memoryTotalText}
+            <span style={memoryColor ? { color: memoryColor } : undefined}>{memoryUsedText}</span>/
+            {memoryTotalText}
           </HeaderStatusPart>
           <HeaderStatusDivider />
           <HeaderStatusPart icon={<MdUpload />} iconColor="#f59e0b">
@@ -755,7 +802,15 @@ export default function Header({
       ),
       title: text,
     };
-  }, [headerStatusMode, remoteStats?.stats, remoteStatusFallback, sessionStatus, t]);
+  }, [
+    currentMinute,
+    headerStatusMode,
+    i18n.language,
+    remoteStats?.stats,
+    remoteStatusFallback,
+    sessionStatus,
+    t,
+  ]);
 
   return (
     <header
@@ -804,37 +859,62 @@ export default function Header({
 
       <div className="flex-1 min-w-0 h-full flex items-center justify-center gap-2 px-2">
         <div className="h-full min-w-0 flex-1" data-tauri-drag-region />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="group flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--df-primary)]"
-              style={{ color: "var(--df-text-muted)" }}
-              title={headerStatus.title}
-              aria-label={t("headerStatus.select")}
+        {headerStatusVisible && (
+          <div
+            className="flex max-w-full min-w-0 items-center gap-0.5 rounded-md text-xs font-medium"
+            style={{ color: "var(--df-text-muted)" }}
+            title={headerStatus.title}
+            data-tauri-drag-region
+          >
+            <div
+              className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap px-2 py-1"
+              data-tauri-drag-region
             >
-              {headerStatus.icon}
-              <span className="flex min-w-0 items-center overflow-hidden whitespace-nowrap">
+              <span className="pointer-events-none inline-flex shrink-0" data-tauri-drag-region>
+                {headerStatus.icon}
+              </span>
+              <span
+                className="pointer-events-none flex min-w-0 items-center overflow-hidden whitespace-nowrap"
+                data-tauri-drag-region
+              >
                 {headerStatus.text}
               </span>
-              <MdKeyboardArrowDown className="text-sm shrink-0 opacity-60 transition-opacity group-hover:opacity-100" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="center" className="min-w-[190px]">
-            <DropdownMenuRadioGroup
-              value={headerStatusMode}
-              onValueChange={(value) => {
-                updateUi({ header_status_mode: normalizeHeaderStatusMode(value) });
-              }}
-            >
-              {HEADER_STATUS_MODES.map((mode) => (
-                <DropdownMenuRadioItem key={mode} value={mode}>
-                  {t(`headerStatus.${mode}`)}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--df-primary)]"
+                  aria-label={t("headerStatus.select")}
+                >
+                  <MdKeyboardArrowDown className="text-sm opacity-60 transition-opacity group-hover:opacity-100" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="center" className="min-w-[190px]">
+                <DropdownMenuRadioGroup
+                  value={headerStatusMode}
+                  onValueChange={(value) => {
+                    updateUi({
+                      header_status_mode: normalizeHeaderStatusMode(value),
+                      header_status_visible: true,
+                    });
+                  }}
+                >
+                  {HEADER_STATUS_MODES.map((mode) => (
+                    <DropdownMenuRadioItem key={mode} value={mode}>
+                      {t(`headerStatus.${mode}`)}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setShowHeaderStatusHideConfirm(true)}>
+                  <MdVisibilityOff className="text-sm text-muted-foreground" />
+                  <span>{t("headerStatus.hide")}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
         <div className="h-full min-w-0 flex-1" data-tauri-drag-region />
       </div>
 
@@ -896,6 +976,11 @@ export default function Header({
         open={showCloseConfirm}
         onOpenChange={setShowCloseConfirm}
         onConfirm={handleConfirmClose}
+      />
+      <HeaderStatusHideConfirmDialog
+        open={showHeaderStatusHideConfirm}
+        onOpenChange={setShowHeaderStatusHideConfirm}
+        onConfirm={handleConfirmHideHeaderStatus}
       />
     </header>
   );

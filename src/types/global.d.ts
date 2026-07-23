@@ -394,7 +394,7 @@ export interface ActivityBarLayout {
 /** Layout preferences: panel widths, active panels, theme. */
 export type QuickCommandViewMode = "list" | "compact" | "tile";
 export type QuickCommandSortMode = "created" | "name" | "useCount";
-export type HeaderStatusMode = "session" | "resources" | "host";
+export type HeaderStatusMode = "session" | "resources" | "host" | "datetime";
 
 export type RestorableTerminalWindowNode =
   | {
@@ -437,6 +437,7 @@ export interface UiConfig {
   zoom_level: number;
   language?: string;
   header_status_mode?: HeaderStatusMode;
+  header_status_visible?: boolean;
   show_remote_stats: boolean;
   remote_stats_interval: number;
   show_gpu_monitor: boolean;

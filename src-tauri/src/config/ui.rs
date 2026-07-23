@@ -258,6 +258,8 @@ pub struct UiConfig {
     #[serde(default = "default_header_status_mode")]
     pub header_status_mode: String,
     #[serde(default = "default_true_fn")]
+    pub header_status_visible: bool,
+    #[serde(default = "default_true_fn")]
     pub show_remote_stats: bool,
     #[serde(default = "default_remote_stats_interval")]
     pub remote_stats_interval: u32,
@@ -407,6 +409,7 @@ impl Default for UiConfig {
             zoom_level: default_zoom(),
             language: default_language(),
             header_status_mode: default_header_status_mode(),
+            header_status_visible: true,
             show_remote_stats: true,
             remote_stats_interval: default_remote_stats_interval(),
             show_gpu_monitor: false,
