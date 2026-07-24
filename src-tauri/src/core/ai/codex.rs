@@ -17,6 +17,7 @@ use tokio::time::timeout;
 use crate::config::{AiAgentKind, AiBackendKind, AiModelSource, AiSettings, CodexThreadMode};
 use crate::core::SessionManager;
 use crate::error::{AppError, AppResult};
+use crate::utils::process::hide_window;
 
 use super::agent::{AgentApprovalManager, run_external_agent_command_step};
 use super::history::{
@@ -180,7 +181,9 @@ impl CodexAppServerManager {
 
         *self.state.write().await = CodexRuntimeState::Starting;
         let executable = codex_executable(path.as_deref());
-        let mut child = Command::new(&executable)
+        let mut command = Command::new(&executable);
+        hide_window(&mut command);
+        let mut child = command
             .args(["app-server", "--listen", "stdio://"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1061,11 +1064,17 @@ fn add_common_codex_candidates(
 }
 
 async fn discover_codex_with_path_command() -> Vec<String> {
-    let output = if cfg!(windows) {
-        Command::new("where.exe").arg("codex").output().await
+    let mut command = if cfg!(windows) {
+        let mut command = Command::new("where.exe");
+        command.arg("codex");
+        command
     } else {
-        Command::new("which").args(["-a", "codex"]).output().await
+        let mut command = Command::new("which");
+        command.args(["-a", "codex"]);
+        command
     };
+    hide_window(&mut command);
+    let output = command.output().await;
 
     let Ok(output) = output else {
         return Vec::new();
@@ -1083,13 +1092,13 @@ async fn discover_codex_with_path_command() -> Vec<String> {
 }
 
 async fn probe_codex_cli(executable: &str) -> Result<String, String> {
-    let output = timeout(
-        CODEX_DETECT_TIMEOUT,
-        Command::new(executable).arg("--version").output(),
-    )
-    .await
-    .map_err(|_| "timed out while running --version".to_string())?
-    .map_err(|error| error.to_string())?;
+    let mut command = Command::new(executable);
+    command.arg("--version");
+    hide_window(&mut command);
+    let output = timeout(CODEX_DETECT_TIMEOUT, command.output())
+        .await
+        .map_err(|_| "timed out while running --version".to_string())?
+        .map_err(|error| error.to_string())?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();

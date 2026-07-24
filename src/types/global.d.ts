@@ -394,7 +394,7 @@ export interface ActivityBarLayout {
 /** Layout preferences: panel widths, active panels, theme. */
 export type QuickCommandViewMode = "list" | "compact" | "tile";
 export type QuickCommandSortMode = "created" | "name" | "useCount";
-export type HeaderStatusMode = "session" | "resources" | "host";
+export type HeaderStatusMode = "session" | "resources" | "host" | "datetime";
 
 export type RestorableTerminalWindowNode =
   | {
@@ -418,6 +418,7 @@ export interface UiConfig {
   quick_cmd_height: number;
   quick_cmd_view_mode: QuickCommandViewMode;
   quick_cmd_sort_mode?: QuickCommandSortMode;
+  quick_cmd_selected_category?: string;
   /** ID of whichever panel is currently open on the left side. */
   active_left_panel: string | null;
   /** ID of whichever panel is currently open on the right side. */
@@ -436,6 +437,7 @@ export interface UiConfig {
   zoom_level: number;
   language?: string;
   header_status_mode?: HeaderStatusMode;
+  header_status_visible?: boolean;
   show_remote_stats: boolean;
   remote_stats_interval: number;
   show_gpu_monitor: boolean;

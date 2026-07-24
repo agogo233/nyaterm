@@ -199,6 +199,7 @@ export function FileExplorerPathBar({
   }, [isEditingPath, onEditingPathChange]);
 
   useLayoutEffect(() => {
+    if (isEditingPath) return;
     const viewport = breadcrumbViewportRef.current;
     if (!viewport) return;
 
@@ -206,12 +207,16 @@ export function FileExplorerPathBar({
       setAvailableWidth(viewport.clientWidth);
     };
     updateWidth();
+    const animationFrame = window.requestAnimationFrame(updateWidth);
 
     const resizeObserver =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateWidth);
     resizeObserver?.observe(viewport);
-    return () => resizeObserver?.disconnect();
-  }, []);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      resizeObserver?.disconnect();
+    };
+  }, [isEditingPath]);
 
   const segments = useMemo(
     () => buildBreadcrumbSegments(currentPath, homeDir, backend),

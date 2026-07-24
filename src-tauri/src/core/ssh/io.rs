@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Sleep, timeout};
 
-const INJECT_TIMEOUT_SECS: u64 = 5;
+const INJECT_TIMEOUT_SECS: u64 = 30;
 const INITIAL_INJECT_DELAY_MS: u64 = 500;
 const SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES: usize = 64 * 1024;
 

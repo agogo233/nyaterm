@@ -24,12 +24,28 @@ NyaTerm 支持以下操作系统：
 | macOS | `.dmg` |
 | Linux | `.deb` / `.AppImage` |
 
-Windows 便携版解压后运行 `NyaTerm.exe` 即可。便携版不会使用自动更新；更新时请下载新的便携版 zip，关闭 NyaTerm，替换程序文件，并保留 `data/` 目录。
+Windows 便携版解压后运行 `NyaTerm.exe` 即可。**Help → 检查更新** 与安装版共用 Cloudflare R2 更新清单和下载源，暂存更新前会强制验证 Tauri updater 签名。重启时 NyaTerm 会自动替换程序文件，并完整保留 `data/` 目录。
 
 Windows 便携版直接下载：
 
-- [NyaTerm_1.1.16_windows_x64_portable.zip](https://github.com/nyakang/nyaterm/releases/download/v1.1.16/NyaTerm_1.1.16_windows_x64_portable.zip)（x64）
-- [NyaTerm_1.1.16_windows_arm64_portable.zip](https://github.com/nyakang/nyaterm/releases/download/v1.1.16/NyaTerm_1.1.16_windows_arm64_portable.zip)（ARM64）
+- [NyaTerm_1.1.17_windows_x64_portable.zip](https://downloads.nyaterm.app/releases/v1.1.17/NyaTerm_1.1.17_windows_x64_portable.zip)（x64）
+- [NyaTerm_1.1.17_windows_arm64_portable.zip](https://downloads.nyaterm.app/releases/v1.1.17/NyaTerm_1.1.17_windows_arm64_portable.zip)（ARM64）
+
+### macOS
+
+macOS 用户可以通过 Homebrew 安装 NyaTerm：
+
+```bash
+brew install nyakang/nyaterm/nyaterm
+```
+
+该命令会使用 [`nyakang/homebrew-nyaterm`](https://github.com/nyakang/homebrew-nyaterm) tap，并安装 `nyaterm` cask。也可以从 [nyaterm.app](https://nyaterm.app) 或 [Releases](https://github.com/nyakang/nyaterm/releases) 下载 `.dmg` 安装包，然后将 NyaTerm 拖入 `/Applications`。
+
+NyaTerm 目前还没有使用 Apple Developer 证书签名。安装后如果 macOS 提示应用已损坏或无法打开，可以移除 quarantine 属性后再打开：
+
+```bash
+sudo xattr -cr /Applications/NyaTerm.app
+```
 
 ### 从源码构建
 

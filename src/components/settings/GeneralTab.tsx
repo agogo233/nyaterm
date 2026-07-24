@@ -4,6 +4,7 @@ import { SelectItem } from "@/components/ui/select";
 import { useApp } from "@/context/AppContext";
 import { useConfigTransfer } from "@/hooks/useConfigTransfer";
 import { AVAILABLE_LANGUAGES } from "@/i18n";
+import { HEADER_STATUS_MODES, normalizeHeaderStatusMode } from "@/lib/headerStatus";
 import { invoke } from "@/lib/invoke";
 import {
   SettingFieldGrid,
@@ -13,10 +14,16 @@ import {
   SettingSwitch,
 } from "./SettingFormItems";
 
+const HIDDEN_HEADER_STATUS_VALUE = "hidden";
+
 export function GeneralTab() {
   const { t, i18n } = useTranslation();
   const { appSettings, updateAppSettings, updateUi } = useApp();
   const { handleExportDiagnostics, handleOpenLogs } = useConfigTransfer();
+  const headerStatusSettingValue =
+    appSettings.ui.header_status_visible === false
+      ? HIDDEN_HEADER_STATUS_VALUE
+      : normalizeHeaderStatusMode(appSettings.ui.header_status_mode);
 
   return (
     <div className="space-y-5">
@@ -34,6 +41,30 @@ export function GeneralTab() {
           {AVAILABLE_LANGUAGES.map((lng) => (
             <SelectItem key={lng.id} value={lng.id}>
               {lng.name}
+            </SelectItem>
+          ))}
+        </SettingSelect>
+
+        <SettingSelect
+          label={t("settings.headerStatus")}
+          desc={t("settings.headerStatusDesc")}
+          value={headerStatusSettingValue}
+          onValueChange={(value) => {
+            if (value === HIDDEN_HEADER_STATUS_VALUE) {
+              updateUi({ header_status_visible: false });
+              return;
+            }
+
+            updateUi({
+              header_status_visible: true,
+              header_status_mode: normalizeHeaderStatusMode(value),
+            });
+          }}
+        >
+          <SelectItem value={HIDDEN_HEADER_STATUS_VALUE}>{t("headerStatus.hidden")}</SelectItem>
+          {HEADER_STATUS_MODES.map((mode) => (
+            <SelectItem key={mode} value={mode}>
+              {t(`headerStatus.${mode}`)}
             </SelectItem>
           ))}
         </SettingSelect>

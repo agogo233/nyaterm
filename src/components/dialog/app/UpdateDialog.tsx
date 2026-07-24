@@ -25,8 +25,6 @@ interface UpdateDialogProps {
   onUpdateFound?: (info: UpdateInfo) => void;
 }
 
-const RELEASES_URL = "https://github.com/nyakang/nyaterm/releases";
-
 type MarkdownNodeProps = {
   children?: ReactNode;
   href?: string;
@@ -173,12 +171,12 @@ export default function UpdateDialog({ open, onClose, onUpdateFound }: UpdateDia
     setStatus("checking");
 
     let cancelled = false;
-    checkForUpdate()
+    checkForUpdate(runtimeInfo.portable)
       .then((info) => {
         if (cancelled) return;
         if (info) {
           setLocalUpdateInfo(info);
-          setStatus(runtimeInfo.portable ? "manual" : "available");
+          setStatus("available");
           onUpdateFoundRef.current?.(info);
         } else {
           setStatus("idle");
@@ -202,7 +200,7 @@ export default function UpdateDialog({ open, onClose, onUpdateFound }: UpdateDia
     setError("");
 
     try {
-      await downloadAndInstallUpdate((p) => {
+      await downloadAndInstallUpdate(runtimeInfo.portable, (p) => {
         setProgress(p);
       });
       setStatus("ready");
@@ -211,23 +209,19 @@ export default function UpdateDialog({ open, onClose, onUpdateFound }: UpdateDia
       setStatus("error");
       isUpdating.current = false;
     }
-  }, []);
+  }, [runtimeInfo.portable]);
 
   const handleRelaunch = useCallback(async () => {
     try {
-      await relaunchApp();
+      await relaunchApp(runtimeInfo.portable);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStatus("error");
     }
-  }, []);
+  }, [runtimeInfo.portable]);
 
   const canClose =
-    status === "checking" ||
-    status === "available" ||
-    status === "idle" ||
-    status === "error" ||
-    status === "manual";
+    status === "checking" || status === "available" || status === "idle" || status === "error";
   const percent = progress.total > 0 ? Math.round((progress.downloaded / progress.total) * 100) : 0;
 
   return (
@@ -265,41 +259,6 @@ export default function UpdateDialog({ open, onClose, onUpdateFound }: UpdateDia
             <DialogFooter>
               <Button variant="outline" size="sm" onClick={onClose}>
                 {t("common.close")}
-              </Button>
-            </DialogFooter>
-          </>
-        )}
-
-        {status === "manual" && (
-          <>
-            <DialogHeader>
-              <DialogTitle>{t("updater.portableManualTitle")}</DialogTitle>
-              <DialogDescription className="space-y-2 pt-1 text-xs">
-                <span className="block">
-                  {t("updater.currentVersion")}: v{currentVersion}
-                </span>
-                {localUpdateInfo && (
-                  <span className="block">
-                    {t("updater.newVersion")}: v{localUpdateInfo.version}
-                  </span>
-                )}
-                <span className="block">{t("updater.portableManualDesc")}</span>
-              </DialogDescription>
-            </DialogHeader>
-            {localUpdateInfo?.body && (
-              <div className="terminal-scroll max-h-[min(42vh,320px)] min-w-0 max-w-full overflow-y-auto overflow-x-hidden rounded-md border p-3">
-                <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                  {t("updater.releaseNotes")}
-                </p>
-                <MarkdownContent content={localUpdateInfo.body} />
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="outline" size="sm" onClick={onClose}>
-                {t("common.close")}
-              </Button>
-              <Button size="sm" onClick={() => void openUrl(RELEASES_URL)}>
-                {t("updater.openReleases")}
               </Button>
             </DialogFooter>
           </>

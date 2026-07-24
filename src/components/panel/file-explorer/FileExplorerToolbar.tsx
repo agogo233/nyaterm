@@ -200,6 +200,18 @@ export function FileExplorerToolbar({
 
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
         <ToolbarIconButton
+          label={t("fileExplorer.search")}
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "h-7 w-7 rounded-md hover:text-foreground",
+            isFileSearchActive ? "bg-primary/10 text-primary" : "text-muted-foreground",
+          )}
+          onClick={onExpandSearch}
+        >
+          <MdSearch className="h-4 w-4 translate-y-px" />
+        </ToolbarIconButton>
+        <ToolbarIconButton
           label={
             showHiddenFiles ? t("fileExplorer.hideHiddenFiles") : t("fileExplorer.showHiddenFiles")
           }
@@ -216,18 +228,6 @@ export function FileExplorerToolbar({
           ) : (
             <MdVisibilityOff className="h-4 w-4" />
           )}
-        </ToolbarIconButton>
-        <ToolbarIconButton
-          label={t("fileExplorer.search")}
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "h-7 w-7 rounded-md hover:text-foreground",
-            isFileSearchActive ? "bg-primary/10 text-primary" : "text-muted-foreground",
-          )}
-          onClick={onExpandSearch}
-        >
-          <MdSearch className="h-4 w-4 translate-y-px" />
         </ToolbarIconButton>
       </div>
 

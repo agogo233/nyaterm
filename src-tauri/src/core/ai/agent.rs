@@ -22,6 +22,7 @@ use crate::core::capture;
 use crate::core::session::{SessionCommand, SessionManager, SessionType};
 use crate::core::ssh::SshConnectionHandles;
 use crate::error::{AppError, AppResult};
+use crate::utils::process::hide_window;
 
 use super::history::{append_ai_audit, append_message, save_user_message};
 use super::model::{ResolvedAiModel, build_chat_options, build_client, resolve_request_model};
@@ -577,6 +578,7 @@ async fn execute_local_background_command(
 fn local_shell_command(command: &str) -> Command {
     let mut child = Command::new("cmd");
     child.args(["/C", command]);
+    hide_window(&mut child);
     child
 }
 

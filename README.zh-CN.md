@@ -19,15 +19,26 @@
 </p>
 
 <p align="center">
-  <a href="https://nyaterm.app"><img alt="Version" src="https://img.shields.io/github/v/release/nyakang/nyaterm?style=flat-square&logo=github&color=0EA5E9&labelColor=334155&label=版本"></a>
+  <a href="https://nyaterm.app"><img alt="Version" src="https://img.shields.io/github/v/release/nyakang/nyaterm.svg?style=flat-square&logo=github&color=0EA5E9&labelColor=334155&label=%E7%89%88%E6%9C%AC&cacheSeconds=300"></a>
   &nbsp;
-  <a href="https://github.com/nyakang/nyaterm/releases"><img alt="GitHub downloads" src="https://img.shields.io/github/downloads/nyakang/nyaterm/total?style=flat-square&logo=github&color=0EA5E9&label=下载量&labelColor=334155"></a>
+  <a href="https://github.com/nyakang/nyaterm/releases">
+    <img
+      alt="GitHub downloads"
+      src="https://img.shields.io/github/downloads/nyakang/nyaterm/total.svg?style=flat-square&logo=github&color=0EA5E9&label=%E4%B8%8B%E8%BD%BD%E9%87%8F&labelColor=334155&v=2"
+    >
+  </a>
   &nbsp;
-  <a href="#"><img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-0EA5E9?style=flat-square&logo=linux&labelColor=334155&label=支持平台"></a>
+  <img
+    alt="Platform"
+    src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-0EA5E9.svg?style=flat-square&logo=linux&labelColor=334155&label=%E6%94%AF%E6%8C%81%E5%B9%B3%E5%8F%B0&v=2"
+  >
   &nbsp;
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-0EA5E9?style=flat-square&logo=readthedocs&labelColor=334155&label=协议"></a>
-</p>
-
+  <a href="LICENSE">
+    <img
+      alt="License"
+      src="https://img.shields.io/badge/License-MIT-0EA5E9.svg?style=flat-square&logo=readthedocs&labelColor=334155&label=%E5%8D%8F%E8%AE%AE&v=2"
+    >
+  </a>
 <p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a>
 </p>
@@ -263,6 +274,22 @@ NyaTerm 适合每天在服务器、本地命令、设备调试和配置文件之
 | Linux | `.deb` / `.AppImage` |
 
 Windows 便携版解压后运行 `NyaTerm.exe` 即可。便携版更新需要手动完成：下载新的便携版 zip，关闭 NyaTerm，替换程序文件，并保留 `data/` 目录。
+
+### macOS
+
+macOS 用户可以通过 Homebrew 安装 NyaTerm：
+
+```bash
+brew install nyakang/nyaterm/nyaterm
+```
+
+该命令会使用 [`nyakang/homebrew-nyaterm`](https://github.com/nyakang/homebrew-nyaterm) tap，并安装 `nyaterm` cask。也可以从 [nyaterm.app](https://nyaterm.app) 或 [Releases](https://github.com/nyakang/nyaterm/releases) 下载 `.dmg` 安装包，然后将 NyaTerm 拖入 `/Applications`。
+
+NyaTerm 目前还没有使用 Apple Developer 证书签名。安装后如果 macOS 提示应用已损坏或无法打开，可以移除 quarantine 属性后再打开：
+
+```bash
+sudo xattr -cr /Applications/NyaTerm.app
+```
 
 ### Arch Linux / AUR
 

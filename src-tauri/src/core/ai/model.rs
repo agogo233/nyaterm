@@ -322,8 +322,13 @@ fn genai_model_name(provider_kind: &AiProviderKind, model_name: &str) -> String 
 
 pub async fn list_model_names(app: &tauri::AppHandle) -> AppResult<Vec<AiModelDiscovery>> {
     let settings = config::load_app_settings(app)?;
+    list_model_names_for_settings(&settings.ai).await
+}
 
-    let custom_credentials = openai_compatible_model_discovery_credentials(&settings.ai);
+pub async fn list_model_names_for_settings(
+    settings: &AiSettings,
+) -> AppResult<Vec<AiModelDiscovery>> {
+    let custom_credentials = openai_compatible_model_discovery_credentials(settings);
 
     let mut models = BTreeMap::new();
     let mut errors = Vec::new();
@@ -345,7 +350,7 @@ pub async fn list_model_names(app: &tauri::AppHandle) -> AppResult<Vec<AiModelDi
             url = base_url,
             "Fetching model list from custom provider"
         );
-        match fetch_openai_compatible_models(&base_url, api_key.as_deref(), &settings.ai).await {
+        match fetch_openai_compatible_models(&base_url, api_key.as_deref(), settings).await {
             Ok(names) => {
                 tracing::info!(
                     credential = label,

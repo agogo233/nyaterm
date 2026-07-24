@@ -6,14 +6,16 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::{
-    io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf},
-    sync::oneshot,
-};
+use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
 use super::Metadata;
 use crate::{
-    client::{error::Error, rawsession::SftpResult, session::Features, RawSftpSession},
+    client::{
+        error::Error,
+        rawsession::{PendingRequest, SftpResult},
+        session::Features,
+        RawSftpSession,
+    },
     protocol::{Packet, StatusCode},
 };
 
@@ -29,7 +31,7 @@ struct FileState {
     f_seek: StateFn<u64>,
     f_flush: StateFn<()>,
     f_shutdown: StateFn<()>,
-    write_acks: VecDeque<oneshot::Receiver<SftpResult<Packet>>>,
+    write_acks: VecDeque<PendingRequest>,
 }
 
 /// Provides high-level methods for interaction with a remote file.
@@ -123,23 +125,21 @@ impl File {
     }
 }
 
-fn check_write_result(
-    result: Result<SftpResult<Packet>, oneshot::error::RecvError>,
-) -> io::Result<()> {
+fn check_write_result(result: SftpResult<Packet>) -> io::Result<()> {
     match result {
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "write channel closed",
+        Ok(Packet::Status(s)) if s.status_code == StatusCode::Ok => Ok(()),
+        Ok(Packet::Status(s)) => Err(io::Error::other(s.error_message)),
+        Ok(_) => Err(io::Error::other("unexpected response packet")),
+        Err(Error::Timeout) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "SFTP write acknowledgement timed out",
         )),
-        Ok(Ok(Packet::Status(s))) if s.status_code == StatusCode::Ok => Ok(()),
-        Ok(Ok(Packet::Status(s))) => Err(io::Error::other(s.error_message)),
-        Ok(Ok(_)) => Err(io::Error::other("unexpected response packet")),
-        Ok(Err(e)) => Err(io::Error::other(e.to_string())),
+        Err(e) => Err(io::Error::other(e.to_string())),
     }
 }
 
 fn poll_oldest_write(
-    pending: &mut VecDeque<oneshot::Receiver<SftpResult<Packet>>>,
+    pending: &mut VecDeque<PendingRequest>,
     cx: &mut Context<'_>,
 ) -> Option<Poll<io::Result<()>>> {
     let rx = pending.front_mut()?;
@@ -153,7 +153,7 @@ fn poll_oldest_write(
 }
 
 fn poll_drain_writes(
-    pending: &mut VecDeque<oneshot::Receiver<SftpResult<Packet>>>,
+    pending: &mut VecDeque<PendingRequest>,
     cx: &mut Context<'_>,
 ) -> Poll<io::Result<()>> {
     while let Some(poll) = poll_oldest_write(pending, cx) {
@@ -383,5 +383,50 @@ impl AsyncWrite for File {
         }
 
         poll
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{Config, RawSftpSession};
+    use tokio::io::AsyncWriteExt;
+
+    fn test_features() -> Features {
+        Features {
+            hardlink: false,
+            fsync: false,
+            statvfs: false,
+            limits: None,
+            max_concurrent_writes: 8,
+            max_packet_len: 262_144,
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_times_out_when_write_ack_never_arrives() {
+        let (client, _server) = tokio::io::duplex(4096);
+        let session = Arc::new(RawSftpSession::new_with_config(
+            client,
+            Config {
+                request_timeout_secs: 0,
+                ..Config::default()
+            },
+        ));
+        let mut file = File::new(session, "handle".to_string(), test_features());
+
+        file.write_all(b"payload")
+            .await
+            .expect("write should queue without waiting for ack");
+        let error = file
+            .shutdown()
+            .await
+            .expect_err("shutdown should drain pending write ack and time out");
+
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(
+            error.to_string(),
+            "SFTP write acknowledgement timed out"
+        );
     }
 }

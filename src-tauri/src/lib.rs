@@ -9,6 +9,7 @@ mod core;
 mod error;
 mod observability;
 mod platform;
+mod portable_updater;
 mod runtime;
 mod storage;
 mod tray;
@@ -28,6 +29,7 @@ use crate::core::{CloudSyncManager, QuickCommandsStore, RecordingManager, Sessio
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    portable_updater::schedule_cleanup_from_environment();
     let runtime = runtime::resolve().expect("failed to resolve runtime paths");
     runtime::prepare_webview_environment(&runtime);
 
@@ -45,6 +47,7 @@ pub fn run() {
     let transfer_duplicate_manager = Arc::new(TransferDuplicateManager::new());
     let docker_sudo_manager = Arc::new(DockerSudoManager::new());
     let app_lock_state = AppLockState::default();
+    let portable_update_state = portable_updater::PortableUpdateState::default();
 
     let builder = tauri::Builder::default();
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -79,6 +82,7 @@ pub fn run() {
         .manage(transfer_duplicate_manager.clone())
         .manage(docker_sudo_manager.clone())
         .manage(app_lock_state)
+        .manage(portable_update_state)
         .setup(move |a| {
             app::setup(
                 a,
@@ -101,8 +105,12 @@ pub fn run() {
             cmd::app::open_transfer_target_directory,
             cmd::app::resolve_local_drop_paths,
             cmd::app::read_background_image_data_url,
+            cmd::updater::check_portable_update,
+            cmd::updater::download_portable_update,
+            cmd::updater::apply_portable_update,
             cmd::ai::start_ai_chat_stream,
             cmd::ai::list_ai_model_names,
+            cmd::ai::refresh_ai_model_settings,
             cmd::ai::cancel_ai_chat_stream,
             cmd::ai::detect_codex_cli,
             cmd::ai::get_codex_account_status,
@@ -318,4 +326,8 @@ pub fn run() {
                 app::show_main_window(_app);
             }
         });
+}
+
+pub fn run_portable_update_helper_if_requested() -> bool {
+    portable_updater::run_helper_if_requested()
 }

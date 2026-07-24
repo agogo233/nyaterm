@@ -38,24 +38,27 @@ export default function ChildWindowRouter({ windowType }: { windowType: string }
     let unlistenFocusChanged: (() => void) | undefined;
     let programmaticClose = false;
     let lastFocusEmitAt = 0;
+    const pageHandlesCloseRequested = windowType === "settings";
 
     currentWindow.show().catch(() => {});
 
-    currentWindow
-      .onCloseRequested(async (event) => {
-        if (programmaticClose || !isModalChildLabel(currentWindow.label)) return;
+    if (!pageHandlesCloseRequested) {
+      currentWindow
+        .onCloseRequested(async (event) => {
+          if (programmaticClose || !isModalChildLabel(currentWindow.label)) return;
 
-        programmaticClose = true;
-        event.preventDefault();
-        await prepareForModalChildClose(currentWindow.label).catch(() => {});
-        await currentWindow.close().catch(() => {
-          programmaticClose = false;
-        });
-      })
-      .then((unlisten) => {
-        unlistenCloseRequested = unlisten;
-      })
-      .catch(() => {});
+          programmaticClose = true;
+          event.preventDefault();
+          await prepareForModalChildClose(currentWindow.label).catch(() => {});
+          await currentWindow.close().catch(() => {
+            programmaticClose = false;
+          });
+        })
+        .then((unlisten) => {
+          unlistenCloseRequested = unlisten;
+        })
+        .catch(() => {});
+    }
 
     if (isModalChildLabel(currentWindow.label)) {
       currentWindow
@@ -79,7 +82,7 @@ export default function ChildWindowRouter({ windowType }: { windowType: string }
       unlistenCloseRequested?.();
       unlistenFocusChanged?.();
     };
-  }, []);
+  }, [windowType]);
 
   if (!Page) {
     return (

@@ -24,12 +24,28 @@ Visit the [Releases](https://github.com/nyakang/nyaterm/releases) page and downl
 | macOS | `.dmg` |
 | Linux | `.deb` / `.AppImage` |
 
-For the Windows portable edition, extract the zip and run `NyaTerm.exe`. Portable edition updates are manual: download the new portable zip, close NyaTerm, replace the program files, and keep the `data/` folder.
+For the Windows portable edition, extract the zip and run `NyaTerm.exe`. **Help → Check Updates** uses the same Cloudflare R2 update manifest and download source as the installed edition. Tauri updater signatures are always verified before staging an update; when restarting, NyaTerm replaces the program files and preserves the complete `data/` folder.
 
 Direct downloads for the Windows portable edition:
 
-- [NyaTerm_1.1.16_windows_x64_portable.zip](https://github.com/nyakang/nyaterm/releases/download/v1.1.16/NyaTerm_1.1.16_windows_x64_portable.zip) (x64)
-- [NyaTerm_1.1.16_windows_arm64_portable.zip](https://github.com/nyakang/nyaterm/releases/download/v1.1.16/NyaTerm_1.1.16_windows_arm64_portable.zip) (ARM64)
+- [NyaTerm_1.1.17_windows_x64_portable.zip](https://downloads.nyaterm.app/releases/v1.1.17/NyaTerm_1.1.17_windows_x64_portable.zip) (x64)
+- [NyaTerm_1.1.17_windows_arm64_portable.zip](https://downloads.nyaterm.app/releases/v1.1.17/NyaTerm_1.1.17_windows_arm64_portable.zip) (ARM64)
+
+### macOS
+
+macOS users can install NyaTerm with Homebrew:
+
+```bash
+brew install nyakang/nyaterm/nyaterm
+```
+
+This uses the [`nyakang/homebrew-nyaterm`](https://github.com/nyakang/homebrew-nyaterm) tap and installs the `nyaterm` cask. You can also download the `.dmg` installer from [nyaterm.app](https://nyaterm.app) or [Releases](https://github.com/nyakang/nyaterm/releases), then drag NyaTerm into `/Applications`.
+
+NyaTerm is currently not signed with an Apple Developer certificate. If macOS reports that the app is damaged or cannot be opened after installation, remove the quarantine attribute and open it again:
+
+```bash
+sudo xattr -cr /Applications/NyaTerm.app
+```
 
 ### Build from source
 

@@ -123,6 +123,8 @@ struct LegacySnapshotRawHashInput<'a> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortableUiSettings {
     pub language: Option<String>,
+    #[serde(default = "default_portable_true")]
+    pub header_status_visible: bool,
     pub show_remote_stats: bool,
     pub remote_stats_interval: u32,
     #[serde(default)]
@@ -147,6 +149,10 @@ pub struct PortableUiSettings {
 
 fn default_portable_gpu_monitor_interval() -> u32 {
     3
+}
+
+fn default_portable_true() -> bool {
+    true
 }
 
 fn default_portable_ascend_npu_monitor_interval() -> u32 {
@@ -201,6 +207,7 @@ impl PortableAppSettings {
             ai: settings.ai.clone(),
             ui: PortableUiSettings {
                 language: settings.ui.language.clone(),
+                header_status_visible: settings.ui.header_status_visible,
                 show_remote_stats: settings.ui.show_remote_stats,
                 remote_stats_interval: settings.ui.remote_stats_interval,
                 show_gpu_monitor: settings.ui.show_gpu_monitor,
@@ -249,6 +256,7 @@ impl PortableAppSettings {
         current.ai = self.ai;
         config::normalize_ai_settings(&mut current.ai);
         current.ui.language = self.ui.language;
+        current.ui.header_status_visible = self.ui.header_status_visible;
         current.ui.show_remote_stats = self.ui.show_remote_stats;
         current.ui.remote_stats_interval = self.ui.remote_stats_interval;
         current.ui.show_gpu_monitor = self.ui.show_gpu_monitor;
@@ -267,6 +275,7 @@ impl PortableAppSettings {
         current.ui.left_width = ui_state.left_width;
         current.ui.right_width = ui_state.right_width;
         current.ui.quick_cmd_height = ui_state.quick_cmd_height;
+        current.ui.quick_cmd_selected_category = ui_state.quick_cmd_selected_category;
         current.ui.active_left_panel = ui_state.active_left_panel;
         current.ui.active_right_panel = ui_state.active_right_panel;
         current.ui.show_quick_cmd_bar = ui_state.show_quick_cmd_bar;

@@ -41,6 +41,10 @@ impl AppRuntime {
         self.portable
     }
 
+    pub fn executable_dir(&self) -> &Path {
+        &self.executable_dir
+    }
+
     pub fn config_dir(&self) -> &Path {
         &self.config_dir
     }

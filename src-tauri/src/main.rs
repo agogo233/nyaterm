@@ -5,5 +5,9 @@
 //! Delegates to `nyaterm_lib::run()` for the actual app.
 
 fn main() {
-    nyaterm_lib::run()
+    if nyaterm_lib::run_portable_update_helper_if_requested() {
+        return;
+    }
+
+    nyaterm_lib::run();
 }

@@ -268,7 +268,23 @@ Download the latest build for your platform from [nyaterm.app](https://nyaterm.a
 | macOS | `.dmg` |
 | Linux | `.deb` / `.AppImage` |
 
-For the Windows portable edition, extract the zip and run `NyaTerm.exe`. Portable updates are manual: download the new portable zip, close NyaTerm, replace the program files, and keep the `data/` folder.
+For the Windows portable edition, extract the zip and run `NyaTerm.exe`. **Help → Check Updates** uses the same Cloudflare R2 update manifest and download source as the installed edition. Tauri updater signatures are always verified before staging an update; NyaTerm preserves the complete `data/` folder while replacing the program files and restarting.
+
+### macOS
+
+macOS users can install NyaTerm with Homebrew:
+
+```bash
+brew install nyakang/nyaterm/nyaterm
+```
+
+This uses the [`nyakang/homebrew-nyaterm`](https://github.com/nyakang/homebrew-nyaterm) tap and installs the `nyaterm` cask. You can also download the `.dmg` installer from [nyaterm.app](https://nyaterm.app) or [Releases](https://github.com/nyakang/nyaterm/releases), then drag NyaTerm into `/Applications`.
+
+NyaTerm is currently not signed with an Apple Developer certificate. If macOS reports that the app is damaged or cannot be opened after installation, remove the quarantine attribute and open it again:
+
+```bash
+sudo xattr -cr /Applications/NyaTerm.app
+```
 
 ### Arch Linux / AUR
 

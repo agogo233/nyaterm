@@ -229,6 +229,8 @@ pub struct UiConfig {
     pub quick_cmd_view_mode: String,
     #[serde(default = "default_quick_cmd_sort_mode")]
     pub quick_cmd_sort_mode: String,
+    #[serde(default = "default_quick_cmd_selected_category")]
+    pub quick_cmd_selected_category: String,
     #[serde(default = "default_active_left_panel")]
     pub active_left_panel: Option<String>,
     #[serde(default = "default_active_right_panel")]
@@ -255,6 +257,8 @@ pub struct UiConfig {
     pub language: Option<String>,
     #[serde(default = "default_header_status_mode")]
     pub header_status_mode: String,
+    #[serde(default = "default_true_fn")]
+    pub header_status_visible: bool,
     #[serde(default = "default_true_fn")]
     pub show_remote_stats: bool,
     #[serde(default = "default_remote_stats_interval")]
@@ -311,6 +315,10 @@ fn default_quick_cmd_view_mode() -> String {
 
 fn default_quick_cmd_sort_mode() -> String {
     "created".to_string()
+}
+
+fn default_quick_cmd_selected_category() -> String {
+    "all".to_string()
 }
 
 fn default_active_left_panel() -> Option<String> {
@@ -387,6 +395,7 @@ impl Default for UiConfig {
             quick_cmd_height: default_quick_cmd_height(),
             quick_cmd_view_mode: default_quick_cmd_view_mode(),
             quick_cmd_sort_mode: default_quick_cmd_sort_mode(),
+            quick_cmd_selected_category: default_quick_cmd_selected_category(),
             active_left_panel: default_active_left_panel(),
             active_right_panel: default_active_right_panel(),
             left_open_panels: vec![],
@@ -400,6 +409,7 @@ impl Default for UiConfig {
             zoom_level: default_zoom(),
             language: default_language(),
             header_status_mode: default_header_status_mode(),
+            header_status_visible: true,
             show_remote_stats: true,
             remote_stats_interval: default_remote_stats_interval(),
             show_gpu_monitor: false,

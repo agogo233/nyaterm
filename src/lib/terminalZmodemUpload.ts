@@ -124,6 +124,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   ]);
 }
 
+function buildZmodemReceiveCommand(conflictMode: ZmodemUploadConflictMode): string {
+  return conflictMode === "overwrite" ? "rz -y" : "rz";
+}
+
 export interface ConflictProbeResult {
   paths: string[];
   probeSkipped: boolean;
@@ -139,8 +143,8 @@ export interface ConflictProbeResult {
  * - "ask" (default): prompt the user per conflict
  *
  * SFTP operations are time-boxed — if the SFTP channel is busy (e.g. the
- * file explorer panel is open), the probe is skipped, all files are uploaded
- * without conflict detection, and `probeSkipped` is set to true.
+ * file explorer panel is open), the probe is skipped, uploads fall back to
+ * the selected ZMODEM conflict mode, and `probeSkipped` is set to true.
  */
 export async function probeAndResolveRemoteConflicts(
   sessionId: string,
@@ -320,9 +324,9 @@ export async function uploadFilesViaZmodem(
     i18n.t("zmodem.preparingUpload", { count: filePaths.length }),
   );
 
-  // BEFORE sending `rz`, so the remote rz never sees an existing file to
-  // prompt about.  If the SFTP channel is busy (e.g. file explorer panel is
-  // open), the probe is time-boxed and we fall through.
+  // BEFORE starting remote rz, so the receiver never sees an existing file to
+  // prompt about when the target directory can be verified. If the probe is
+  // unavailable, fall back to rz flags plus the ZFILE conflict mode.
   const conflict = await probeAndResolveRemoteConflicts(sessionId, filePaths, duplicateStrategy);
 
   if (conflict.paths.length === 0) {
@@ -353,7 +357,10 @@ export async function uploadFilesViaZmodem(
       phase: "waiting",
     };
 
-    sendSessionInput(sessionId, buildTerminalCommandInput("rz", true)).catch((error) => {
+    sendSessionInput(
+      sessionId,
+      buildTerminalCommandInput(buildZmodemReceiveCommand(conflict.conflictMode), true),
+    ).catch((error) => {
       if (pendingUpload?.sessionId !== sessionId) return;
       clearPendingUpload();
       reject(error instanceof Error ? error : new Error(String(error)));

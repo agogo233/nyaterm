@@ -6,7 +6,7 @@ import {
 } from "./tabWindows";
 
 /**
- * Build a balanced binary split tree that tiles every tab into its own leaf.
+ * Build a balanced binary split tree that moves every tab into its own leaf.
  *
  * For `N` tabs the tree depth is `O(log N)` rather than `O(N)` because we
  * always bisect the list instead of chaining one split after another.
@@ -38,7 +38,7 @@ function buildBalancedTree(
 }
 
 /**
- * Auto-tile: alternates horizontal / vertical to produce a grid-like layout.
+ * Auto-split: alternates horizontal / vertical to produce a grid-like layout.
  * 4 tabs → 2×2, 6 tabs → 3×2, etc.
  */
 export function autoTileLayout(tabIds: string[]): TerminalWindowNode | null {
@@ -46,13 +46,13 @@ export function autoTileLayout(tabIds: string[]): TerminalWindowNode | null {
   return buildBalancedTree(tabIds, "horizontal", true);
 }
 
-/** Tile every tab side-by-side in a single horizontal row. */
+/** Split every tab using horizontal split nodes. */
 export function tileHorizontally(tabIds: string[]): TerminalWindowNode | null {
   if (tabIds.length === 0) return null;
   return buildBalancedTree(tabIds, "horizontal", false);
 }
 
-/** Stack every tab top-to-bottom in a single vertical column. */
+/** Split every tab using vertical split nodes. */
 export function tileVertically(tabIds: string[]): TerminalWindowNode | null {
   if (tabIds.length === 0) return null;
   return buildBalancedTree(tabIds, "vertical", false);

@@ -1,15 +1,10 @@
+import { Channel } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
+import { invoke } from "@/lib/invoke";
 import { logger } from "@/lib/logger";
 
-export type UpdateStatus =
-  | "idle"
-  | "checking"
-  | "available"
-  | "downloading"
-  | "ready"
-  | "error"
-  | "manual";
+export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
 
 export interface UpdateProgress {
   downloaded: number;
@@ -24,7 +19,7 @@ export interface UpdateInfo {
 
 let cachedUpdate: Update | null = null;
 
-export async function checkForUpdate(): Promise<UpdateInfo | null> {
+export async function checkForUpdate(portable = false): Promise<UpdateInfo | null> {
   logger.info({
     domain: "updater.flow",
     event: "update.check_started",
@@ -32,6 +27,24 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   });
 
   try {
+    if (portable) {
+      cachedUpdate = null;
+      const update = await invoke<UpdateInfo | null>("check_portable_update");
+      logger.info({
+        domain: "updater.flow",
+        event: update ? "update.available" : "update.check_succeeded",
+        message: update ? "Portable update available" : "No portable update available",
+        data: update
+          ? {
+              version: update.version,
+              release_date: update.date,
+              mode: "portable",
+            }
+          : { mode: "portable" },
+      });
+      return update;
+    }
+
     const update = await check();
     if (!update) {
       cachedUpdate = null;
@@ -70,8 +83,39 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
 }
 
 export async function downloadAndInstallUpdate(
+  portable: boolean,
   onProgress?: (progress: UpdateProgress) => void,
 ): Promise<void> {
+  if (portable) {
+    const progressChannel = new Channel<UpdateProgress>();
+    progressChannel.onmessage = (progress) => onProgress?.(progress);
+    logger.info({
+      domain: "updater.flow",
+      event: "update.download_started",
+      message: "Starting portable update download",
+      data: { mode: "portable" },
+    });
+    try {
+      await invoke<void>("download_portable_update", { onProgress: progressChannel });
+      logger.info({
+        domain: "updater.flow",
+        event: "update.download_finished",
+        message: "Portable update download and verification finished",
+        data: { mode: "portable" },
+      });
+      return;
+    } catch (error) {
+      logger.error({
+        domain: "updater.flow",
+        event: "update.install_failed",
+        message: "Portable update staging failed",
+        data: { mode: "portable" },
+        error,
+      });
+      throw error;
+    }
+  }
+
   if (!cachedUpdate) throw new Error("No update available");
 
   let downloaded = 0;
@@ -125,11 +169,15 @@ export async function downloadAndInstallUpdate(
   }
 }
 
-export async function relaunchApp(): Promise<void> {
+export async function relaunchApp(portable = false): Promise<void> {
   logger.info({
     domain: "updater.flow",
     event: "update.relaunch_requested",
     message: "Relaunching app after update",
   });
-  await relaunch();
+  if (portable) {
+    await invoke<void>("apply_portable_update");
+  } else {
+    await relaunch();
+  }
 }

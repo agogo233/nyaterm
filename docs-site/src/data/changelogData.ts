@@ -10,6 +10,26 @@ export type ChangelogRelease = {
 
 const changelogReleasesEn: ChangelogRelease[] = [
   {
+    version: '[1.1.17] - 2026-07-22',
+    sections: [
+      {
+        title: 'Fixed',
+        items: [
+          '**csp:** Allow `blob:` image URLs in the content security policy so generated or previewed image assets can render correctly.',
+          '**terminal:** Improve hibernation logic in the XTerminal component.',
+          '**zmodem:** Improve conflict resolution handling during Zmodem uploads.',
+        ],
+      },
+      {
+        title: 'Documentation',
+        items: [
+          '**readme:** Add macOS installation instructions to the README files.',
+          '**i18n:** Clarify Zmodem conflict resolution messages.',
+        ],
+      },
+    ],
+  },
+  {
     version: '[1.1.16] - 2026-07-21',
     sections: [
       {
@@ -1648,6 +1668,23 @@ const changelogReleasesEn: ChangelogRelease[] = [
 ];
 
 const changelogReleasesZhCN: ChangelogRelease[] = [
+  {
+    version: '[1.1.17] - 2026-07-22',
+    sections: [
+      {
+        title: '修复',
+        items: [
+          '**csp:** 在内容安全策略中允许 `blob:` 图片 URL，使生成或预览的图片资源可以正确渲染。',
+          '**terminal:** 改进 XTerminal 组件的休眠逻辑。',
+          '**zmodem:** 改进 Zmodem 上传过程中的冲突处理。',
+        ],
+      },
+      {
+        title: '文档',
+        items: ['**readme:** 在 README 文件中新增 macOS 安装说明。', '**i18n:** 优化 Zmodem 冲突处理提示文案，使表达更清晰。'],
+      },
+    ],
+  },
   {
     version: '[1.1.16] - 2026-07-21',
     sections: [

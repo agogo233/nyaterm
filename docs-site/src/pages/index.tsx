@@ -47,9 +47,8 @@ type LatestDownloadManifest = {
 const latestDownloadManifestUrl = 'https://downloads.nyaterm.app/latest.json';
 const downloadBaseUrl = 'https://downloads.nyaterm.app';
 
-// Fallback version for portable download links before the manifest loads.
-// Portable zips have no `.sig`, so they never appear in latest.json's platforms;
-// their URLs are derived from the manifest `version` instead (see buildPortableHref).
+// Fallback for the initial render and older manifests that predate portable targets.
+// The application updater itself never uses this unsigned URL derivation.
 const fallbackPortableVersion = 'latest';
 
 const portableArchByKey: Partial<Record<DownloadPlatformKey, string>> = {
@@ -65,7 +64,6 @@ function buildPortableHref(key: DownloadPlatformKey, version: string): string | 
 
   return `${downloadBaseUrl}/releases/v${version}/NyaTerm_${version}_windows_${arch}_portable.zip`;
 }
-
 const downloadPlatforms: DownloadPlatform[] = [
   {
     key: 'windows-x86_64',
@@ -237,15 +235,17 @@ function getPlatformKeyFromHints(os: string, architecture: string): DownloadPlat
 
 function getDownloadPlatformsFromManifest(manifest: LatestDownloadManifest): DownloadPlatform[] {
   return downloadPlatforms.map((platform) => {
-    // Portable zips have no `.sig`, so they never appear in manifest.platforms;
-    // derive their URL from the manifest version when available.
-    if (portableArchByKey[platform.key]) {
-      const href = manifest.version ? buildPortableHref(platform.key, manifest.version) : undefined;
-      return href ? {...platform, href} : platform;
+    const manifestHref = manifest.platforms?.[platform.key]?.url;
+    if (manifestHref) {
+      return {...platform, href: manifestHref};
     }
 
-    const href = manifest.platforms?.[platform.key]?.url;
-    return href ? {...platform, href} : platform;
+    if (portableArchByKey[platform.key] && manifest.version) {
+      const fallbackHref = buildPortableHref(platform.key, manifest.version);
+      return fallbackHref ? {...platform, href: fallbackHref} : platform;
+    }
+
+    return platform;
   });
 }
 

@@ -449,6 +449,18 @@ pub(crate) async fn wait_for_transfer_ready(controller: &Arc<TransferController>
     }
 }
 
+pub(crate) async fn wait_for_transfer_cancelled(
+    controller: &Arc<TransferController>,
+) -> AppResult<()> {
+    loop {
+        let notified = controller.notify.notified();
+        if controller.control_state() == TransferControlState::Cancelled {
+            return Err(AppError::Cancelled(TRANSFER_CANCELLED_MESSAGE.to_string()));
+        }
+        notified.await;
+    }
+}
+
 pub(crate) async fn wait_for_transfer_chain(
     controller: &Arc<TransferController>,
     parent_controller: Option<&Arc<TransferController>>,

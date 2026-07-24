@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { SelectItem } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useApp } from "@/context/AppContext";
+import { useSettingsDraft } from "@/context/SettingsDraftContext";
 import {
   aiModelIdForCredential,
   aiModelIdForProvider,
@@ -26,7 +27,6 @@ import {
   getCustomProviderBaseUrlPlaceholder,
   getProviderLabel,
   isBuiltinProvider,
-  mergeModelDiscoveries,
   requiresManualCustomModelEntry,
   supportsCustomModelDiscovery,
 } from "@/lib/aiSettings";
@@ -35,7 +35,6 @@ import { invoke } from "@/lib/invoke";
 import type {
   AICustomActionConfig,
   AIModelConfigItem,
-  AIModelDiscovery,
   AIPermissionMode,
   AIProviderCredential,
   AIProviderKind,
@@ -739,7 +738,8 @@ function groupModels(
 
 export function AiModelsTab() {
   const { t } = useTranslation();
-  const { appSettings, updateAppSettings } = useApp();
+  const { appSettings, updateAppSettings, replaceAppSettings } = useApp();
+  const { committedSettings } = useSettingsDraft();
   const ai = appSettings.ai;
   const [query, setQuery] = useState("");
   const [manualModelNames, setManualModelNames] = useState<Record<string, string>>({});
@@ -824,14 +824,15 @@ export function AiModelsTab() {
     update({ models, default_model_id: updateDefaultModelId(ai, models) });
   };
 
-  const hasRefreshableCustomCredential = ai.provider_credentials.some(supportsCustomModelDiscovery);
+  const canRefreshModels =
+    ai.codex.enabled || ai.provider_credentials.some(supportsCustomModelDiscovery);
 
   const refreshModels = async () => {
     setRefreshing(true);
     try {
-      const discoveries = await invoke<AIModelDiscovery[]>("list_ai_model_names");
-      const models = mergeModelDiscoveries(ai.models, discoveries);
-      updateModels(models);
+      const refreshedAi = await invoke<AISettings>("refresh_ai_model_settings", { aiSettings: ai });
+      updateAppSettings({ ai: refreshedAi });
+      replaceAppSettings({ ...committedSettings, ai: refreshedAi });
       toast.success(t("ai.modelsRefreshed"));
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -995,7 +996,7 @@ export function AiModelsTab() {
           <Button
             size="icon-sm"
             variant="outline"
-            disabled={refreshing || !hasRefreshableCustomCredential}
+            disabled={refreshing || !canRefreshModels}
             onClick={() => void refreshModels()}
             title={t("ai.refreshModels")}
           >

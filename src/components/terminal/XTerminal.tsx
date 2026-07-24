@@ -2208,8 +2208,14 @@ export default function XTerminal({
       }
     };
 
-    const canHibernateRenderer = () => {
-      if (!isTerminalAlive() || visibleRef.current || hibernationPendingRef.current) return false;
+    const canHibernateRenderer = (options: { allowPending?: boolean } = {}) => {
+      if (
+        !isTerminalAlive() ||
+        visibleRef.current ||
+        (!options.allowPending && hibernationPendingRef.current)
+      ) {
+        return false;
+      }
       if (sessionTypeRef.current === "Local") return false;
       if (!["SSH", "Telnet", "Serial"].includes(sessionTypeRef.current)) return false;
       if (terminal.buffer.active.type === "alternate") return false;
@@ -2226,19 +2232,36 @@ export default function XTerminal({
       if (!canHibernateRenderer()) return;
 
       hibernationPendingRef.current = true;
+      let rendererDetached = false;
+      const restoreDetachedRenderer = async () => {
+        if (!rendererDetached) return;
+        rendererDetached = false;
+        try {
+          await invoke("attach_session", { sessionId });
+        } catch {
+          // The session may be closing; the normal close/error listeners handle that path.
+        }
+      };
+
       try {
         await invoke("detach_session_renderer", { sessionId });
-        if (!canHibernateRenderer()) return;
+        rendererDetached = true;
+        if (!canHibernateRenderer({ allowPending: true })) {
+          await restoreDetachedRenderer();
+          return;
+        }
 
         const serialized = serializeTerminalText(terminal, serializeAddon);
         const queuedTail = outputQueueToBoundedString(outputQueueRef.current);
         hibernationSnapshotRef.current = `${serialized}${queuedTail}`;
         hibernationCleanupRef.current = true;
+        rendererDetached = false;
         setTerminalReady(false);
         setHibernated(true);
         setTerminalGeneration((generation) => generation + 1);
       } catch {
         hibernationSnapshotRef.current = null;
+        await restoreDetachedRenderer();
       } finally {
         hibernationPendingRef.current = false;
       }

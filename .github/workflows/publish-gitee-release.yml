@@ -219,11 +219,41 @@ jobs:
 
       - name: Install Python dependencies
         shell: bash
+        env:
+            PIP_DISABLE_PIP_VERSION_CHECK: "1"
+            PIP_NO_INPUT: "1"
         run: |
-          python3 -m venv "$RUNNER_TEMP/gitee-release-venv"
-          "$RUNNER_TEMP/gitee-release-venv/bin/python" -m pip install --upgrade pip
-          "$RUNNER_TEMP/gitee-release-venv/bin/python" -m pip install requests requests-toolbelt
-          echo "PYTHON_BIN=$RUNNER_TEMP/gitee-release-venv/bin/python" >> "$GITHUB_ENV"
+            set -euo pipefail
+
+            VENV_DIR="$RUNNER_TEMP/gitee-release-venv"
+            PYTHON_BIN="$VENV_DIR/bin/python"
+
+            # 防止自托管 Runner 残留损坏或不完整的虚拟环境
+            rm -rf "$VENV_DIR"
+            python3 -m venv "$VENV_DIR"
+
+            echo "Python:"
+            "$PYTHON_BIN" --version
+
+            echo "Effective pip configuration:"
+            "$PYTHON_BIN" -m pip config debug || true
+
+            "$PYTHON_BIN" -m pip install \
+            --upgrade \
+            --no-cache-dir \
+            --index-url "https://pypi.org/simple" \
+            pip setuptools wheel
+
+            "$PYTHON_BIN" -m pip install \
+            --upgrade \
+            --no-cache-dir \
+            --index-url "https://pypi.org/simple" \
+            "requests==2.34.2" \
+            "requests-toolbelt==1.0.0"
+
+            "$PYTHON_BIN" -m pip check
+
+            echo "PYTHON_BIN=$PYTHON_BIN" >> "$GITHUB_ENV"
 
       - name: Create or update Gitee release and upload assets
         env:

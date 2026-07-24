@@ -1,18 +1,22 @@
 use bytes::Bytes;
 use dashmap::DashMap as HashMap;
 use std::{
+    future::Future,
+    pin::Pin,
     sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
     },
+    task::{Context, Poll},
     time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{mpsc, oneshot},
+    time::Sleep,
 };
 
-use super::{error::Error, runtime, Handler};
+use super::{error::Error, Handler};
 use crate::{
     client::{run, Config},
     de,
@@ -51,10 +55,81 @@ impl SessionInner {
             return validate;
         }
 
-        Err(Error::UnexpectedBehavior(format!(
-            "Packet {:?} for unknown recipient",
-            id
-        )))
+        warn!("Packet {:?} for unknown recipient", id);
+        Ok(())
+    }
+}
+
+pub(crate) struct PendingRequest {
+    id: Option<u32>,
+    requests: Arc<SharedRequests>,
+    receiver: oneshot::Receiver<SftpResult<Packet>>,
+    timeout: Pin<Box<Sleep>>,
+    completed: bool,
+}
+
+impl PendingRequest {
+    fn new(
+        id: Option<u32>,
+        receiver: oneshot::Receiver<SftpResult<Packet>>,
+        timeout: Duration,
+        requests: Arc<SharedRequests>,
+    ) -> Self {
+        Self {
+            id,
+            requests,
+            receiver,
+            timeout: Box::pin(tokio::time::sleep(timeout)),
+            completed: false,
+        }
+    }
+}
+
+impl Future for PendingRequest {
+    type Output = SftpResult<Packet>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match Pin::new(&mut self.receiver).poll(cx) {
+            Poll::Ready(Ok(result)) => {
+                self.completed = true;
+                return Poll::Ready(result);
+            }
+            Poll::Ready(Err(_)) => {
+                self.completed = true;
+                return Poll::Ready(Err(Error::UnexpectedBehavior("sender dropped".into())));
+            }
+            Poll::Pending => {}
+        }
+
+        match self.timeout.as_mut().poll(cx) {
+            Poll::Ready(()) => {
+                self.completed = true;
+                self.requests.remove(&self.id);
+                Poll::Ready(Err(Error::Timeout))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for PendingRequest {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.requests.remove(&self.id);
+        }
+    }
+}
+
+fn fail_all_pending_requests(requests: &SharedRequests, error: Error) {
+    let ids = requests
+        .iter()
+        .map(|entry| *entry.key())
+        .collect::<Vec<_>>();
+
+    for id in ids {
+        if let Some((_, sender)) = requests.remove(&id) {
+            let _ = sender.send(Err(error.clone()));
+        }
     }
 }
 
@@ -163,8 +238,14 @@ impl RawSftpSession {
             requests: req_map.clone(),
         };
 
+        let fail_requests = req_map.clone();
+
         Self {
-            tx: run(stream, inner),
+            tx: run(
+                stream,
+                inner,
+                Arc::new(move |error| fail_all_pending_requests(&fail_requests, error)),
+            ),
             requests: req_map,
             next_req_id: AtomicU32::new(1),
             handles: AtomicU64::new(0),
@@ -184,11 +265,7 @@ impl RawSftpSession {
         self.limits = limits;
     }
 
-    fn send(
-        &self,
-        id: Option<u32>,
-        packet: Packet,
-    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
+    fn send(&self, id: Option<u32>, packet: Packet) -> SftpResult<PendingRequest> {
         if self.tx.is_closed() {
             return Err(Error::UnexpectedBehavior("session closed".into()));
         }
@@ -203,23 +280,21 @@ impl RawSftpSession {
 
         let (tx, rx) = oneshot::channel();
         self.requests.insert(id, tx);
-        self.tx.send(bytes)?;
+        if let Err(error) = self.tx.send(bytes) {
+            self.requests.remove(&id);
+            return Err(error.into());
+        }
 
-        Ok(rx)
+        Ok(PendingRequest::new(
+            id,
+            rx,
+            Duration::from_secs(self.timeout.load(Ordering::Relaxed)),
+            self.requests.clone(),
+        ))
     }
 
     async fn request(&self, id: Option<u32>, packet: Packet) -> SftpResult<Packet> {
-        let rx = self.send(id, packet)?;
-        let timeout = self.timeout.load(Ordering::Relaxed);
-
-        match runtime::timeout(Duration::from_secs(timeout), rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(Error::UnexpectedBehavior("sender dropped".into())),
-            Err(error) => {
-                self.requests.remove(&id);
-                Err(error)
-            }
-        }
+        self.send(id, packet)?.await
     }
 
     fn use_next_id(&self) -> u32 {
@@ -355,7 +430,7 @@ impl RawSftpSession {
     pub(crate) fn close_nowait(
         &self,
         handle: String,
-    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
+    ) -> SftpResult<PendingRequest> {
         let id = self.use_next_id();
         self.send(Some(id), Close { id, handle }.into())
     }
@@ -420,7 +495,7 @@ impl RawSftpSession {
         handle: String,
         offset: u64,
         data: Vec<u8>,
-    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
+    ) -> SftpResult<PendingRequest> {
         if self.limits.write_len.is_some_and(|w| data.len() as u64 > w) {
             return Err(Error::Limited("write limit reached".to_owned()));
         }
@@ -984,6 +1059,66 @@ impl RawSftpSession {
             }
             _ => Err(Error::UnexpectedPacket),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config(request_timeout_secs: u64) -> Config {
+        Config {
+            request_timeout_secs,
+            ..Config::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn write_nowait_times_out_and_cleans_pending_request() {
+        let (client, _server) = tokio::io::duplex(4096);
+        let session = RawSftpSession::new_with_config(client, test_config(0));
+        let pending = session
+            .write_nowait("handle".to_string(), 0, b"payload".to_vec())
+            .expect("write request should be queued");
+
+        assert_eq!(session.requests.len(), 1);
+
+        let error = pending.await.expect_err("write ack should time out");
+
+        assert!(matches!(error, Error::Timeout));
+        assert!(session.requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropped_pending_request_cleans_pending_map() {
+        let (client, _server) = tokio::io::duplex(4096);
+        let session = RawSftpSession::new_with_config(client, test_config(10));
+        let pending = session
+            .write_nowait("handle".to_string(), 0, b"payload".to_vec())
+            .expect("write request should be queued");
+
+        assert_eq!(session.requests.len(), 1);
+        drop(pending);
+
+        assert!(session.requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stream_write_failure_wakes_pending_request() {
+        let (client, server) = tokio::io::duplex(64);
+        drop(server);
+        let session = RawSftpSession::new_with_config(client, test_config(10));
+        let pending = session
+            .write_nowait("handle".to_string(), 0, vec![0; 1024])
+            .expect("write request should be queued before write task observes closure");
+
+        let error = tokio::time::timeout(Duration::from_secs(1), pending)
+            .await
+            .expect("pending request should be failed promptly")
+            .expect_err("stream write failure should fail the request");
+
+        assert!(matches!(error, Error::IO(_) | Error::UnexpectedBehavior(_)));
+        assert!(session.requests.is_empty());
     }
 }
 

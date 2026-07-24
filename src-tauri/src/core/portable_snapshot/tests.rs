@@ -19,6 +19,7 @@ mod tests {
         current.security.master_password = Some("encrypted-master".to_string());
         current.ui.left_width = 444.0;
         current.ui.active_left_panel = Some("fileExplorer".to_string());
+        current.ui.quick_cmd_selected_category = "local-category".to_string();
         current.ai.active_profile_id = "local-profile".to_string();
         current.ai.provider_profiles[0].api_key = Some("local-key".to_string());
 
@@ -37,6 +38,10 @@ mod tests {
         );
         assert_eq!(merged.ui.left_width, current.ui.left_width);
         assert_eq!(merged.ui.active_left_panel, current.ui.active_left_panel);
+        assert_eq!(
+            merged.ui.quick_cmd_selected_category,
+            current.ui.quick_cmd_selected_category
+        );
         assert_eq!(merged.ui.language.as_deref(), Some("zh-CN"));
         assert_eq!(merged.ui.saved_connections_sort_mode, "name-asc");
         assert_eq!(merged.ai.active_profile_id, "synced-profile");
@@ -220,6 +225,7 @@ mod tests {
             ai: config::AiSettings::default(),
             ui: PortableUiSettings {
                 language: Some("en".to_string()),
+                header_status_visible: true,
                 show_remote_stats: false,
                 remote_stats_interval: 3,
                 show_gpu_monitor: false,

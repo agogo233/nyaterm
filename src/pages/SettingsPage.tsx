@@ -43,6 +43,16 @@ import { TerminalTab } from "@/components/settings/TerminalTab";
 import { TransferTab } from "@/components/settings/TransferTab";
 import { TranslationTab } from "@/components/settings/TranslationTab";
 import { ActionButton, ActionFooter } from "@/components/ui/action-footer";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppContext, useApp } from "@/context/AppContext";
@@ -50,6 +60,7 @@ import { SettingsDraftContext } from "@/context/SettingsDraftContext";
 import { type CloudSyncValidationCode, getCloudSyncValidationErrors } from "@/lib/cloudSync";
 import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
+import { prepareForModalChildClose } from "@/lib/windowManager";
 import type { AppSettings, UiConfig } from "@/types/global";
 
 type SettingsTabConfig = {
@@ -93,9 +104,11 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState(initialTab);
   const [draftSettings, setDraftSettings] = useState<AppSettings>(committedSettings);
   const [isSaving, setIsSaving] = useState(false);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollStates = useRef<Record<string, number>>({});
+  const forceCloseRef = useRef(false);
 
   useLayoutEffect(() => {
     if (scrollContainerRef.current) {
@@ -342,6 +355,14 @@ export default function SettingsPage() {
   );
   const saveBlockedMessage = saveBlockState?.message ?? null;
 
+  const closeSettingsWindow = useCallback(async () => {
+    const currentWindow = getCurrentWindow();
+    forceCloseRef.current = true;
+    await currentWindow.close().catch(() => {
+      forceCloseRef.current = false;
+    });
+  }, []);
+
   const saveDraftSettings = useCallback(
     async (closeAfterSave: boolean) => {
       const validationState = getDraftSaveBlockState();
@@ -365,7 +386,7 @@ export default function SettingsPage() {
 
         if (closeAfterSave) {
           setIsSaving(false);
-          void getCurrentWindow().close();
+          await closeSettingsWindow();
           return;
         } else {
           toast.success(t("settings.saveSuccess"));
@@ -376,21 +397,29 @@ export default function SettingsPage() {
         setIsSaving(false);
       }
     },
-    [app, draftSettings, getDraftSaveBlockState, t],
+    [app, closeSettingsWindow, draftSettings, getDraftSaveBlockState, t],
   );
 
   const handleCancel = useCallback(async () => {
     setDraftSettings(committedSettings);
-    await getCurrentWindow().close();
-  }, [committedSettings]);
+    await closeSettingsWindow();
+  }, [closeSettingsWindow, committedSettings]);
+
+  const requestClose = useCallback(() => {
+    if (isDirty) {
+      setCloseConfirmOpen(true);
+      return;
+    }
+    void closeSettingsWindow();
+  }, [closeSettingsWindow, isDirty]);
 
   const handleConfirm = useCallback(async () => {
     if (!isDirty) {
-      await getCurrentWindow().close();
+      await closeSettingsWindow();
       return;
     }
     await saveDraftSettings(true);
-  }, [isDirty, saveDraftSettings]);
+  }, [closeSettingsWindow, isDirty, saveDraftSettings]);
 
   const handleApply = useCallback(async () => {
     if (!isDirty || isSaving) {
@@ -398,6 +427,30 @@ export default function SettingsPage() {
     }
     await saveDraftSettings(false);
   }, [isDirty, isSaving, saveDraftSettings]);
+
+  useEffect(() => {
+    const currentWindow = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+
+    currentWindow
+      .onCloseRequested(async (event) => {
+        if (forceCloseRef.current || !isDirty) {
+          await prepareForModalChildClose(currentWindow.label).catch(() => {});
+          return;
+        }
+
+        event.preventDefault();
+        setCloseConfirmOpen(true);
+      })
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch(() => {});
+
+    return () => {
+      unlisten?.();
+    };
+  }, [isDirty]);
 
   return (
     <div
@@ -407,9 +460,7 @@ export default function SettingsPage() {
       <ChildWindowHeader
         title={t("settings.title")}
         icon={<MdSettings className="text-base" />}
-        onClose={() => {
-          void handleCancel();
-        }}
+        onClose={requestClose}
       />
 
       <SettingsDraftContext.Provider
@@ -574,6 +625,13 @@ export default function SettingsPage() {
                         </Button>
                       ) : null}
                     </div>
+                  ) : isDirty ? (
+                    <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+                      <span aria-hidden="true" className="text-primary">
+                        ●
+                      </span>
+                      <span className="min-w-0 truncate">{t("settings.unappliedChanges")}</span>
+                    </div>
                   ) : null
                 }
               >
@@ -626,6 +684,38 @@ export default function SettingsPage() {
           </div>
         </AppContext.Provider>
       </SettingsDraftContext.Provider>
+
+      <AlertDialog open={closeConfirmOpen} onOpenChange={setCloseConfirmOpen}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.unsavedChangesTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("settings.unsavedChangesDesc")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="group-data-[size=sm]/alert-dialog-content:grid-cols-3">
+            <AlertDialogCancel disabled={isSaving}>
+              {t("settings.continueEditing")}
+            </AlertDialogCancel>
+            <Button
+              variant="outline"
+              disabled={isSaving}
+              onClick={() => {
+                void saveDraftSettings(true);
+              }}
+            >
+              {isSaving ? t("common.saving") : t("settings.saveAndClose")}
+            </Button>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={isSaving}
+              onClick={() => {
+                void handleCancel();
+              }}
+            >
+              {t("settings.discardChanges")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

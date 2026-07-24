@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 This changelog is inferred from release bump commits in git history (for example `chore: bump version to vX.Y.Z`) and grouped by Conventional Commit type.
 
+## [1.1.17] - 2026-07-22
+
+### Fixed
+
+- **csp:** Allow `blob:` image URLs in the content security policy so generated or previewed image assets can render correctly.
+- **terminal:** Improve hibernation logic in the XTerminal component.
+- **zmodem:** Improve conflict resolution handling during Zmodem uploads.
+
+### Documentation
+
+- **readme:** Add macOS installation instructions to the README files.
+- **i18n:** Clarify Zmodem conflict resolution messages.
+
 ## [1.1.16] - 2026-07-21
 
 ### Added

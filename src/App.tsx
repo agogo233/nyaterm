@@ -297,9 +297,11 @@ function App() {
     setIsLocked,
     settingsLoaded,
     startupRestoreComplete,
+    runtimeInfo,
     runtimeInfoLoaded,
   } = useApp();
   const uiConfig = appSettings.ui;
+  const portable = runtimeInfo.portable;
   const remoteStatsEnabled = uiConfig.show_remote_stats ?? true;
   const updateAutoIconForSessionStart = useCallback(
     (connectionId: string | null | undefined, sessionId: string) => {
@@ -448,7 +450,7 @@ function App() {
     if (!runtimeInfoLoaded) return;
 
     const timer = setTimeout(() => {
-      checkForUpdate()
+      checkForUpdate(portable)
         .then((info) => {
           if (info) {
             setUpdateInfo(info);
@@ -458,7 +460,7 @@ function App() {
         .catch(() => {});
     }, 3000);
     return () => clearTimeout(timer);
-  }, [runtimeInfoLoaded]);
+  }, [portable, runtimeInfoLoaded]);
 
   const handleOpenPanel = useCallback(
     (panelId: "activeSessions" | "syncBackupHistory") => {

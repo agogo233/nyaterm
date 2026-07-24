@@ -7,6 +7,7 @@ use crate::core::ai::{
 };
 use crate::error::AppResult;
 use std::sync::Arc;
+use tauri::Emitter;
 
 #[tauri::command]
 pub fn start_ai_chat_stream(
@@ -24,6 +25,105 @@ pub async fn list_ai_model_names(app: tauri::AppHandle) -> AppResult<Vec<ai::AiM
     let manager = ai::manager_from_app(&app).await?;
     models.extend(manager.list_models(&settings.ai).await?);
     Ok(models)
+}
+
+#[tauri::command]
+pub async fn refresh_ai_model_settings(
+    app: tauri::AppHandle,
+    ai_settings: config::AiSettings,
+) -> AppResult<config::AiSettings> {
+    let existing = config::load_app_settings(&app)?;
+    let mut merged_ai = config::merge_masked_ai_settings(&existing.ai, ai_settings);
+
+    let mut discoveries = ai::list_model_names_for_settings(&merged_ai).await?;
+    let manager = ai::manager_from_app(&app).await?;
+    discoveries.extend(manager.list_models(&merged_ai).await?);
+
+    merged_ai.models = merge_model_discoveries(&merged_ai, discoveries);
+    merged_ai.default_model_id = update_default_model_id(&merged_ai, &merged_ai.models);
+    config::normalize_ai_settings(&mut merged_ai);
+
+    let mut persisted = existing;
+    persisted.cloud_sync = config::encrypt_cloud_sync_settings(persisted.cloud_sync)?;
+    persisted.ai = config::encrypt_ai_settings(merged_ai.clone())?;
+    config::save_app_settings(&app, &persisted)?;
+
+    let notify_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::core::cloud_sync::notify_config_changed(&notify_app).await;
+    });
+    let _ = app.emit("settings-changed", ());
+    crate::tray::schedule_refresh(&app);
+
+    Ok(config::mask_ai_settings(merged_ai))
+}
+
+fn merge_model_discoveries(
+    settings: &config::AiSettings,
+    discoveries: Vec<ai::AiModelDiscovery>,
+) -> Vec<config::AiModelConfigItem> {
+    let old_by_id = settings
+        .models
+        .iter()
+        .map(|model| (model.id.as_str(), model))
+        .collect::<std::collections::HashMap<_, _>>();
+    let now = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| String::new());
+    let mut seen = std::collections::HashSet::new();
+    let mut merged = Vec::new();
+
+    for item in discoveries {
+        if !seen.insert(item.id.clone()) {
+            continue;
+        }
+        if let Some(old) = old_by_id.get(item.id.as_str()) {
+            let mut model = (*old).clone();
+            model.last_seen_at = Some(now.clone());
+            merged.push(model);
+        } else {
+            merged.push(config::AiModelConfigItem {
+                id: item.id,
+                name: item.name,
+                backend: item.backend,
+                provider_kind: item.provider_kind,
+                credential_id: item.credential_id,
+                enabled: false,
+                source: item.source,
+                last_seen_at: Some(now.clone()),
+            });
+        }
+    }
+
+    for old in &settings.models {
+        if !seen.contains(&old.id)
+            && (old.source == config::AiModelSource::Manual
+                || old.backend == config::AiBackendKind::Codex)
+        {
+            merged.push(old.clone());
+        }
+    }
+
+    merged.sort_by(|left, right| left.name.cmp(&right.name));
+    merged
+}
+
+fn update_default_model_id(
+    settings: &config::AiSettings,
+    models: &[config::AiModelConfigItem],
+) -> Option<String> {
+    if let Some(default_model_id) = settings.default_model_id.as_deref() {
+        if models
+            .iter()
+            .any(|model| model.enabled && model.id == default_model_id)
+        {
+            return Some(default_model_id.to_string());
+        }
+    }
+    models
+        .iter()
+        .find(|model| model.enabled)
+        .map(|model| model.id.clone())
 }
 
 #[tauri::command]
@@ -140,4 +240,93 @@ pub fn get_ai_audit_logs(
     limit: Option<usize>,
 ) -> AppResult<Vec<AiAuditLog>> {
     ai::get_ai_audit_logs(&app, limit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn codex_model(id: &str, name: &str, enabled: bool) -> config::AiModelConfigItem {
+        config::AiModelConfigItem {
+            id: id.to_string(),
+            name: name.to_string(),
+            backend: config::AiBackendKind::Codex,
+            provider_kind: None,
+            credential_id: None,
+            enabled,
+            source: config::AiModelSource::RustGenai,
+            last_seen_at: None,
+        }
+    }
+
+    fn manual_model(id: &str, name: &str) -> config::AiModelConfigItem {
+        config::AiModelConfigItem {
+            id: id.to_string(),
+            name: name.to_string(),
+            backend: config::AiBackendKind::Genai,
+            provider_kind: Some(config::AiProviderKind::OpenaiCompatible),
+            credential_id: Some("credential-a".to_string()),
+            enabled: true,
+            source: config::AiModelSource::Manual,
+            last_seen_at: None,
+        }
+    }
+
+    #[test]
+    fn model_discovery_merge_preserves_enabled_codex_and_manual_models() {
+        let mut settings = config::AiSettings {
+            models: vec![
+                codex_model("codex:gpt-5-codex", "gpt-5-codex", true),
+                manual_model("credential-a:manual-a", "manual-a"),
+            ],
+            default_model_id: Some("codex:gpt-5-codex".to_string()),
+            ..config::AiSettings::default()
+        };
+        config::normalize_ai_settings(&mut settings);
+
+        let models = merge_model_discoveries(
+            &settings,
+            vec![
+                ai::AiModelDiscovery {
+                    id: "codex:gpt-5-codex".to_string(),
+                    name: "gpt-5-codex".to_string(),
+                    backend: config::AiBackendKind::Codex,
+                    provider_kind: None,
+                    credential_id: None,
+                    source: config::AiModelSource::RustGenai,
+                },
+                ai::AiModelDiscovery {
+                    id: "codex:gpt-6-codex".to_string(),
+                    name: "gpt-6-codex".to_string(),
+                    backend: config::AiBackendKind::Codex,
+                    provider_kind: None,
+                    credential_id: None,
+                    source: config::AiModelSource::RustGenai,
+                },
+            ],
+        );
+
+        let existing = models
+            .iter()
+            .find(|model| model.id == "codex:gpt-5-codex")
+            .expect("existing codex model");
+        assert!(existing.enabled);
+        assert!(existing.last_seen_at.is_some());
+
+        let fresh = models
+            .iter()
+            .find(|model| model.id == "codex:gpt-6-codex")
+            .expect("new codex model");
+        assert!(!fresh.enabled);
+
+        assert!(
+            models
+                .iter()
+                .any(|model| model.id == "credential-a:manual-a")
+        );
+        assert_eq!(
+            update_default_model_id(&settings, &models).as_deref(),
+            Some("codex:gpt-5-codex")
+        );
+    }
 }
