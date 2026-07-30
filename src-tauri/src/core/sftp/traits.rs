@@ -1,11 +1,13 @@
 //! Unified `RemoteFs` trait that all remote file system backends implement.
 
+use super::transfer::TransferController;
 use super::util::{
     FileEntry, FileProperties, RemoteBinaryFile, RemoteFileAttributeUpdate, RemotePathRef,
     RemoteTextFile, WriteRemoteTextResult,
 };
 use crate::error::AppResult;
 use std::any::Any;
+use std::sync::Arc;
 
 /// Common interface for remote file system operations.
 ///
@@ -98,4 +100,26 @@ pub(crate) trait RemoteFs: Send + Sync {
         transfer_settings: &crate::config::TransferSettings,
         transfer_id: Option<String>,
     ) -> AppResult<()>;
+
+    async fn copy_remote_file_to_local_with_controller(
+        &self,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        remote_path: &str,
+        local_path: &str,
+        transfer_settings: &crate::config::TransferSettings,
+        controller: Arc<TransferController>,
+        parent_controller: Option<Arc<TransferController>>,
+    ) -> AppResult<u64>;
+
+    async fn copy_local_file_to_remote_with_controller(
+        &self,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        local_path: &str,
+        remote_path: &str,
+        transfer_settings: &crate::config::TransferSettings,
+        controller: Arc<TransferController>,
+        parent_controller: Option<Arc<TransferController>>,
+    ) -> AppResult<u64>;
 }

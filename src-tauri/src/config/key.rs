@@ -21,6 +21,12 @@ pub struct SshKey {
     #[serde(default)]
     pub passphrase: Option<String>,
 
+    /// Transient: plaintext private key content pasted from the UI.
+    #[serde(default, skip_serializing)]
+    pub key_data: Option<String>,
+    /// Transient: plaintext OpenSSH user certificate content pasted from the UI.
+    #[serde(default, skip_serializing)]
+    pub cert_data: Option<String>,
     /// Transient: file path from the UI file picker.
     #[serde(default, skip_serializing)]
     pub key_file_path: Option<String>,
@@ -95,6 +101,8 @@ mod tests {
             key: Some("encrypted-key".to_string()),
             cert: Some("encrypted-cert".to_string()),
             passphrase: None,
+            key_data: None,
+            cert_data: None,
             key_file_path: None,
             cert_file_path: None,
             has_key_data: false,

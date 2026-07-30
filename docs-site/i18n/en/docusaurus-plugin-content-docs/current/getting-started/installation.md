@@ -28,8 +28,8 @@ For the Windows portable edition, extract the zip and run `NyaTerm.exe`. **Help 
 
 Direct downloads for the Windows portable edition:
 
-- [NyaTerm_1.1.17_windows_x64_portable.zip](https://downloads.nyaterm.app/releases/v1.1.17/NyaTerm_1.1.17_windows_x64_portable.zip) (x64)
-- [NyaTerm_1.1.17_windows_arm64_portable.zip](https://downloads.nyaterm.app/releases/v1.1.17/NyaTerm_1.1.17_windows_arm64_portable.zip) (ARM64)
+- [NyaTerm_1.1.18_windows_x64_portable.zip](https://downloads.nyaterm.app/releases/v1.1.18/NyaTerm_1.1.18_windows_x64_portable.zip) (x64)
+- [NyaTerm_1.1.18_windows_arm64_portable.zip](https://downloads.nyaterm.app/releases/v1.1.18/NyaTerm_1.1.18_windows_arm64_portable.zip) (ARM64)
 
 ### macOS
 

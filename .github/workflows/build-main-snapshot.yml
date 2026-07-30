@@ -167,13 +167,19 @@ jobs:
           const fs = require('fs');
           const os = require('os');
           const path = require('path');
+          const crypto = require('crypto');
 
           const keyB64 = process.env.TAURI_SIGNING_PRIVATE_KEY_B64 || '';
           const runnerTemp = process.env.RUNNER_TEMP || os.tmpdir();
           const keyPath = path.join(runnerTemp, 'tauri-updater.key');
+          const keyText = Buffer.from(keyB64, 'base64').toString('utf8').trim();
+          const envDelimiter = `TAURI_KEY_${crypto.randomUUID().replace(/-/g, '')}`;
 
-          fs.writeFileSync(keyPath, Buffer.from(keyB64, 'base64'));
-          fs.appendFileSync(process.env.GITHUB_ENV, `TAURI_SIGNING_PRIVATE_KEY=${keyPath}\n`);
+          fs.writeFileSync(keyPath, keyText);
+          fs.appendFileSync(
+            process.env.GITHUB_ENV,
+            `TAURI_SIGNING_PRIVATE_KEY<<${envDelimiter}\n${keyText}\n${envDelimiter}\n`
+          );
 
           console.log(`Tauri updater signing key prepared at: ${keyPath}`);
           NODE

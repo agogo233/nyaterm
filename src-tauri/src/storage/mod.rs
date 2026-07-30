@@ -253,9 +253,19 @@ fn storage() -> AppResult<Arc<Storage>> {
         .ok_or_else(|| AppError::Storage("redb storage did not initialize".to_string()))
 }
 fn default_config_dir() -> AppResult<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::Config("cannot determine home directory".to_string()))?;
-    Ok(home.join(".nyaterm"))
+    #[cfg(test)]
+    {
+        return Ok(
+            std::env::temp_dir().join(format!("nyaterm-test-storage-{}", std::process::id()))
+        );
+    }
+
+    #[cfg(not(test))]
+    {
+        let home = dirs::home_dir()
+            .ok_or_else(|| AppError::Config("cannot determine home directory".to_string()))?;
+        Ok(home.join(".nyaterm"))
+    }
 }
 
 impl Storage {

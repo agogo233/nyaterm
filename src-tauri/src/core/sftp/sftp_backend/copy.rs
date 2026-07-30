@@ -433,6 +433,7 @@ impl SftpBackend {
 }
 
 impl SftpBackend {
+    #[allow(dead_code)]
     pub(crate) async fn resolve_remote_copy_target_info(
         &self,
         app: &tauri::AppHandle,
@@ -466,6 +467,7 @@ impl SftpBackend {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn copy_local_file_to_remote(
         &self,
         app: &tauri::AppHandle,
@@ -618,6 +620,7 @@ impl SftpBackend {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn copy_remote_file_to_local(
         &self,
         app: &tauri::AppHandle,
@@ -929,6 +932,7 @@ impl SftpBackend {
         Ok((files, total_size))
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn copy_local_directory_to_remote(
         &self,
         app: &tauri::AppHandle,

@@ -185,6 +185,10 @@ pub(super) fn sftp_attrs_is_symlink(attrs: &FileAttributes) -> bool {
     })
 }
 
+pub(super) fn permissions_to_preserve_after_write(permissions: Option<u32>) -> Option<u32> {
+    permissions.map(|permissions| permissions & POSIX_MODE_MASK)
+}
+
 pub(super) fn normalize_remote_dir_path(path: &str) -> &str {
     if path == "/" {
         "/"

@@ -939,9 +939,11 @@ fn prepare_termius_keys(keys: &[TermiusRawSshKey]) -> AppResult<PreparedTermiusK
             id,
             name: normalize_optional_string(key.label.clone())
                 .unwrap_or_else(|| "Termius SSH Key".to_string()),
-            key: Some(crypto::encrypt(&private_key)?),
+            key: Some(encrypt_import_secret(&private_key)?),
             cert: None,
             passphrase: encrypt_optional_secret(key.passphrase.clone())?,
+            key_data: None,
+            cert_data: None,
             key_file_path: None,
             cert_file_path: None,
             has_key_data: false,
@@ -982,7 +984,7 @@ fn prepare_termius_passwords(
                         .or_else(|| normalize_optional_string(host.address.clone()))
                         .unwrap_or_else(|| "Termius host".to_string())
                 ),
-                password: Some(crypto::encrypt(&password)?),
+                password: Some(encrypt_import_secret(&password)?),
                 has_password: false,
             });
         }
@@ -1003,7 +1005,7 @@ fn prepare_termius_passwords(
                         .or_else(|| normalize_optional_string(identity.username.clone()))
                         .unwrap_or_else(|| "Termius identity".to_string())
                 ),
-                password: Some(crypto::encrypt(&password)?),
+                password: Some(encrypt_import_secret(&password)?),
                 has_password: false,
             });
         }

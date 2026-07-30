@@ -225,6 +225,53 @@ pub(crate) fn describe_permissions(mode: Option<u32>) -> String {
     }
 }
 
+pub(crate) fn permissions_string_to_octal_mode(permissions: &str) -> Option<String> {
+    let chars: Vec<char> = permissions.chars().collect();
+    if chars.len() < 10 {
+        return None;
+    }
+
+    let mut mode = 0u32;
+    if chars[1] == 'r' {
+        mode |= 0o400;
+    }
+    if chars[2] == 'w' {
+        mode |= 0o200;
+    }
+    match chars[3] {
+        'x' => mode |= 0o100,
+        's' => mode |= 0o4100,
+        'S' => mode |= 0o4000,
+        _ => {}
+    }
+    if chars[4] == 'r' {
+        mode |= 0o040;
+    }
+    if chars[5] == 'w' {
+        mode |= 0o020;
+    }
+    match chars[6] {
+        'x' => mode |= 0o010,
+        's' => mode |= 0o2010,
+        'S' => mode |= 0o2000,
+        _ => {}
+    }
+    if chars[7] == 'r' {
+        mode |= 0o004;
+    }
+    if chars[8] == 'w' {
+        mode |= 0o002;
+    }
+    match chars[9] {
+        'x' => mode |= 0o001,
+        't' => mode |= 0o1001,
+        'T' => mode |= 0o1000,
+        _ => {}
+    }
+
+    Some(format!("{mode:04o}"))
+}
+
 pub(crate) fn owner_or_id(owner: &Option<String>, uid: Option<u32>) -> String {
     owner
         .as_deref()
@@ -326,7 +373,7 @@ fn is_windows_reserved_device_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        RemotePathRef, decode_raw_path_token, raw_path_token,
+        RemotePathRef, decode_raw_path_token, permissions_string_to_octal_mode, raw_path_token,
         sanitize_download_file_name_for_platform,
     };
 
@@ -413,5 +460,26 @@ mod tests {
             sanitize_download_file_name_for_platform("100%.txt", false),
             "100%25.txt"
         );
+    }
+
+    #[test]
+    fn parses_ls_permissions_to_octal_mode() {
+        assert_eq!(
+            permissions_string_to_octal_mode("-rw-r--r--").as_deref(),
+            Some("0644")
+        );
+        assert_eq!(
+            permissions_string_to_octal_mode("-rwxr-xr-x").as_deref(),
+            Some("0755")
+        );
+        assert_eq!(
+            permissions_string_to_octal_mode("-rwsr-sr-t").as_deref(),
+            Some("7755")
+        );
+        assert_eq!(
+            permissions_string_to_octal_mode("-rwSr-Sr-T").as_deref(),
+            Some("7644")
+        );
+        assert_eq!(permissions_string_to_octal_mode("bad"), None);
     }
 }

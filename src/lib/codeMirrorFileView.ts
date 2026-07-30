@@ -4,7 +4,7 @@ import {
   closeBracketsKeymap,
   completionKeymap,
 } from "@codemirror/autocomplete";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, indentLess, insertTab } from "@codemirror/commands";
 import { cpp } from "@codemirror/lang-cpp";
 import { css } from "@codemirror/lang-css";
 import { go } from "@codemirror/lang-go";
@@ -269,7 +269,7 @@ export function codeMirrorFileViewExtensions(
     rectangularSelection(),
     crosshairCursor(),
     scrollPastEnd(),
-    keymap.of([indentWithTab, ...defaultKeymap, ...searchKeymap, ...foldKeymap]),
+    keymap.of([...defaultKeymap, ...searchKeymap, ...foldKeymap]),
     EditorView.lineWrapping,
     EditorView.theme({
       "&": {
@@ -366,6 +366,10 @@ export function codeMirrorFileViewExtensions(
       indentOnInput(),
       autocompletion(),
       closeBrackets(),
+      keymap.of([
+        { key: "Tab", run: insertTab },
+        { key: "Shift-Tab", run: indentLess },
+      ]),
       keymap.of([...closeBracketsKeymap, ...historyKeymap, ...completionKeymap]),
     );
   } else {

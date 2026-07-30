@@ -192,13 +192,14 @@ NyaTerm 可以在同一条 SSH 连接上多路复用多个终端会话。向同�
 支持两种输入形式：
 
 - `ssh://user@host:port` 形式的 URL
+- `ssh://user:password@host:port` 形式的 URL；密码只用于本次临时 SSH 会话，不会保存
 - `ssh [-p port] [-l user] user@host` 形式的命令字符串
 
 约定与限制：
 
 - 默认用户名为 `root`，默认端口为 `22`
 - 使用密码认证，不带代理、跳板机、登录后命令或 X11
-- 出于安全考虑，会拒绝内联密码（`user:pass@`）以及 `-J`、`-L/-R/-D`、`-i`、`-o ProxyJump/ProxyCommand` 等不支持的选项，并给出对应错误提示
+- 出于安全考虑，只有 `ssh://` URL 可携带一次性密码；命令形式的内联密码（`user:pass@host`）以及 `-J`、`-L/-R/-D`、`-i`、`-o ProxyJump/ProxyCommand` 等不支持的选项会被拒绝
 
 临时会话不会写入已保存连接：NyaTerm 会剥离连接 ID、代理、跳板机、登录后命令、X11 与算法偏好，因此它始终只是一次性会话。
 

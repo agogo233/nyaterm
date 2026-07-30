@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useApp } from "@/context/AppContext";
 import {
   getActiveGroupForSession,
-  getSyncPeers,
+  getSessionInputPeerIds,
   isSessionPausedInGroup,
   pauseSessionInGroup,
   removeSessionFromGroup,
@@ -306,24 +306,7 @@ function PaneXTerminal({
   const { tabs, setSyncGroups } = useApp();
 
   const syncPeerSessionIds = useMemo(() => {
-    const peers = getSyncPeers(sessionId, syncGroups);
-    if (!broadcastToAll) return peers;
-
-    const allSessionIds = new Set(peers);
-    for (const tab of tabs) {
-      const panes = (function collect(
-        n: import("@/types/global").PaneNode,
-      ): import("@/types/global").SessionPane[] {
-        if (n.kind === "leaf") return [n];
-        return [...collect(n.first), ...collect(n.second)];
-      })(tab.root);
-      for (const p of panes) {
-        if (p.sessionId !== sessionId && !p.connecting && !p.connectError) {
-          allSessionIds.add(p.sessionId);
-        }
-      }
-    }
-    return [...allSessionIds];
+    return getSessionInputPeerIds(sessionId, syncGroups, tabs, broadcastToAll);
   }, [sessionId, syncGroups, broadcastToAll, tabs]);
 
   const activeGroup = useMemo(

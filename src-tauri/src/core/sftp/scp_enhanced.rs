@@ -929,11 +929,17 @@ impl RemoteFs for ScpEnhancedBackend {
             path,
             uuid::Uuid::new_v4().to_string().replace('-', "")
         );
+        let original_mode = permissions_string_to_octal_mode(&props.permissions);
+        let restore_mode = original_mode
+            .as_deref()
+            .map(|mode| format!(" && chmod {} -- {}", sh_quote(mode), sh_quote(path)))
+            .unwrap_or_default();
         let cmd = format!(
-            "umask 077; cat > {} && mv -f -- {} {}",
+            "umask 077; cat > {} && mv -f -- {} {}{}",
             sh_quote(&tmp),
             sh_quote(&tmp),
-            sh_quote(path)
+            sh_quote(path),
+            restore_mode
         );
         let result = self.exec_with_stdin(&cmd, content.as_bytes()).await?;
         if result.exit_code != 0 {
@@ -1241,5 +1247,57 @@ impl RemoteFs for ScpEnhancedBackend {
                 Err(e)
             }
         }
+    }
+
+    async fn copy_remote_file_to_local_with_controller(
+        &self,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        remote_path: &str,
+        local_path: &str,
+        transfer_settings: &crate::config::TransferSettings,
+        controller: Arc<TransferController>,
+        parent_controller: Option<Arc<TransferController>>,
+    ) -> AppResult<u64> {
+        self.download_file_inner(
+            app,
+            session_id,
+            remote_path,
+            local_path,
+            transfer_settings,
+            controller,
+            parent_controller,
+        )
+        .await?;
+        tokio::fs::metadata(local_path)
+            .await
+            .map(|metadata| metadata.len())
+            .map_err(|error| AppError::Channel(format!("Failed to read copied file size: {error}")))
+    }
+
+    async fn copy_local_file_to_remote_with_controller(
+        &self,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        local_path: &str,
+        remote_path: &str,
+        transfer_settings: &crate::config::TransferSettings,
+        controller: Arc<TransferController>,
+        parent_controller: Option<Arc<TransferController>>,
+    ) -> AppResult<u64> {
+        self.upload_file_inner(
+            app,
+            session_id,
+            local_path,
+            remote_path,
+            transfer_settings,
+            controller,
+            parent_controller,
+        )
+        .await?;
+        tokio::fs::metadata(local_path)
+            .await
+            .map(|metadata| metadata.len())
+            .map_err(|error| AppError::Channel(format!("Failed to read copied file size: {error}")))
     }
 }

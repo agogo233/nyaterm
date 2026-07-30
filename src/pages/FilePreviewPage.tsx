@@ -4,7 +4,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MdClose, MdKeyboardArrowDown, MdOpenInNew, MdRefresh, MdVisibility } from "react-icons/md";
+import {
+  MdClose,
+  MdDns,
+  MdKeyboardArrowDown,
+  MdOpenInNew,
+  MdRefresh,
+  MdVisibility,
+} from "react-icons/md";
 import { toast } from "sonner";
 import ChildWindowHeader from "@/components/layout/ChildWindowHeader";
 import {
@@ -37,6 +44,7 @@ interface FilePreviewOpenPayload {
 interface PreviewTab extends FilePreviewContentData {
   id: string;
   backend: PreviewBackendKind;
+  target?: FilePreviewWindowData["target"];
   reloadKey: number;
   loadStatus: FilePreviewLoadSummary["status"];
   loadError: string;
@@ -56,6 +64,7 @@ function createTab(data: FilePreviewWindowData): PreviewTab {
     id: tabId(data),
     sessionId: data.sessionId,
     backend: data.backend ?? "remote",
+    target: data.target,
     path: data.path,
     name: data.name,
     size: data.size,
@@ -86,6 +95,11 @@ function formatPreviewMtime(mtime?: number) {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(timestamp));
+}
+
+function formatTargetLabel(target?: FilePreviewWindowData["target"]) {
+  if (!target) return "";
+  return target.label;
 }
 
 export default function FilePreviewPage() {
@@ -163,9 +177,8 @@ export default function FilePreviewPage() {
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();
-    currentWindow
-      .setTitle(activeTab ? activeTab.name || activeTab.path : t("filePreview.title"))
-      .catch(() => {});
+    const fileLabel = activeTab ? activeTab.name || activeTab.path : t("filePreview.title");
+    currentWindow.setTitle(fileLabel).catch(() => {});
   }, [activeTab, t]);
 
   const closeWindow = useCallback(() => {
@@ -264,11 +277,20 @@ export default function FilePreviewPage() {
       : activeTab?.loadStatus === "error"
         ? t("filePreview.error")
         : t("filePreview.ready");
+  const activeTarget = activeTab?.target;
+  const activeTargetLabel =
+    formatTargetLabel(activeTarget) ||
+    (activeTab?.backend !== "local"
+      ? activeTab?.sessionId || t("filePreview.remoteTarget")
+      : "");
+  const activeTargetTitle = [activeTargetLabel, activeTarget?.detail].filter(Boolean).join(" - ");
+  const shouldShowTarget = activeTab?.backend !== "local" && !!activeTargetLabel;
+  const activeHeaderTitle = activeTab ? activeTab.name || activeTab.path : t("filePreview.title");
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
       <ChildWindowHeader
-        title={activeTab?.name || t("filePreview.title")}
+        title={activeHeaderTitle}
         icon={<MdVisibility className="text-base" />}
         windowControls
         onClose={closeWindow}
@@ -368,11 +390,22 @@ export default function FilePreviewPage() {
         </div>
 
         <div className="flex min-h-0 shrink-0 flex-col gap-2 border-b bg-muted/10 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
-          <div
-            className="min-w-0 truncate font-mono text-xs text-muted-foreground"
-            title={activeTab?.path}
-          >
-            {activeTab?.path}
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            {shouldShowTarget ? (
+              <div
+                className="flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-sm border bg-background/70 px-2 py-1 text-xs text-muted-foreground"
+                title={activeTargetTitle || activeTargetLabel}
+              >
+                <MdDns className="shrink-0 text-sm" />
+                <span className="truncate">{activeTargetLabel}</span>
+              </div>
+            ) : null}
+            <div
+              className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+              title={activeTab?.path}
+            >
+              {activeTab?.path}
+            </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button

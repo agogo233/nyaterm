@@ -579,23 +579,6 @@ export function pathStartsWithDirectory(
     : normalizedPath.startsWith(prefix);
 }
 
-export function formatExplorerPathFromHome(
-  path: string,
-  homeDir: string,
-  backend: FileExplorerBackendKind,
-) {
-  const normalizedPath = normalizeExplorerPath(path, backend);
-  const normalizedHome = normalizeExplorerPath(homeDir, backend);
-  if (!normalizedPath || !normalizedHome) return normalizedPath || "~";
-  if (normalizedPath === normalizedHome) return "~";
-  if (!pathStartsWithDirectory(normalizedPath, normalizedHome, backend)) return normalizedPath;
-
-  const suffix = normalizedPath.slice(normalizedHome.length);
-  if (!suffix) return "~";
-  if (suffix.startsWith("/") || suffix.startsWith("\\")) return `~${suffix}`;
-  return `~${backend === "remote" ? "/" : getLocalSeparator(normalizedPath)}${suffix}`;
-}
-
 export function buildBreadcrumbSegments(
   currentPath: string,
   homeDir: string,
@@ -616,11 +599,8 @@ export function buildBreadcrumbSegments(
   };
 
   if (backend === "remote") {
-    const normalizedHome = normalizeExplorerPath(homeDir, backend);
-    const useHomeRoot =
-      !!normalizedHome && pathStartsWithDirectory(normalizedPath, normalizedHome, backend);
-    const rootPath = useHomeRoot ? normalizedHome : "/";
-    const segments = [makeSegment(useHomeRoot ? "~" : "/", rootPath, true)];
+    const rootPath = "/";
+    const segments = [makeSegment("/", rootPath, true)];
     const suffix = normalizedPath === rootPath ? "" : normalizedPath.slice(rootPath.length);
     const parts = suffix.split("/").filter(Boolean);
     let accumulated = rootPath;

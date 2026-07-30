@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActionButton, ActionFooter } from "@/components/ui/action-footer";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
@@ -60,19 +53,21 @@ function toForm(proxy: ProxyConfig | null): ProxyForm {
   };
 }
 
-export function ProxyDialog({
-  open,
+export function ProxyFormContent({
   proxy,
   saving,
   groups,
-  onOpenChange,
+  externalError,
+  saveDisabled,
+  onCancel,
   onSave,
 }: {
-  open: boolean;
   proxy: ProxyConfig | null;
   saving: boolean;
   groups: NetworkGroup[];
-  onOpenChange: (open: boolean) => void;
+  externalError?: string;
+  saveDisabled?: boolean;
+  onCancel: () => void;
   onSave: (proxy: ProxyConfig) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -81,10 +76,9 @@ export function ProxyDialog({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!open) return;
     setForm(toForm(proxy));
     setError("");
-  }, [open, proxy]);
+  }, [proxy]);
 
   const handleSubmit = async () => {
     if (!form.name.trim()) {
@@ -121,13 +115,14 @@ export function ProxyDialog({
     });
   };
 
+  const displayError = error || externalError || "";
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle>{editing ? t("network.editProxy") : t("network.newProxy")}</DialogTitle>
-          <DialogDescription>{t("network.proxyDialogDescription")}</DialogDescription>
-        </DialogHeader>
+    <>
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-20 sm:p-5 sm:pb-20">
+        <p className="mb-4 text-xs leading-5 text-muted-foreground">
+          {t("network.proxyDialogDescription")}
+        </p>
 
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-[9rem_minmax(0,1fr)]">
@@ -252,22 +247,22 @@ export function ProxyDialog({
             </>
           )}
 
-          {error ? (
+          {displayError ? (
             <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {error}
+              {displayError}
             </div>
           ) : null}
         </div>
+      </div>
 
-        <ActionFooter className="-mx-6 -mb-6 mt-2 rounded-b-lg">
-          <ActionButton variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            {t("common.cancel")}
-          </ActionButton>
-          <ActionButton onClick={handleSubmit} disabled={saving}>
-            {saving ? t("common.saving") : t("common.save")}
-          </ActionButton>
-        </ActionFooter>
-      </DialogContent>
-    </Dialog>
+      <ActionFooter>
+        <ActionButton variant="outline" onClick={onCancel} disabled={saving}>
+          {t("common.cancel")}
+        </ActionButton>
+        <ActionButton onClick={handleSubmit} disabled={saving || saveDisabled}>
+          {saving ? t("common.saving") : t("common.save")}
+        </ActionButton>
+      </ActionFooter>
+    </>
   );
 }

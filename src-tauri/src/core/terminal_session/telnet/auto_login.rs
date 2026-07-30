@@ -124,9 +124,11 @@ impl TelnetAutoLogin {
 
         self.push_tail(text);
         let clean = strip_ansi_escapes::strip_str(&self.tail);
+        let clean_input = strip_ansi_escapes::strip_str(text).replace('\r', "\n");
         let normalized = clean.replace('\r', "\n");
         let window = last_chars(&normalized, AUTO_LOGIN_PROMPT_WINDOW_CHARS);
         let last_line = last_non_empty_line(&normalized);
+        let prompts = prompt_candidates(&window, &clean_input);
 
         if self.matches_failure(&window, &last_line) {
             if self.retries < self.config.max_retries {
@@ -149,7 +151,7 @@ impl TelnetAutoLogin {
 
         if !self.sent_username
             && !self.credentials.username.trim().is_empty()
-            && self.matches_username_prompt(&window, &last_line)
+            && self.matches_username_prompt(&prompts, &last_line)
         {
             self.sent_username = true;
             actions.push(TelnetAutoLoginAction::Send(line_bytes(
@@ -160,7 +162,7 @@ impl TelnetAutoLogin {
 
         if !self.sent_password
             && self.credentials.password.as_deref().is_some_and(|value| !value.is_empty())
-            && self.matches_password_prompt(&window)
+            && self.matches_password_prompt(&prompts)
         {
             self.sent_password = true;
             actions.push(TelnetAutoLoginAction::Send(line_bytes(
@@ -194,20 +196,26 @@ impl TelnetAutoLogin {
         default_wake_regex().is_match(text)
     }
 
-    fn matches_username_prompt(&self, text: &str, last_line: &str) -> bool {
+    fn matches_username_prompt(&self, prompts: &[String], last_line: &str) -> bool {
         if last_login_regex().is_match(last_line) {
             return false;
         }
 
-        self.username_regex
-            .as_ref()
-            .map_or_else(|| default_username_regex().is_match(text), |regex| regex.is_match(text))
+        prompts.iter().any(|prompt| {
+            self.username_regex.as_ref().map_or_else(
+                || default_username_regex().is_match(prompt),
+                |regex| regex.is_match(prompt),
+            )
+        })
     }
 
-    fn matches_password_prompt(&self, text: &str) -> bool {
-        self.password_regex
-            .as_ref()
-            .map_or_else(|| default_password_regex().is_match(text), |regex| regex.is_match(text))
+    fn matches_password_prompt(&self, prompts: &[String]) -> bool {
+        prompts.iter().any(|prompt| {
+            self.password_regex.as_ref().map_or_else(
+                || default_password_regex().is_match(prompt),
+                |regex| regex.is_match(prompt),
+            )
+        })
     }
 
     fn matches_success(&self, last_line: &str) -> bool {
@@ -257,11 +265,67 @@ fn last_non_empty_line(value: &str) -> String {
         .to_string()
 }
 
+fn prompt_candidates(window: &str, current_input: &str) -> Vec<String> {
+    let mut prompts = Vec::new();
+    for source in [window, current_input] {
+        for line in source.lines() {
+            let prompt = line.trim();
+            push_prompt_candidate(&mut prompts, prompt);
+            push_prompt_suffix_candidates(&mut prompts, prompt);
+        }
+    }
+    prompts
+}
+
+fn push_prompt_candidate(prompts: &mut Vec<String>, prompt: &str) {
+    if !prompt.is_empty() && !prompts.iter().any(|existing| existing == prompt) {
+        prompts.push(prompt.to_string());
+    }
+}
+
+fn push_prompt_suffix_candidates(prompts: &mut Vec<String>, prompt: &str) {
+    const KEYWORDS: &[&str] = &[
+        "user name",
+        "username",
+        "login",
+        "logon",
+        "account",
+        "userid",
+        "user id",
+        "user",
+        "password",
+        "passwd",
+        "passcode",
+        "passphrase",
+        "pin",
+        "用户名",
+        "帐号",
+        "账号",
+        "登录",
+        "登入",
+        "密码",
+        "口令",
+    ];
+
+    let lower = prompt.to_lowercase();
+    for keyword in KEYWORDS {
+        let mut search_start = 0;
+        while let Some(offset) = lower[search_start..].find(keyword) {
+            let start = search_start + offset;
+            push_prompt_candidate(prompts, prompt[start..].trim());
+            search_start = start + keyword.len();
+            if search_start >= lower.len() {
+                break;
+            }
+        }
+    }
+}
+
 fn default_username_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(
-            r"(?i)(?:^|[\r\n])\s*(?:[^\r\n:：>]{1,80}\s+)?(?:user\s*name|username|login|logon|account|userid|user\s*id|user|用户名|帐号|账号|登录|登入)\s*[:：>]?\s*$",
+            r"(?i)^\s*(?:[^\r\n:：>]{1,80}\s+)?(?:user\s*name|username|login|logon|account|userid|user\s*id|user|用户名|帐号|账号|登录|登入)\s*[:：>]\s*$",
         )
         .expect("default username prompt regex")
     })

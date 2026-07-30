@@ -273,7 +273,7 @@ NyaTerm 适合每天在服务器、本地命令、设备调试和配置文件之
 | macOS | `.dmg` |
 | Linux | `.deb` / `.AppImage` |
 
-Windows 便携版解压后运行 `NyaTerm.exe` 即可。便携版更新需要手动完成：下载新的便携版 zip，关闭 NyaTerm，替换程序文件，并保留 `data/` 目录。
+Windows 便携版解压后运行 `NyaTerm.exe` 即可。**Help → 检查更新** 与安装版共用 Cloudflare R2 更新清单和下载源，暂存更新前会强制验证 Tauri updater 签名。重启时 NyaTerm 会自动替换程序文件，并完整保留 `data/` 目录。
 
 ### macOS
 

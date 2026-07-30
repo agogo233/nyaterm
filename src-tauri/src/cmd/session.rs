@@ -789,6 +789,17 @@ pub async fn attach_session(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
 ) -> AppResult<()> {
+    observability::log_event(StructuredLog {
+        level: StructuredLogLevel::Debug,
+        domain: "session.lifecycle".to_string(),
+        event: "session.attach_requested".to_string(),
+        message: "Attaching session renderer".to_string(),
+        ids: Some(serde_json::json!({ "session_id": session_id.clone() })),
+        data: None,
+        error: None,
+        client_timestamp: None,
+    });
+
     state
         .send_command(&session_id, SessionCommand::Attach)
         .await
@@ -799,6 +810,17 @@ pub async fn detach_session_renderer(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
 ) -> AppResult<()> {
+    observability::log_event(StructuredLog {
+        level: StructuredLogLevel::Debug,
+        domain: "session.lifecycle".to_string(),
+        event: "session.detach_renderer_requested".to_string(),
+        message: "Detaching session renderer".to_string(),
+        ids: Some(serde_json::json!({ "session_id": session_id.clone() })),
+        data: None,
+        error: None,
+        client_timestamp: None,
+    });
+
     state
         .send_command(&session_id, SessionCommand::DetachRenderer)
         .await

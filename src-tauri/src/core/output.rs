@@ -580,10 +580,10 @@ mod tests {
         let emitted_bytes =
             wait_for_emitted_bytes(&emitted, OUTPUT_PAUSE_HIGH_WATERMARK_BYTES).await;
         assert_eq!(emitted_bytes, OUTPUT_PAUSE_HIGH_WATERMARK_BYTES);
-        output.ack(emitted_bytes - OUTPUT_RESUME_LOW_WATERMARK_BYTES);
+        output.ack(emitted_bytes - OUTPUT_RESUME_LOW_WATERMARK_BYTES - 1);
         assert!(cmd_rx.try_recv().is_err());
 
-        output.ack(OUTPUT_RESUME_LOW_WATERMARK_BYTES);
+        output.ack(1);
         assert!(matches!(
             cmd_rx.recv().await,
             Some(SessionCommand::ResumeOutput)

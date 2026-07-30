@@ -194,11 +194,16 @@ function parseSshUrl(text: string): TemporaryLinkParseResult | null {
 
   try {
     const url = new URL(text);
-    if (url.password) return { ok: false, errorKey: "temporarySsh.inlinePassword" };
     if (!url.hostname) return { ok: false, errorKey: "temporarySsh.missingHost" };
     const port = url.port ? Number(url.port) : DEFAULT_SSH_PORT;
     if (!isValidPort(port)) return { ok: false, errorKey: "temporarySsh.invalidPort" };
-    return createConfig(url.hostname, decodeURIComponent(url.username || DEFAULT_USERNAME), port);
+    const password = url.password ? decodeURIComponent(url.password) : null;
+    return createConfig(
+      url.hostname,
+      decodeURIComponent(url.username || DEFAULT_USERNAME),
+      port,
+      password,
+    );
   } catch {
     return { ok: false, errorKey: "temporarySsh.invalidInput" };
   }
@@ -288,6 +293,7 @@ function createConfig(
   host: string,
   username: string,
   port: number,
+  password: string | null = null,
 ): Extract<TemporaryLinkParseResult, { ok: true }> {
   const normalizedHost = host.replace(/^\[(.*)\]$/, "$1");
   const name = `${username}@${normalizedHost}:${port}`;
@@ -300,7 +306,7 @@ function createConfig(
       host: normalizedHost,
       port,
       username,
-      auth: { type: "password", password: null },
+      auth: { type: "password", password },
       backspace_mode: "del",
       x11_forwarding: false,
       x11_display: "",

@@ -34,7 +34,6 @@ import {
   type ChildrenMenuState,
   type DirectoryChild,
   type FileExplorerBackendKind,
-  formatExplorerPathFromHome,
   joinExplorerPath,
   type LoadDirectoryOptions,
   normalizeExplorerPath,
@@ -278,14 +277,6 @@ export function FileExplorerPathBar({
   const isCurrentFavorite = favoriteDirectories.includes(normalizedCurrentPath);
   const FavoriteIcon = isCurrentFavorite ? MdBookmarkAdded : MdBookmarkBorder;
 
-  const formatHistoryPath = useCallback(
-    (path: string) => {
-      if (!homeDir) return path;
-      return formatExplorerPathFromHome(path, homeDir, backend);
-    },
-    [backend, homeDir],
-  );
-
   const beginPathEditing = useCallback(() => {
     onPathInputTextChange(currentPath || homeDir);
     onEditingPathChange(true);
@@ -409,6 +400,17 @@ export function FileExplorerPathBar({
         </div>
       )}
 
+      {!isEditingPath && (
+        <button
+          type="button"
+          className="ml-1 h-5 shrink-0 rounded transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          style={{ flex: "0 0 clamp(28px, 12%, 56px)" }}
+          title={t("fileExplorer.editPath")}
+          aria-label={t("fileExplorer.editPath")}
+          onClick={beginPathEditing}
+        />
+      )}
+
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
@@ -440,7 +442,7 @@ export function FileExplorerPathBar({
                     className="min-w-0 flex-1 truncate font-mono text-[0.625rem]"
                     style={{ color: isCurrent ? "var(--df-primary)" : undefined }}
                   >
-                    {formatHistoryPath(path)}
+                    {path}
                   </span>
                   <button
                     type="button"
@@ -501,7 +503,7 @@ export function FileExplorerPathBar({
                   onSelectHistoryPath(path);
                 }}
               >
-                <span className="truncate">{formatHistoryPath(path)}</span>
+                <span className="truncate">{path}</span>
               </button>
             );
           })}

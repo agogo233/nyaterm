@@ -57,6 +57,10 @@
     "new-session-*",
     "quick-command",
     "quick-command-*",
+    "proxy",
+    "proxy-*",
+    "tunnel",
+    "tunnel-*",
     "auto-upload-*",
     "file-editor-*",
     "file-preview-*"

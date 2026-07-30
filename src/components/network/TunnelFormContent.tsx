@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActionButton, ActionFooter } from "@/components/ui/action-footer";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
@@ -127,21 +120,23 @@ function generateTunnelPreview(
   });
 }
 
-export function TunnelDialog({
-  open,
+export function TunnelFormContent({
   tunnel,
   connectionOptions,
   groups,
   saving,
-  onOpenChange,
+  externalError,
+  saveDisabled,
+  onCancel,
   onSave,
 }: {
-  open: boolean;
   tunnel: TunnelConfig | null;
   connectionOptions: ConnectionOption[];
   groups: NetworkGroup[];
   saving: boolean;
-  onOpenChange: (open: boolean) => void;
+  externalError?: string;
+  saveDisabled?: boolean;
+  onCancel: () => void;
   onSave: (tunnel: TunnelConfig) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -157,10 +152,9 @@ export function TunnelDialog({
   };
 
   useEffect(() => {
-    if (!open) return;
     setForm(createTunnelDraft(tunnel));
     setError("");
-  }, [open, tunnel]);
+  }, [tunnel]);
 
   const handleSubmit = async () => {
     const trimmedName = form.name.trim();
@@ -198,13 +192,14 @@ export function TunnelDialog({
     });
   };
 
+  const displayError = error || externalError || "";
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[680px]">
-        <DialogHeader>
-          <DialogTitle>{tunnel ? t("network.editTunnel") : t("network.newTunnel")}</DialogTitle>
-          <DialogDescription>{t("network.tunnelDialogDescription")}</DialogDescription>
-        </DialogHeader>
+    <>
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-20 sm:p-5 sm:pb-20">
+        <p className="mb-4 text-xs leading-5 text-muted-foreground">
+          {t("network.tunnelDialogDescription")}
+        </p>
 
         <div className="grid gap-4">
           {/* Tunnel Name, Type and Group */}
@@ -434,22 +429,22 @@ export function TunnelDialog({
             </div>
           </div>
 
-          {error ? (
+          {displayError ? (
             <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {error}
+              {displayError}
             </div>
           ) : null}
         </div>
+      </div>
 
-        <ActionFooter className="-mx-6 -mb-6 mt-2 rounded-b-lg">
-          <ActionButton variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            {t("common.cancel")}
-          </ActionButton>
-          <ActionButton onClick={handleSubmit} disabled={saving}>
-            {saving ? t("common.saving") : t("common.save")}
-          </ActionButton>
-        </ActionFooter>
-      </DialogContent>
-    </Dialog>
+      <ActionFooter>
+        <ActionButton variant="outline" onClick={onCancel} disabled={saving}>
+          {t("common.cancel")}
+        </ActionButton>
+        <ActionButton onClick={handleSubmit} disabled={saving || saveDisabled}>
+          {saving ? t("common.saving") : t("common.save")}
+        </ActionButton>
+      </ActionFooter>
+    </>
   );
 }

@@ -32,7 +32,7 @@ fn prepare_nyaterm_json_import(file: NyatermJsonImportFile) -> AppResult<Prepare
         passwords.push(config::SavedPassword {
             id,
             name: required_string(entry.name, "password name", "passwords")?,
-            password: Some(crypto::encrypt(&entry.password)?),
+            password: Some(encrypt_import_secret(&entry.password)?),
             has_password: false,
         });
     }
@@ -57,9 +57,11 @@ fn prepare_nyaterm_json_import(file: NyatermJsonImportFile) -> AppResult<Prepare
         ssh_keys.push(config::SshKey {
             id,
             name: required_string(entry.name, "ssh key name", "ssh_keys")?,
-            key: Some(crypto::encrypt(&entry.private_key)?),
+            key: Some(encrypt_import_secret(&entry.private_key)?),
             cert: encrypt_optional_secret(entry.certificate)?,
             passphrase: encrypt_optional_secret(entry.passphrase)?,
+            key_data: None,
+            cert_data: None,
             key_file_path: None,
             cert_file_path: None,
             has_key_data: false,
@@ -292,7 +294,7 @@ fn prepare_json_ssh_auth(
             };
             let password = auth
                 .password
-                .map(|plain| crypto::encrypt(&plain))
+                .map(|plain| encrypt_import_secret(&plain))
                 .transpose()?;
 
             Ok(ConnectionAuth {
@@ -355,7 +357,7 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 fn encrypt_optional_secret(value: Option<String>) -> AppResult<Option<String>> {
     value
         .filter(|value| !value.is_empty())
-        .map(|value| crypto::encrypt(&value))
+        .map(|value| encrypt_import_secret(&value))
         .transpose()
 }
 

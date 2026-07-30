@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdClose, MdKeyboardArrowDown, MdKeyboardArrowUp } from "react-icons/md";
 import type {
@@ -14,6 +14,7 @@ import {
 
 interface TerminalSearchBarProps {
   show: boolean;
+  inputRef: React.RefObject<HTMLInputElement | null>;
   searchQuery: string;
   searchState: TerminalSearchState;
   searchFlags: TerminalSearchFlags;
@@ -29,6 +30,7 @@ interface TerminalSearchBarProps {
 
 export default function TerminalSearchBar({
   show,
+  inputRef,
   searchQuery,
   searchState,
   searchFlags,
@@ -42,7 +44,6 @@ export default function TerminalSearchBar({
   onClose,
 }: TerminalSearchBarProps) {
   const { t } = useTranslation();
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!show) return;
@@ -57,7 +58,7 @@ export default function TerminalSearchBar({
       window.cancelAnimationFrame(animationFrameId);
       window.clearTimeout(timeoutId);
     };
-  }, [show]);
+  }, [show, inputRef]);
 
   const statusLabel = useMemo(
     () =>

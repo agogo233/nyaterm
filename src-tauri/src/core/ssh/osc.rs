@@ -635,7 +635,7 @@ mod tests {
         };
 
         let bash = injection_script(ShellKind::Bash, &ready_marker).expect("bash injection script");
-        assert!(bash.find("__nyaterm_prompt(){{").expect("bash prompt hook") < ready_pos(&bash));
+        assert!(bash.find("__nyaterm_prompt(){").expect("bash prompt hook") < ready_pos(&bash));
         assert!(
             bash.find(" __nyaterm_install_prompt;")
                 .expect("bash prompt install")
@@ -645,7 +645,7 @@ mod tests {
         assert_no_empty_tail_printf(&bash);
 
         let zsh = injection_script(ShellKind::Zsh, &ready_marker).expect("zsh injection script");
-        assert!(zsh.find("__nyaterm_emit(){{").expect("zsh prompt hook") < ready_pos(&zsh));
+        assert!(zsh.find("__nyaterm_emit(){").expect("zsh prompt hook") < ready_pos(&zsh));
         assert!(
             zsh.find(" fc -P 2>/dev/null\n")
                 .expect("zsh history restore")

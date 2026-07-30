@@ -1,6 +1,6 @@
 [package]
 name = "nyaterm"
-version = "1.1.17"
+version = "1.1.18"
 description = "A modern remote terminal workspace built with Tauri, React, and Rust."
 authors = ["Kang"]
 edition = "2024"
@@ -98,7 +98,7 @@ tokio = { version = "1", features = [
 ] }
 russh = { path = "vendor/russh/russh", default-features = false, features = ["des", "dsa", "flate2", "ring", "rsa"] }
 russh-sftp = { path = "vendor/russh-sftp" }
-ssh-key = { version = "0.6", features = ["std"] }
+ssh-key = { version = "0.6", features = ["ed25519", "std"] }
 portable-pty = "0.8"
 uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"
@@ -124,6 +124,7 @@ sha2 = "0.10"
 sha1 = "0.10"
 zeroize = "1"
 tauri-plugin-dialog = "2"
+tauri-plugin-deep-link = "2"
 notify = { version = "8.2.0", features = ["serde"] }
 lazy_static = "1.5.0"
 open = "5"
@@ -175,7 +176,7 @@ tauri-plugin-updater = { version = "2", default-features = false, features = [
     "zip",
 ] }
 tauri-plugin-process = "2"
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38.2"

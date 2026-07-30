@@ -488,8 +488,16 @@ impl RemoteFs for SftpBackend {
         use tokio::io::AsyncWriteExt;
 
         let sftp = self.open_sftp().await?;
+        let original_attrs = match sftp.metadata(path).await {
+            Ok(attrs) => Some(attrs),
+            Err(error) if force && is_sftp_not_found(&error) => None,
+            Err(error) => {
+                let _ = sftp.close().await;
+                return Err(error.into());
+            }
+        };
         if !force {
-            let attrs = sftp.metadata(path).await?;
+            let attrs = original_attrs.as_ref().expect("metadata checked above");
             let current_mtime = u64::from(attrs.mtime.unwrap_or(0));
             let current_size = attrs.size.unwrap_or(0);
             if expected_mtime.is_some_and(|mtime| mtime != current_mtime)
@@ -499,6 +507,9 @@ impl RemoteFs for SftpBackend {
                 return Ok(WriteRemoteTextResult::conflict(current_mtime, current_size));
             }
         }
+        let original_permissions = original_attrs
+            .as_ref()
+            .and_then(|attrs| permissions_to_preserve_after_write(attrs.permissions));
 
         let mut file = sftp
             .create(path)
@@ -507,9 +518,57 @@ impl RemoteFs for SftpBackend {
         file.write_all(content.as_bytes())
             .await
             .map_err(|error| AppError::Channel(format!("Failed to write remote file: {error}")))?;
-        file.flush()
+        file.shutdown()
             .await
-            .map_err(|error| AppError::Channel(format!("Failed to flush remote file: {error}")))?;
+            .map_err(|error| AppError::Channel(format!("Failed to close remote file: {error}")))?;
+        drop(file);
+
+        if let Some(permissions) = original_permissions {
+            let path_bytes = self.encode_path_for_sftp(path);
+            apply_remote_attrs_bytes(&sftp, path, path_bytes, Some(permissions), None, None)
+                .await
+                .map_err(|error| {
+                    AppError::Channel(format!(
+                        "Failed to restore remote file permissions: {error}"
+                    ))
+                })?;
+
+            let actual_permissions = sftp
+                .metadata(path)
+                .await
+                .ok()
+                .and_then(|attrs| permissions_to_preserve_after_write(attrs.permissions));
+            if actual_permissions != Some(permissions) {
+                tracing::warn!(
+                    remote_path = path,
+                    requested_permissions = format!("{permissions:#06o}"),
+                    actual_permissions = ?actual_permissions.map(|mode| format!("{mode:#06o}")),
+                    "SFTP permission restore did not take effect; falling back to chmod"
+                );
+
+                self.exec_ok(&format!("chmod {permissions:04o} -- {}", sh_quote(path)))
+                    .await
+                    .map_err(|error| {
+                        AppError::Channel(format!(
+                            "Failed to restore remote file permissions with chmod: {error}"
+                        ))
+                    })?;
+
+                let actual_permissions = sftp
+                    .metadata(path)
+                    .await
+                    .ok()
+                    .and_then(|attrs| permissions_to_preserve_after_write(attrs.permissions));
+                if actual_permissions != Some(permissions) {
+                    return Err(AppError::Channel(format!(
+                        "Failed to restore remote file permissions: requested {permissions:#06o}, actual {}",
+                        actual_permissions
+                            .map(|mode| format!("{mode:#06o}"))
+                            .unwrap_or_else(|| "unknown".to_string())
+                    )));
+                }
+            }
+        }
 
         let attrs = sftp.metadata(path).await?;
         let _ = sftp.close().await;
@@ -884,5 +943,59 @@ impl RemoteFs for SftpBackend {
                 Err(e)
             }
         }
+    }
+
+    async fn copy_remote_file_to_local_with_controller(
+        &self,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        remote_path: &str,
+        local_path: &str,
+        transfer_settings: &crate::config::TransferSettings,
+        controller: Arc<TransferController>,
+        parent_controller: Option<Arc<TransferController>>,
+    ) -> AppResult<u64> {
+        download_remote_file_inner_with_controller(
+            self,
+            app,
+            session_id,
+            remote_path,
+            local_path,
+            transfer_settings,
+            controller,
+            parent_controller,
+        )
+        .await?;
+        tokio::fs::metadata(local_path)
+            .await
+            .map(|metadata| metadata.len())
+            .map_err(|error| AppError::Channel(format!("Failed to read copied file size: {error}")))
+    }
+
+    async fn copy_local_file_to_remote_with_controller(
+        &self,
+        app: &tauri::AppHandle,
+        session_id: &str,
+        local_path: &str,
+        remote_path: &str,
+        transfer_settings: &crate::config::TransferSettings,
+        controller: Arc<TransferController>,
+        parent_controller: Option<Arc<TransferController>>,
+    ) -> AppResult<u64> {
+        upload_local_file_inner_with_controller(
+            self,
+            app,
+            session_id,
+            local_path,
+            remote_path,
+            transfer_settings,
+            controller,
+            parent_controller,
+        )
+        .await?;
+        tokio::fs::metadata(local_path)
+            .await
+            .map(|metadata| metadata.len())
+            .map_err(|error| AppError::Channel(format!("Failed to read copied file size: {error}")))
     }
 }

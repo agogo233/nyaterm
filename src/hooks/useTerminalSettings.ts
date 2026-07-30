@@ -1,17 +1,17 @@
-import type { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { Terminal } from "@xterm/xterm";
-import { useCallback, useEffect, useRef } from "react";
+import { type RefObject, useCallback, useEffect, useRef } from "react";
 import { isTerminalTransparencyEnabled } from "@/lib/backgroundImage";
 import { resolveTerminalFontSize } from "@/lib/terminalFontSize";
 import type { TerminalColors } from "@/lib/themes";
 import { installImeCompatibilityPatch } from "@/lib/xtermImeCompatibility";
 import { XTERM_PERFORMANCE_CONFIG } from "@/lib/xtermPerformance";
+import type { TerminalFitScheduler } from "@/components/terminal/terminalFitScheduler";
 import type { AppSettings } from "@/types/global";
 
 export function useTerminalSettings(
-  terminalRef: React.RefObject<Terminal | null>,
-  fitAddonRef: React.RefObject<FitAddon | null>,
+  terminalRef: RefObject<Terminal | null>,
+  fitSchedulerRef: RefObject<TerminalFitScheduler | null>,
   terminalThemeColors: TerminalColors,
   appearance: AppSettings["appearance"],
   terminalSettings: AppSettings["terminal"],
@@ -236,15 +236,18 @@ export function useTerminalSettings(
       scheduleTextureRefresh();
 
       // Auto-fit on font size change
-      if (fitAddonRef.current) {
-        requestAnimationFrame(() => fitAddonRef.current?.fit());
-      }
+      fitSchedulerRef.current?.schedule({
+        reason: "appearance",
+        force: true,
+        refresh: true,
+        clearTextureAtlas: true,
+      });
     }
   }, [
     appearance,
     terminalSettings.font_size_delta,
     terminalRef,
-    fitAddonRef,
+    fitSchedulerRef,
     scheduleTextureRefresh,
   ]);
 

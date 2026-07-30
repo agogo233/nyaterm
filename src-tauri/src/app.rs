@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use tauri::Manager;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri_plugin_deep_link::DeepLinkExt;
 
 use crate::core::{CloudSyncManager, QuickCommandsStore, SessionManager};
 use crate::runtime::AppRuntime;
@@ -97,6 +99,42 @@ fn install_main_window_bridges(window: &tauri::WebviewWindow) {
         );
     }
     apply_window_transparency_for_window(window);
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn install_external_open_handlers(app: &tauri::AppHandle, runtime: &AppRuntime) {
+    let app_handle = app.clone();
+    app.deep_link().on_open_url(move |event| {
+        let urls = event
+            .urls()
+            .into_iter()
+            .map(|url| url.to_string())
+            .collect::<Vec<_>>();
+        crate::external_open::handle_deep_link_urls(&app_handle, urls);
+    });
+
+    #[cfg(not(target_os = "macos"))]
+    if cfg!(debug_assertions) || runtime.portable() || cfg!(target_os = "linux") {
+        if let Err(error) = app.deep_link().register_all() {
+            tracing::warn!("Failed to register deep link schemes: {}", error);
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn handle_current_deep_links(app: &tauri::AppHandle) {
+    match app.deep_link().get_current() {
+        Ok(Some(urls)) => {
+            crate::external_open::handle_deep_link_urls(
+                app,
+                urls.into_iter().map(|url| url.to_string()).collect(),
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!("Failed to read current deep link URLs: {}", error);
+        }
+    }
 }
 
 /// Read the configured window transparency from settings and apply it to a
@@ -262,6 +300,8 @@ pub fn setup(
     }
 
     session_manager.set_app_handle(app.handle().clone());
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    install_external_open_handlers(app.handle(), &runtime);
 
     // Restore the master password for wrapping-key derivation.
     if let Ok(settings) = crate::config::load_app_settings(app.handle()) {
@@ -308,6 +348,12 @@ pub fn setup(
         .into());
     }
     crate::tray::setup(app)?;
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        crate::external_open::handle_startup_arguments(app.handle());
+        handle_current_deep_links(app.handle());
+    }
 
     Ok(())
 }

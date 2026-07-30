@@ -198,6 +198,87 @@ fn trim_wrapping_quotes(value: &str) -> &str {
     }
 }
 
+fn resolve_text_secret_input(
+    inline_value: Option<&str>,
+    file_path: Option<&str>,
+    file_error_label: &str,
+) -> AppResult<Option<String>> {
+    if let Some(value) = inline_value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(Some(value.to_string()));
+    }
+
+    let Some(path) = file_path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return Ok(None);
+    };
+
+    std::fs::read_to_string(trim_wrapping_quotes(path))
+        .map(Some)
+        .map_err(|e| AppError::Config(format!("failed to read {file_error_label} file: {e}")))
+}
+
+fn missing_private_key_passphrase_error(error: &russh::keys::Error) -> bool {
+    let message = error.to_string().to_lowercase();
+    message.contains("encrypted")
+        || message.contains("passphrase")
+        || message.contains("password")
+        || message.contains("cipher")
+}
+
+fn validate_private_key_content(content: &str, passphrase: Option<&str>) -> AppResult<()> {
+    let usable_passphrase = passphrase.filter(|value| !value.is_empty());
+    match russh::keys::decode_secret_key(content, usable_passphrase) {
+        Ok(_) => Ok(()),
+        Err(error)
+            if usable_passphrase.is_none() && missing_private_key_passphrase_error(&error) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(AppError::Config(format!(
+            "invalid SSH private key: {error}"
+        ))),
+    }
+}
+
+fn validate_certificate_content(content: &str) -> AppResult<()> {
+    russh::keys::Certificate::from_openssh(content)
+        .map(|_| ())
+        .map_err(|error| AppError::Config(format!("invalid OpenSSH certificate: {error}")))
+}
+
+fn resolve_private_key_for_save(
+    key: &SshKey,
+    existing: Option<&SshKey>,
+) -> AppResult<Option<String>> {
+    let Some(content) =
+        resolve_text_secret_input(key.key_data.as_deref(), key.key_file_path.as_deref(), "key")?
+    else {
+        return Ok(existing.and_then(|e| e.key.clone()));
+    };
+
+    validate_private_key_content(&content, key.passphrase.as_deref())?;
+    crypto::encrypt(&content).map(Some)
+}
+
+fn resolve_certificate_for_save(
+    key: &SshKey,
+    existing: Option<&SshKey>,
+) -> AppResult<Option<String>> {
+    let Some(content) = resolve_text_secret_input(
+        key.cert_data.as_deref(),
+        key.cert_file_path.as_deref(),
+        "certificate",
+    )?
+    else {
+        return Ok(existing.and_then(|e| e.cert.clone()));
+    };
+
+    validate_certificate_content(&content)?;
+    crypto::encrypt(&content).map(Some)
+}
+
 fn validate_proxy_jump_config(
     connection: &SavedConnection,
     existing_connections: &[SavedConnection],
@@ -277,15 +358,29 @@ fn find_connection_for_proxy_jump<'a>(
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_group_from_config, update_connection_icon_in_config, validate_local_terminal_config,
-        validate_proxy_jump_config,
+        delete_group_from_config, resolve_private_key_for_save, resolve_text_secret_input,
+        update_connection_icon_in_config, validate_certificate_content,
+        validate_local_terminal_config, validate_private_key_content, validate_proxy_jump_config,
     };
     use crate::config::{
         AiExecutionProfile, ConnectionNetwork, ConnectionType, Group, SavedConnection,
-        SessionsConfig, SftpSettings,
+        SessionsConfig, SftpSettings, SshKey,
     };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const TEST_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEINTuctv5E1hK1bbY8fdp+K06/nwoy/HU++CXqI9EdVhC
+-----END PRIVATE KEY-----";
+
+    const TEST_ENCRYPTED_PRIVATE_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABDLGyfA39
+J2FcJygtYqi5ISAAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIN+Wjn4+4Fcvl2Jl
+KpggT+wCRxpSvtqqpVrQrKN1/A22AAAAkOHDLnYZvYS6H9Q3S3Nk4ri3R2jAZlQlBbUos5
+FkHpYgNw65KCWCTXtP7ye2czMC3zjn2r98pJLobsLYQgRiHIv/CUdAdsqbvMPECB+wl/UQ
+e+JpiSq66Z6GIt0801skPh20jxOO3F52SoX1IeO5D5PXfZrfSZlw6S8c7bwyp2FHxDewRx
+7/wNsnDM0T7nLv/Q==
+-----END OPENSSH PRIVATE KEY-----";
 
     fn ssh_connection(id: &str, proxy_jump_id: Option<&str>) -> SavedConnection {
         SavedConnection {
@@ -399,6 +494,132 @@ mod tests {
         let mut connection = ssh_connection(id, None);
         connection.group_id = group_id.map(str::to_string);
         connection
+    }
+
+    fn ssh_key_with_sources(
+        id: &str,
+        key_data: Option<&str>,
+        key_file_path: Option<&str>,
+    ) -> SshKey {
+        SshKey {
+            id: id.to_string(),
+            name: format!("Key {id}"),
+            key: None,
+            cert: None,
+            passphrase: None,
+            key_data: key_data.map(str::to_string),
+            cert_data: None,
+            key_file_path: key_file_path.map(str::to_string),
+            cert_file_path: None,
+            has_key_data: false,
+            has_cert_data: false,
+        }
+    }
+
+    fn create_test_certificate() -> ssh_key::Certificate {
+        use ssh_key::certificate;
+
+        let mut rng = rand::thread_rng();
+        let ca_key = ssh_key::PrivateKey::random(&mut rng, ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = ssh_key::PrivateKey::random(&mut rng, ssh_key::Algorithm::Ed25519).unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut builder = certificate::Builder::new_with_random_nonce(
+            &mut rng,
+            user_key.public_key(),
+            now.saturating_sub(3600),
+            now + 86400,
+        )
+        .unwrap();
+        builder.serial(1).unwrap();
+        builder.key_id("test-cert").unwrap();
+        builder.cert_type(certificate::CertType::User).unwrap();
+        builder.valid_principal("testuser").unwrap();
+        builder.sign(&ca_key).unwrap()
+    }
+
+    #[test]
+    fn key_data_takes_priority_over_key_file_path() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("nyaterm-key-source-{nanos}.pem"));
+        fs::write(&path, "file content").expect("write test key file");
+
+        let content = resolve_text_secret_input(
+            Some(" inline content "),
+            Some(&path.to_string_lossy()),
+            "key",
+        )
+        .expect("resolve key input");
+
+        assert_eq!(content.as_deref(), Some("inline content"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn key_file_path_is_still_supported() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("nyaterm-key-file-{nanos}.pem"));
+        fs::write(&path, TEST_PRIVATE_KEY).expect("write test key file");
+
+        let content = resolve_text_secret_input(None, Some(&path.to_string_lossy()), "key")
+            .expect("resolve key file input");
+
+        assert_eq!(content.as_deref(), Some(TEST_PRIVATE_KEY));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn existing_key_data_is_preserved_without_new_source() {
+        let mut existing = ssh_key_with_sources("existing", None, None);
+        existing.key = Some("encrypted-existing-key".to_string());
+        let edited = ssh_key_with_sources("existing", Some("   "), Some("   "));
+
+        let resolved =
+            resolve_private_key_for_save(&edited, Some(&existing)).expect("preserve old key");
+
+        assert_eq!(resolved.as_deref(), Some("encrypted-existing-key"));
+    }
+
+    #[test]
+    fn valid_private_key_data_is_accepted() {
+        validate_private_key_content(TEST_PRIVATE_KEY, None).expect("valid private key");
+    }
+
+    #[test]
+    fn encrypted_private_key_without_passphrase_is_accepted() {
+        validate_private_key_content(TEST_ENCRYPTED_PRIVATE_KEY, None)
+            .expect("encrypted private key can be saved without passphrase");
+    }
+
+    #[test]
+    fn invalid_private_key_data_is_rejected() {
+        let error = validate_private_key_content("not a private key", None).unwrap_err();
+
+        assert!(error.to_string().contains("invalid SSH private key"));
+    }
+
+    #[test]
+    fn valid_certificate_data_is_accepted() {
+        let cert = create_test_certificate()
+            .to_openssh()
+            .expect("render test certificate");
+
+        validate_certificate_content(&cert).expect("valid certificate");
+    }
+
+    #[test]
+    fn invalid_certificate_data_is_rejected() {
+        let error = validate_certificate_content("not a certificate").unwrap_err();
+
+        assert!(error.to_string().contains("invalid OpenSSH certificate"));
     }
 
     #[test]
@@ -654,23 +875,12 @@ pub fn save_ssh_key(app: tauri::AppHandle, mut key: SshKey) -> AppResult<String>
     let target_id = key.id.clone();
     let existing = cfg.keys.iter().find(|k| k.id == target_id);
 
-    key.key = match key.key_file_path.as_deref() {
-        Some(path) if !path.is_empty() => {
-            let content = std::fs::read_to_string(path)
-                .map_err(|e| AppError::Config(format!("failed to read key file: {e}")))?;
-            Some(crypto::encrypt(&content)?)
-        }
-        _ => existing.and_then(|e| e.key.clone()),
-    };
+    key.key = resolve_private_key_for_save(&key, existing)?;
+    if key.key.is_none() {
+        return Err(AppError::Config("SSH private key is required".to_string()));
+    }
 
-    key.cert = match key.cert_file_path.as_deref() {
-        Some(path) if !path.is_empty() => {
-            let content = std::fs::read_to_string(path)
-                .map_err(|e| AppError::Config(format!("failed to read certificate file: {e}")))?;
-            Some(crypto::encrypt(&content)?)
-        }
-        _ => existing.and_then(|e| e.cert.clone()),
-    };
+    key.cert = resolve_certificate_for_save(&key, existing)?;
 
     key.passphrase = match key.passphrase.as_deref() {
         Some(plain) if !plain.is_empty() => Some(crypto::encrypt(plain)?),

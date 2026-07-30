@@ -18,6 +18,8 @@ pub const MAIN_WINDOW_PREFIX: &str = "main-";
 const SETTINGS_WINDOW_KEY: &str = "settings";
 const NEW_SESSION_WINDOW_KEY: &str = "new-session";
 const QUICK_COMMAND_WINDOW_KEY: &str = "quick-command";
+const PROXY_WINDOW_KEY: &str = "proxy";
+const TUNNEL_WINDOW_KEY: &str = "tunnel";
 const FILE_EDITOR_WINDOW_KEY: &str = "file-editor";
 const FILE_PREVIEW_WINDOW_KEY: &str = "file-preview";
 const AUTO_UPLOAD_WINDOW_PREFIX: &str = "auto-upload-";
@@ -107,6 +109,8 @@ pub enum ChildWindowStateKey {
     Settings,
     NewSession,
     QuickCommand,
+    Proxy,
+    Tunnel,
     FileEditor,
     FilePreview,
 }
@@ -117,6 +121,8 @@ impl ChildWindowStateKey {
             Self::Settings => SETTINGS_WINDOW_KEY,
             Self::NewSession => NEW_SESSION_WINDOW_KEY,
             Self::QuickCommand => QUICK_COMMAND_WINDOW_KEY,
+            Self::Proxy => PROXY_WINDOW_KEY,
+            Self::Tunnel => TUNNEL_WINDOW_KEY,
             Self::FileEditor => FILE_EDITOR_WINDOW_KEY,
             Self::FilePreview => FILE_PREVIEW_WINDOW_KEY,
         }
@@ -127,6 +133,8 @@ impl ChildWindowStateKey {
             Self::Settings => (800.0, 560.0),
             Self::NewSession => (520.0, 620.0),
             Self::QuickCommand => (540.0, 640.0),
+            Self::Proxy => (520.0, 560.0),
+            Self::Tunnel => (680.0, 640.0),
             Self::FileEditor => (980.0, 720.0),
             Self::FilePreview => (1080.0, 760.0),
         }
@@ -235,6 +243,12 @@ pub fn child_window_state_key_for_label(label: &str) -> Option<ChildWindowStateK
     }
     if is_scoped_child_label(label, QUICK_COMMAND_WINDOW_KEY) {
         return Some(ChildWindowStateKey::QuickCommand);
+    }
+    if is_scoped_child_label(label, PROXY_WINDOW_KEY) {
+        return Some(ChildWindowStateKey::Proxy);
+    }
+    if is_scoped_child_label(label, TUNNEL_WINDOW_KEY) {
+        return Some(ChildWindowStateKey::Tunnel);
     }
     if label.starts_with(&format!("{FILE_EDITOR_WINDOW_KEY}-")) {
         return Some(ChildWindowStateKey::FileEditor);
@@ -643,6 +657,14 @@ mod tests {
         assert_eq!(
             child_window_state_key_for_label("quick-command-main-abc"),
             Some(ChildWindowStateKey::QuickCommand)
+        );
+        assert_eq!(
+            child_window_state_key_for_label("proxy-main-abc"),
+            Some(ChildWindowStateKey::Proxy)
+        );
+        assert_eq!(
+            child_window_state_key_for_label("tunnel-main-abc"),
+            Some(ChildWindowStateKey::Tunnel)
         );
         assert_eq!(
             child_window_state_key_for_label("file-editor-abc"),

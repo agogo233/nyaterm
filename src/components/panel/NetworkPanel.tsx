@@ -4,15 +4,13 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { useTranslation } from "react-i18next";
 import { MdAdd, MdDelete, MdDriveFileMove, MdEdit, MdLan, MdRouter } from "react-icons/md";
 import { toast } from "sonner";
-import { ProxyDialog } from "@/components/dialog/network/ProxyDialog";
+import PanelHeader from "@/components/layout/PanelHeader";
 import {
   buildGroupPath,
   type ConnectionOption,
   EmptyState,
   sortLabel,
-} from "@/components/dialog/network/shared";
-import { TunnelDialog } from "@/components/dialog/network/TunnelDialog";
-import PanelHeader from "@/components/layout/PanelHeader";
+} from "@/components/network/shared";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,6 +48,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useApp } from "@/context/AppContext";
 import { invoke } from "@/lib/invoke";
 import { cn } from "@/lib/utils";
+import { openProxyConfig, openTunnelConfig } from "@/lib/windowManager";
 import type {
   NetworkGroup,
   ProxyConfig,
@@ -535,16 +534,12 @@ export default function NetworkPanel() {
 
   const [proxies, setProxies] = useState<ProxyConfig[]>([]);
   const [proxyGroups, setProxyGroups] = useState<NetworkGroup[]>([]);
-  const [proxyDialog, setProxyDialog] = useState<ProxyConfig | "new" | null>(null);
-  const [proxySaving, setProxySaving] = useState(false);
 
   const [tunnels, setTunnels] = useState<TunnelConfig[]>([]);
   const [tunnelRuntimeStates, setTunnelRuntimeStates] = useState<
     Record<string, TunnelRuntimeState>
   >({});
   const [tunnelGroups, setTunnelGroups] = useState<NetworkGroup[]>([]);
-  const [tunnelDialog, setTunnelDialog] = useState<TunnelConfig | "new" | null>(null);
-  const [tunnelSaving, setTunnelSaving] = useState(false);
 
   const [groupDialog, setGroupDialog] = useState<GroupDialogState>(null);
   const [groupSaving, setGroupSaving] = useState(false);
@@ -660,51 +655,31 @@ export default function NetworkPanel() {
   }, [loadTunnels, loadTunnelGroups, loadTunnelRuntimeStates]);
 
   useEffect(() => {
-    const unlistenPromise = listen<TunnelRuntimeState>("tunnel-runtime-state-changed", (event) => {
-      setTunnelRuntimeStates((prev) => ({
-        ...prev,
-        [event.payload.tunnelId]: event.payload,
-      }));
+    const unlistenRuntimePromise = listen<TunnelRuntimeState>(
+      "tunnel-runtime-state-changed",
+      (event) => {
+        setTunnelRuntimeStates((prev) => ({
+          ...prev,
+          [event.payload.tunnelId]: event.payload,
+        }));
+      },
+    );
+    const unlistenProxySavedPromise = listen("proxy-saved", () => {
+      void loadProxies();
+      void loadProxyGroups();
+    });
+    const unlistenTunnelSavedPromise = listen("tunnel-saved", () => {
+      void loadTunnels();
+      void loadTunnelRuntimeStates();
+      void loadTunnelGroups();
     });
 
     return () => {
-      unlistenPromise.then((unlisten) => unlisten());
+      unlistenRuntimePromise.then((unlisten) => unlisten());
+      unlistenProxySavedPromise.then((unlisten) => unlisten());
+      unlistenTunnelSavedPromise.then((unlisten) => unlisten());
     };
-  }, []);
-
-  const handleSaveProxy = useCallback(
-    async (proxy: ProxyConfig) => {
-      setProxySaving(true);
-      try {
-        const payload = proxy.id ? proxy : { ...proxy, id: crypto.randomUUID() };
-        await invoke("save_proxy", { proxy: payload });
-        await loadProxies();
-        setProxyDialog(null);
-      } catch (error) {
-        toast.error(String(error));
-      } finally {
-        setProxySaving(false);
-      }
-    },
-    [loadProxies],
-  );
-
-  const handleSaveTunnel = useCallback(
-    async (tunnel: TunnelConfig) => {
-      setTunnelSaving(true);
-      try {
-        const payload = tunnel.id ? tunnel : { ...tunnel, id: crypto.randomUUID() };
-        await invoke("save_tunnel", { tunnel: payload });
-        await Promise.all([loadTunnels(), loadTunnelRuntimeStates()]);
-        setTunnelDialog(null);
-      } catch (error) {
-        toast.error(String(error));
-      } finally {
-        setTunnelSaving(false);
-      }
-    },
-    [loadTunnelRuntimeStates, loadTunnels],
-  );
+  }, [loadProxies, loadProxyGroups, loadTunnelGroups, loadTunnelRuntimeStates, loadTunnels]);
 
   const handleDeleteProxy = useCallback(
     async (proxyId: string) => {
@@ -866,7 +841,9 @@ export default function NetworkPanel() {
                     variant="ghost"
                     size="sm"
                     className="h-7 px-2 text-primary text-xs"
-                    onClick={() => setTunnelDialog("new")}
+                    onClick={() => {
+                      void openTunnelConfig().catch((error) => toast.error(String(error)));
+                    }}
                     disabled={connectionOptions.length === 0}
                     title={
                       connectionOptions.length === 0 ? t("network.bindConnectionFirst") : undefined
@@ -921,7 +898,11 @@ export default function NetworkPanel() {
                                 ? connectionOptionMap.get(tunnel.connection_id)
                                 : undefined
                             }
-                            onEdit={setTunnelDialog}
+                            onEdit={(item) => {
+                              void openTunnelConfig(item.id).catch((error) =>
+                                toast.error(String(error)),
+                              );
+                            }}
                             onDelete={handleDeleteTunnel}
                             onToggle={handleToggleTunnel}
                             onMoveGroup={handleMoveTunnelGroup}
@@ -952,7 +933,9 @@ export default function NetworkPanel() {
                     variant="ghost"
                     size="sm"
                     className="h-7 px-2 text-primary text-xs"
-                    onClick={() => setProxyDialog("new")}
+                    onClick={() => {
+                      void openProxyConfig().catch((error) => toast.error(String(error)));
+                    }}
                   >
                     <MdAdd className="text-base mr-1" />
                     {t("network.newProxy")}
@@ -989,7 +972,11 @@ export default function NetworkPanel() {
                           <ProxyRow
                             proxy={proxy}
                             groups={proxyGroups}
-                            onEdit={setProxyDialog}
+                            onEdit={(item) => {
+                              void openProxyConfig(item.id).catch((error) =>
+                                toast.error(String(error)),
+                              );
+                            }}
                             onDelete={handleDeleteProxy}
                             onMoveGroup={handleMoveProxyGroup}
                           />
@@ -1018,32 +1005,6 @@ export default function NetworkPanel() {
           if (!open) setDeleteGroupState(null);
         }}
         onConfirm={handleConfirmDeleteGroup}
-      />
-      <ProxyDialog
-        open={proxyDialog !== null}
-        proxy={proxyDialog && proxyDialog !== "new" ? proxyDialog : null}
-        groups={proxyGroups}
-        saving={proxySaving}
-        onOpenChange={(open) => {
-          if (!open) {
-            setProxyDialog(null);
-          }
-        }}
-        onSave={handleSaveProxy}
-      />
-
-      <TunnelDialog
-        open={tunnelDialog !== null}
-        tunnel={tunnelDialog && tunnelDialog !== "new" ? tunnelDialog : null}
-        connectionOptions={connectionOptions}
-        groups={tunnelGroups}
-        saving={tunnelSaving}
-        onOpenChange={(open) => {
-          if (!open) {
-            setTunnelDialog(null);
-          }
-        }}
-        onSave={handleSaveTunnel}
       />
     </aside>
   );

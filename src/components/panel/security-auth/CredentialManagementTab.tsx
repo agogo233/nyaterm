@@ -1,13 +1,12 @@
-import { CheckCircle2, Eye, EyeOff, GripVertical, KeyRound, UserRound } from "lucide-react";
+import { Eye, EyeOff, GripVertical } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdAdd, MdDelete, MdEdit } from "react-icons/md";
 import { toast } from "sonner";
 import { CredentialDeleteDialog } from "@/components/dialog/security-auth/CredentialDeleteDialog";
+import { CredentialEditorDialog } from "@/components/dialog/security-auth/CredentialEditorDialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { validatePromptRegex } from "@/lib/credentialAutofill";
 import { invoke } from "@/lib/invoke";
@@ -58,194 +57,6 @@ function reorderCredentials(
   const next = [...withoutSource];
   next.splice(insertIndex, 0, source);
   return next.map((entry, index) => ({ ...entry, sort_order: index }));
-}
-
-interface CredentialEditorProps {
-  entry: Partial<SavedCredential>;
-  isEditing: boolean;
-  passwordLoading: boolean;
-  onCancel: () => void;
-  onChange: (patch: Partial<SavedCredential>) => void;
-  onSave: () => void;
-  saveDisabled: boolean;
-  t: ReturnType<typeof useTranslation>["t"];
-}
-
-function CredentialEditor({
-  entry,
-  isEditing,
-  passwordLoading,
-  onCancel,
-  onChange,
-  onSave,
-  saveDisabled,
-  t,
-}: CredentialEditorProps) {
-  const [showPassword, setShowPassword] = useState(false);
-  const usernamePromptRegex = entry.username_prompt_regex ?? "";
-  const passwordPromptRegex = entry.password_prompt_regex ?? "";
-  const usernameRegexValid =
-    !usernamePromptRegex.trim() || validatePromptRegex(usernamePromptRegex);
-  const passwordRegexValid =
-    !passwordPromptRegex.trim() || validatePromptRegex(passwordPromptRegex);
-  const showUsernameRegexValid = Boolean(usernamePromptRegex.trim() && usernameRegexValid);
-  const showPasswordRegexValid = Boolean(passwordPromptRegex.trim() && passwordRegexValid);
-  const regexError = (value: string) => (value.trim() ? t("credentialManager.invalidRegex") : "");
-
-  return (
-    <div className="border-b bg-accent/25 p-3">
-      <div className="mb-3 flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1 basis-44 space-y-1.5">
-          <Label className="text-[0.6875rem] text-muted-foreground">
-            {t("credentialManager.nameLabel")}
-          </Label>
-          <Input
-            placeholder={t("credentialManager.namePlaceholder")}
-            className="h-8 text-xs"
-            value={entry.name ?? ""}
-            onChange={(event) => onChange({ name: event.target.value })}
-            autoFocus
-          />
-        </div>
-        <div className="flex shrink-0 items-center gap-2 pt-0">
-          <span className="text-[0.6875rem] text-muted-foreground">
-            {t("credentialManager.enabled")}
-          </span>
-          <Switch
-            size="sm"
-            checked={entry.enabled ?? true}
-            onCheckedChange={(enabled) => onChange({ enabled })}
-          />
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <div className="space-y-2 border-t pt-3">
-          <div className="flex items-center gap-1.5 text-xs font-medium">
-            <UserRound className="h-3.5 w-3.5 text-primary" />
-            {t("credentialManager.usernameOptionalLabel")}
-          </div>
-          <div className="space-y-2">
-            <div className="space-y-1.5">
-              <Label className="text-[0.6875rem] text-muted-foreground">
-                {t("credentialManager.promptRegexOptionalLabel")}
-              </Label>
-              <div className="relative">
-                <Input
-                  placeholder={t("credentialManager.usernameRegexPlaceholder")}
-                  className="h-8 pr-8 font-mono text-[0.6875rem]"
-                  value={usernamePromptRegex}
-                  onChange={(event) => onChange({ username_prompt_regex: event.target.value })}
-                  aria-invalid={!usernameRegexValid}
-                />
-                {showUsernameRegexValid ? (
-                  <CheckCircle2 className="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-emerald-500" />
-                ) : null}
-              </div>
-              {!usernameRegexValid ? (
-                <div className="text-[0.6875rem] text-destructive">
-                  {regexError(usernamePromptRegex)}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-[0.6875rem] text-muted-foreground">
-                {t("credentialManager.sendValueLabel")}
-              </Label>
-              <Input
-                placeholder={t("credentialManager.usernamePlaceholder")}
-                className="h-8 text-xs"
-                value={entry.username ?? ""}
-                onChange={(event) => onChange({ username: event.target.value })}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-2 border-t pt-3">
-          <div className="flex items-center gap-1.5 text-xs font-medium">
-            <KeyRound className="h-3.5 w-3.5 text-primary" />
-            {t("credentialManager.passwordLabel")}
-          </div>
-          <div className="space-y-2">
-            <div className="space-y-1.5">
-              <Label className="text-[0.6875rem] text-muted-foreground">
-                {t("credentialManager.promptRegexOptionalLabel")}
-              </Label>
-              <div className="relative">
-                <Input
-                  placeholder={t("credentialManager.passwordRegexPlaceholder")}
-                  className="h-8 pr-8 font-mono text-[0.6875rem]"
-                  value={passwordPromptRegex}
-                  onChange={(event) => onChange({ password_prompt_regex: event.target.value })}
-                  aria-invalid={!passwordRegexValid}
-                />
-                {showPasswordRegexValid ? (
-                  <CheckCircle2 className="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-emerald-500" />
-                ) : null}
-              </div>
-              {!passwordRegexValid ? (
-                <div className="text-[0.6875rem] text-destructive">
-                  {regexError(passwordPromptRegex)}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-[0.6875rem] text-muted-foreground">
-                {t("credentialManager.sendValueLabel")}
-              </Label>
-              <div className="relative">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  placeholder={
-                    passwordLoading
-                      ? t("common.loading")
-                      : isEditing && entry.has_password
-                        ? t("credentialManager.passwordUnchanged")
-                        : t("credentialManager.passwordPlaceholder")
-                  }
-                  className="h-8 pr-8 text-xs"
-                  value={entry.password ?? ""}
-                  onChange={(event) => onChange({ password: event.target.value })}
-                  disabled={passwordLoading}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-0.5 right-0.5 h-7 w-7 text-muted-foreground hover:text-foreground"
-                  onClick={() => setShowPassword((value) => !value)}
-                  disabled={passwordLoading}
-                  aria-label={
-                    showPassword
-                      ? t("credentialManager.hidePassword")
-                      : t("credentialManager.showPassword")
-                  }
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-3.5 w-3.5" />
-                  ) : (
-                    <Eye className="h-3.5 w-3.5" />
-                  )}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 flex justify-end gap-1.5">
-        <Button variant="outline" size="sm" className="h-7 px-3 text-xs" onClick={onCancel}>
-          {t("common.cancel")}
-        </Button>
-        <Button size="sm" className="h-7 px-3 text-xs" onClick={onSave} disabled={saveDisabled}>
-          {t("common.save")}
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 export function CredentialManagementTab({
@@ -527,19 +338,6 @@ export function CredentialManagementTab({
           </div>
 
           <div className="overflow-hidden rounded-md border">
-            {isNew && editingId === "__new__" ? (
-              <CredentialEditor
-                entry={editEntry}
-                isEditing={false}
-                passwordLoading={passwordLoading}
-                onCancel={resetEdit}
-                onChange={handleChange}
-                onSave={handleSave}
-                saveDisabled={saveDisabled}
-                t={t}
-              />
-            ) : null}
-
             {credentials.map((entry) => {
               const activeDropTarget = dropTarget?.id === entry.id ? dropTarget.position : null;
               const rowStyle = activeDropTarget
@@ -552,162 +350,144 @@ export function CredentialManagementTab({
                 : undefined;
 
               return (
-                <div key={entry.id}>
-                  {editingId === entry.id && !isNew ? (
-                    <CredentialEditor
-                      entry={editEntry}
-                      isEditing={true}
-                      passwordLoading={passwordLoading}
-                      onCancel={resetEdit}
-                      onChange={handleChange}
-                      onSave={handleSave}
-                      saveDisabled={saveDisabled}
-                      t={t}
-                    />
-                  ) : (
-                    <div
-                      className={`security-auth-action-row flex flex-wrap items-start gap-1.5 border-b px-2 py-2.5 transition-colors last:border-0 hover:bg-accent ${
-                        draggingCredentialId === entry.id ? "opacity-50" : ""
-                      }`}
-                      style={rowStyle}
-                      onDragOver={(event) => handleDragOver(event, entry.id)}
-                      onDrop={(event) => {
-                        void handleDrop(event, entry.id);
-                      }}
-                    >
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="inline-flex shrink-0">
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
-                              draggable={!actionsDisabled && credentials.length > 1}
-                              onDragStart={(event) => handleDragStart(event, entry.id)}
-                              onDragEnd={resetDragState}
-                              disabled={actionsDisabled || credentials.length < 2}
-                              aria-label={t("credentialManager.dragToSort")}
-                            >
-                              <GripVertical className="h-4 w-4" />
-                            </Button>
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          {reordering
-                            ? t("credentialManager.reordering")
-                            : t("credentialManager.dragToSort")}
-                        </TooltipContent>
-                      </Tooltip>
-                      <div className="min-w-24 flex-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="min-w-0 truncate text-xs">{entry.name}</span>
-                          {!entry.enabled ? (
-                            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
-                              {t("credentialManager.disabled")}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="mt-1 flex items-start gap-0.5">
-                          <span className="min-w-0 select-text break-all text-[0.6875rem] text-muted-foreground">
-                            {entry.username || t("credentialManager.passwordOnlyCredential")}
-                          </span>
-                          {entry.username ? <CopyButton value={entry.username} /> : null}
-                        </div>
-                        {revealedIds.has(entry.id) ? (
-                          <div className="mt-1 flex items-start gap-0.5">
-                            <span className="min-w-0 select-text break-all font-mono text-[0.6875rem] text-muted-foreground">
-                              {passwordCache[entry.id] || t("secretUnlock.emptySecret")}
-                            </span>
-                            {passwordCache[entry.id] ? (
-                              <CopyButton value={passwordCache[entry.id]} />
-                            ) : null}
-                          </div>
+                <div
+                  key={entry.id}
+                  className={`security-auth-action-row flex flex-wrap items-start gap-1.5 border-b px-2 py-2.5 transition-colors last:border-0 hover:bg-accent ${
+                    draggingCredentialId === entry.id ? "opacity-50" : ""
+                  }`}
+                  style={rowStyle}
+                  onDragOver={(event) => handleDragOver(event, entry.id)}
+                  onDrop={(event) => {
+                    void handleDrop(event, entry.id);
+                  }}
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
+                          draggable={!actionsDisabled && credentials.length > 1}
+                          onDragStart={(event) => handleDragStart(event, entry.id)}
+                          onDragEnd={resetDragState}
+                          disabled={actionsDisabled || credentials.length < 2}
+                          aria-label={t("credentialManager.dragToSort")}
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {reordering
+                        ? t("credentialManager.reordering")
+                        : t("credentialManager.dragToSort")}
+                    </TooltipContent>
+                  </Tooltip>
+                  <div className="min-w-24 flex-1">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 truncate text-xs">{entry.name}</span>
+                      {!entry.enabled ? (
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
+                          {t("credentialManager.disabled")}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 flex items-start gap-0.5">
+                      <span className="min-w-0 select-text break-all text-[0.6875rem] text-muted-foreground">
+                        {entry.username || t("credentialManager.passwordOnlyCredential")}
+                      </span>
+                      {entry.username ? <CopyButton value={entry.username} /> : null}
+                    </div>
+                    {revealedIds.has(entry.id) ? (
+                      <div className="mt-1 flex items-start gap-0.5">
+                        <span className="min-w-0 select-text break-all font-mono text-[0.6875rem] text-muted-foreground">
+                          {passwordCache[entry.id] || t("secretUnlock.emptySecret")}
+                        </span>
+                        {passwordCache[entry.id] ? (
+                          <CopyButton value={passwordCache[entry.id]} />
                         ) : null}
                       </div>
-                      <div className="security-auth-row-actions flex shrink-0 items-center">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex">
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => {
-                                  if (revealedIds.has(entry.id)) {
-                                    void handleToggleReveal(entry.id);
-                                  } else {
-                                    runUnlockedAction(() => handleToggleReveal(entry.id));
-                                  }
-                                }}
-                                disabled={actionsDisabled || revealLoadingIds.has(entry.id)}
-                                aria-label={
-                                  revealedIds.has(entry.id)
-                                    ? t("credentialManager.hidePassword")
-                                    : t("credentialManager.showPassword")
-                                }
-                              >
-                                {revealedIds.has(entry.id) ? (
-                                  <EyeOff className="h-4 w-4" />
-                                ) : (
-                                  <Eye className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            {revealedIds.has(entry.id)
-                              ? t("credentialManager.hidePassword")
-                              : t("credentialManager.showPassword")}
-                          </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex">
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => {
-                                  runUnlockedAction(() => handleEdit(entry));
-                                }}
-                                disabled={actionsDisabled}
-                                aria-label={t("common.edit")}
-                              >
-                                <MdEdit className="text-base" />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            {lockedHint ?? t("common.edit")}
-                          </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex">
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="text-destructive hover:bg-destructive/10"
-                                onClick={() => {
-                                  runUnlockedAction(() => setDeletingEntry(entry));
-                                }}
-                                disabled={actionsDisabled}
-                                aria-label={t("common.delete")}
-                              >
-                                <MdDelete className="text-base" />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            {lockedHint ?? t("common.delete")}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                  )}
+                    ) : null}
+                  </div>
+                  <div className="security-auth-row-actions flex shrink-0 items-center">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => {
+                              if (revealedIds.has(entry.id)) {
+                                void handleToggleReveal(entry.id);
+                              } else {
+                                runUnlockedAction(() => handleToggleReveal(entry.id));
+                              }
+                            }}
+                            disabled={actionsDisabled || revealLoadingIds.has(entry.id)}
+                            aria-label={
+                              revealedIds.has(entry.id)
+                                ? t("credentialManager.hidePassword")
+                                : t("credentialManager.showPassword")
+                            }
+                          >
+                            {revealedIds.has(entry.id) ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        {revealedIds.has(entry.id)
+                          ? t("credentialManager.hidePassword")
+                          : t("credentialManager.showPassword")}
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => {
+                              runUnlockedAction(() => handleEdit(entry));
+                            }}
+                            disabled={actionsDisabled}
+                            aria-label={t("common.edit")}
+                          >
+                            <MdEdit className="text-base" />
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{lockedHint ?? t("common.edit")}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-destructive hover:bg-destructive/10"
+                            onClick={() => {
+                              runUnlockedAction(() => setDeletingEntry(entry));
+                            }}
+                            disabled={actionsDisabled}
+                            aria-label={t("common.delete")}
+                          >
+                            <MdDelete className="text-base" />
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{lockedHint ?? t("common.delete")}</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
               );
             })}
 
-            {credentials.length === 0 && !isNew ? (
+            {credentials.length === 0 ? (
               <div className="py-6 text-center text-xs text-muted-foreground">
                 {t("credentialManager.noCredentials")}
               </div>
@@ -721,6 +501,17 @@ export function CredentialManagementTab({
         onLock={onLockSecrets ?? (() => {})}
         onUnlocked={handleSecretsUnlocked}
         unlockRequestNonce={unlockRequestNonce}
+      />
+
+      <CredentialEditorDialog
+        open={editingId !== null}
+        entry={editEntry}
+        isEditing={!isNew}
+        passwordLoading={passwordLoading}
+        onCancel={resetEdit}
+        onChange={handleChange}
+        onSave={handleSave}
+        saveDisabled={saveDisabled}
       />
 
       <CredentialDeleteDialog

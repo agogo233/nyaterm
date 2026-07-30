@@ -39,6 +39,7 @@ interface AppPanelContentProps {
     autoConnect?: boolean,
     target?: NewSessionTarget,
   ) => void;
+  onConnectConnection: (connection: SavedConnection) => Promise<void> | void;
   onSessionClick: (sessionId: string) => void;
   onSessionReconnect: (sessionId: string) => Promise<void> | void;
   onSessionDisconnect: (sessionId: string) => Promise<void> | void;
@@ -63,6 +64,7 @@ export default function AppPanelContent({
   onTemporarySshLink,
   onNewConnection,
   onEditConnection,
+  onConnectConnection,
   onSessionClick,
   onSessionReconnect,
   onSessionDisconnect,
@@ -87,6 +89,7 @@ export default function AppPanelContent({
                 activeSessionId={activeSessionId}
                 activeSessionType={liveActivePane ? liveActivePane.type : null}
                 activeConnectionId={liveActivePane?.connectionId ?? null}
+                activeSessionName={liveActivePane?.name ?? null}
               />
             </div>
             <ResizeHandle direction="vertical" onResize={onTransferResize} />
@@ -107,6 +110,7 @@ export default function AppPanelContent({
             onTemporarySshLink={onTemporarySshLink}
             onNewConnection={onNewConnection}
             onEditConnection={onEditConnection}
+            onConnectConnection={onConnectConnection}
           />
         );
       case "activeSessions":

@@ -11,7 +11,7 @@ import {
   MdKeyboardArrowUp,
   MdSettings,
 } from "react-icons/md";
-import { ConnectionCombobox, type ConnectionOption } from "@/components/dialog/network/shared";
+import { ConnectionCombobox, type ConnectionOption } from "@/components/network/shared";
 import { KeyManagementTab } from "@/components/panel/security-auth/KeyManagementTab";
 import { PasswordManagementTab } from "@/components/panel/security-auth/PasswordManagementTab";
 import { Button } from "@/components/ui/button";
@@ -111,6 +111,9 @@ interface SshFormProps {
   connectionId?: string;
   encoding: string;
   setEncoding: (v: string) => void;
+  passwordSecretsUnlocked?: boolean;
+  onUnlockPasswordSecrets?: () => void;
+  onLockPasswordSecrets?: () => void;
 }
 
 function RequiredMark() {
@@ -430,6 +433,9 @@ export function SshForm({
   connectionId,
   encoding,
   setEncoding,
+  passwordSecretsUnlocked = false,
+  onUnlockPasswordSecrets,
+  onLockPasswordSecrets,
 }: SshFormProps) {
   const { t } = useTranslation();
   const [sshKeys, setSshKeys] = useState<SshKey[]>([]);
@@ -784,7 +790,7 @@ export function SshForm({
                     side="bottom"
                     sideOffset={4}
                     collisionPadding={16}
-                    className="w-[var(--radix-popover-trigger-width)] min-w-[14rem] overflow-hidden p-0"
+                    className="w-(--radix-popover-trigger-width) min-w-56 overflow-hidden p-0"
                   >
                     <div className="max-h-40 overflow-y-auto overflow-x-hidden">
                       <button
@@ -857,7 +863,7 @@ export function SshForm({
                 side="bottom"
                 sideOffset={4}
                 collisionPadding={16}
-                className="w-[var(--radix-popover-trigger-width)] min-w-[14rem] overflow-hidden p-0"
+                className="w-(--radix-popover-trigger-width) min-w-56 overflow-hidden p-0"
               >
                 <div className="max-h-40 overflow-y-auto overflow-x-hidden">
                   <button
@@ -1349,12 +1355,15 @@ export function SshForm({
           }
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden">
-          <DialogHeader>
+        <DialogContent
+          className="flex! w-[min(42rem,calc(100vw-3rem))] max-w-none max-h-[76vh]! min-h-0 flex-col overflow-hidden!"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <DialogHeader className="shrink-0">
             <DialogTitle>{t("settings.keyManagement")}</DialogTitle>
             <DialogDescription className="sr-only">{t("settings.keyManagement")}</DialogDescription>
           </DialogHeader>
-          <div className="overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1 terminal-scroll">
             <KeyManagementTab />
           </div>
         </DialogContent>
@@ -1369,15 +1378,19 @@ export function SshForm({
         }}
       >
         <DialogContent
-          className="w-[min(27rem,calc(100vw-3rem))] max-w-none max-h-[76vh] overflow-hidden"
+          className="flex! w-[min(27rem,calc(100vw-3rem))] max-w-none max-h-[76vh]! min-h-0 flex-col overflow-hidden!"
           onOpenAutoFocus={(event) => event.preventDefault()}
         >
-          <DialogHeader>
+          <DialogHeader className="shrink-0">
             <DialogTitle>{t("passwordManager.title")}</DialogTitle>
             <DialogDescription className="sr-only">{t("passwordManager.title")}</DialogDescription>
           </DialogHeader>
-          <div className="overflow-y-auto px-1 pb-1">
-            <PasswordManagementTab />
+          <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1 terminal-scroll">
+            <PasswordManagementTab
+              secretsUnlocked={passwordSecretsUnlocked}
+              onUnlockSecrets={onUnlockPasswordSecrets}
+              onLockSecrets={onLockPasswordSecrets}
+            />
           </div>
         </DialogContent>
       </Dialog>

@@ -1,4 +1,5 @@
-import type { SyncGroup } from "@/types/global";
+import type { SyncGroup, Tab } from "@/types/global";
+import { collectSessionPanes } from "./workspaceTabs";
 
 let groupIdCounter = 0;
 
@@ -83,6 +84,27 @@ export function getSyncPeers(sessionId: string, groups: SyncGroup[]): string[] {
       if (sid !== sessionId && !g.pausedSessionIds.includes(sid)) peers.add(sid);
     }
   }
+  return [...peers];
+}
+
+export function getSessionInputPeerIds(
+  sessionId: string,
+  groups: SyncGroup[],
+  tabs: Tab[],
+  broadcastToAll: boolean,
+): string[] {
+  const peers = new Set(getSyncPeers(sessionId, groups));
+
+  if (broadcastToAll) {
+    for (const tab of tabs) {
+      for (const pane of collectSessionPanes(tab.root)) {
+        if (pane.sessionId !== sessionId && !pane.connecting && !pane.connectError) {
+          peers.add(pane.sessionId);
+        }
+      }
+    }
+  }
+
   return [...peers];
 }
 

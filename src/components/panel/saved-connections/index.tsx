@@ -42,8 +42,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useApp } from "@/context/AppContext";
 import { useConfigTransfer } from "@/hooks/useConfigTransfer";
 import { resolveShortcutKeys } from "@/hooks/useShortcutMap";
-import { updateConnectionAutoIconAfterSessionStart } from "@/lib/connectionAutoIcon";
-import { getErrorMessage, shouldPromptConnectionEditOnFailure } from "@/lib/errors";
+import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
 import { logger } from "@/lib/logger";
 import { matchesKeyEvent } from "@/lib/shortcutRegistry";
@@ -69,6 +68,7 @@ interface SavedConnectionsProps {
     autoConnect?: boolean,
     target?: NewSessionTarget,
   ) => void;
+  onConnectConnection: (connection: SavedConnection) => Promise<void> | void;
 }
 
 type HeaderActionButtonProps = ComponentProps<typeof Button> & {
@@ -110,19 +110,9 @@ export default function SavedConnections({
   onTemporarySshLink,
   onNewConnection,
   onEditConnection,
+  onConnectConnection,
 }: SavedConnectionsProps) {
-  const {
-    savedConnections,
-    savedGroups,
-    refreshConnections,
-    addPendingTab,
-    updateTabSession,
-    markTabConnectionFailed,
-    hasTab,
-    appSettings,
-    updateUi,
-    recordRecentConnection,
-  } = useApp();
+  const { savedConnections, savedGroups, refreshConnections, appSettings, updateUi } = useApp();
   const { t } = useTranslation();
   const { handleExport, passwordAlert } = useConfigTransfer();
   const panelRootRef = useRef<HTMLDivElement | null>(null);
@@ -141,7 +131,6 @@ export default function SavedConnections({
   const lastSelectedConnectionIdRef = useRef<string | null>(null);
   const connectionElementRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const sortMode = (appSettings.ui.saved_connections_sort_mode || "default") as SortMode;
-  const remoteStatsEnabled = appSettings.ui.show_remote_stats ?? true;
 
   // ── Dialog state ──────────────────────────────────────────────────────────
   const [deleteTargets, setDeleteTargets] = useState<SavedConnection[]>([]);
@@ -593,82 +582,10 @@ export default function SavedConnections({
   const connectConnection = async (conn: SavedConnection) => {
     if (connectingIdsRef.current.has(conn.id)) return;
     connectingIdsRef.current.add(conn.id);
-    const typeMap: Record<string, import("@/types/global").SessionType> = {
-      ssh: "SSH",
-      local_terminal: "Local",
-      telnet: "Telnet",
-      serial: "Serial",
-    };
-    const sessionType = typeMap[conn.type] || "SSH";
-    const { tabId, createRequestId } = addPendingTab(conn.name, sessionType, conn.id);
-
     try {
-      let sessionId: string;
-      switch (conn.type) {
-        case "local_terminal":
-          sessionId = await invoke<string>("create_local_session", {
-            connectionId: conn.id,
-            createRequestId,
-          });
-          break;
-        case "telnet":
-          sessionId = await invoke<string>("create_telnet_session", {
-            connectionId: conn.id,
-            createRequestId,
-          });
-          break;
-        case "serial":
-          sessionId = await invoke<string>("create_serial_session", {
-            connectionId: conn.id,
-            createRequestId,
-          });
-          break;
-        default:
-          sessionId = await invoke<string>("create_ssh_session", {
-            connectionId: conn.id,
-            createRequestId,
-          });
-          break;
-      }
-      if (!hasTab(tabId)) {
-        try {
-          await invoke("close_session", { sessionId });
-        } catch (error) {
-          logger.error({
-            domain: "session.lifecycle",
-            event: "session.stale_close_failed",
-            message: "Failed to close stale created session",
-            ids: { session_id: sessionId },
-            error,
-          });
-        }
-        return;
-      }
-      updateTabSession(tabId, sessionId);
-      recordRecentConnection(conn.id);
-      updateUi({ saved_connections_last_opened_connection_id: conn.id });
-      void updateConnectionAutoIconAfterSessionStart({
-        connectionId: conn.id,
-        sessionId,
-        remoteStatsEnabled,
-      });
+      await onConnectConnection(conn);
     } catch (e) {
-      const errorMessage = getErrorMessage(e);
-      if (errorMessage.toLowerCase().includes("session creation cancelled") || !hasTab(tabId)) {
-        return;
-      }
-      logger.error({
-        domain: "session.lifecycle",
-        event: "connection.open_failed",
-        message: "Connection failed",
-        ids: { connection_id: conn.id },
-        error: e,
-      });
-      toast.error(t("savedConnections.connectionFailed", { error: errorMessage }));
-      markTabConnectionFailed(tabId, errorMessage);
-      if (shouldPromptConnectionEditOnFailure(conn, errorMessage)) {
-        onEditConnection(conn, true, { sourceTabId: tabId });
-      }
+      toast.error(t("savedConnections.connectionFailed", { error: getErrorMessage(e) }));
     } finally {
       connectingIdsRef.current.delete(conn.id);
     }

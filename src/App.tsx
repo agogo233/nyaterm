@@ -1,3 +1,4 @@
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { downloadDir } from "@tauri-apps/api/path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -5,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import AppLayout from "./components/app/AppLayout";
 import AppPanelContent from "./components/app/AppPanelContent";
+import ExternalConnectionMatchDialog from "./components/dialog/connections/ExternalConnectionMatchDialog";
 import type { HostKeyVerifyRequest } from "./components/dialog/connections/HostKeyVerifyDialog";
 import type { OtpRequest } from "./components/dialog/connections/OtpDialog";
 import type { SshAuthRequest } from "./components/dialog/connections/SshAuthDialog";
@@ -13,9 +15,20 @@ import type { DockerSudoPasswordRequest } from "./components/dialog/docker/Docke
 import SessionQuickSwitcher, {
   type QuickSwitcherSession,
 } from "./components/dialog/terminal/SessionQuickSwitcherDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./components/ui/alert-dialog";
 import { useApp } from "./context/AppContext";
 import { TransferProvider } from "./context/TransferContext";
 import { useActivityBarController } from "./hooks/useActivityBarController";
+import { type ExternalOpenRequest, useExternalOpenRequests } from "./hooks/useExternalOpenRequests";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useIdleLock } from "./hooks/useIdleLock";
 import { useMacSelectionGuard } from "./hooks/useMacSelectionGuard";
@@ -41,6 +54,11 @@ import {
 } from "./lib/appWorkspace";
 import { updateConnectionAutoIconAfterSessionStart } from "./lib/connectionAutoIcon";
 import { getErrorMessage, shouldPromptConnectionEditOnFailure } from "./lib/errors";
+import {
+  type ExternalConnectionResolution,
+  findExternalConnectionMatches,
+  parseExternalOpenUrl,
+} from "./lib/externalOpen";
 import { invoke } from "./lib/invoke";
 import { logger } from "./lib/logger";
 import {
@@ -54,7 +72,7 @@ import {
   sendSessionInputWithSync,
 } from "./lib/sessionInput";
 import { buildSmartSplitLayout, type SmartSplitMode } from "./lib/smartSplit";
-import { getSyncPeers, purgeSessionFromGroups } from "./lib/syncInputGroups";
+import { getSessionInputPeerIds, purgeSessionFromGroups } from "./lib/syncInputGroups";
 import {
   findTerminalWindowLeafById,
   findTerminalWindowLeafByTabId,
@@ -124,8 +142,21 @@ function isSessionCreationCancelled(error: unknown) {
   return getErrorMessage(error).toLowerCase().includes("session creation cancelled");
 }
 
+async function attachSessionBeforeClose(sessionId: string) {
+  await tauriInvoke("attach_session", { sessionId }).catch((error) => {
+    logger.debug({
+      domain: "session.lifecycle",
+      event: "session.attach_before_close_failed",
+      message: "Best-effort attach before close failed",
+      ids: { session_id: sessionId },
+      error,
+    });
+  });
+}
+
 async function closeStaleCreatedSession(sessionId: string) {
   try {
+    await attachSessionBeforeClose(sessionId);
     await invoke("close_session", { sessionId });
     clearSessionCommandHistory(sessionId);
   } catch (error) {
@@ -142,6 +173,23 @@ async function closeStaleCreatedSession(sessionId: string) {
 type StartupCommandRequest = {
   command: string;
   delayMs: number;
+};
+
+type ExternalConnectionChoice =
+  | { kind: "saved"; connection: SavedConnection }
+  | { kind: "temporary"; config: TemporaryLinkConfig }
+  | { kind: "cancelled" };
+
+type ExternalMatchDialogState = {
+  connections: SavedConnection[];
+  temporary: TemporaryLinkConfig;
+  resolve: (choice: ExternalConnectionChoice) => void;
+};
+
+type PostLoginConfirmState = {
+  connection: SavedConnection;
+  command: string;
+  resolve: (confirmed: boolean) => void;
 };
 
 async function createSessionForConnection(
@@ -288,6 +336,7 @@ function App() {
     appSettings,
     closeTabs,
     savedConnections,
+    savedGroups,
     recordRecentConnection,
     syncGroups,
     setSyncGroups,
@@ -343,6 +392,10 @@ function App() {
   const [sendCommandDraft, setSendCommandDraft] = useState<SendCommandPanelDraft | null>(null);
   const [showSessionQuickSwitcher, setShowSessionQuickSwitcher] = useState(false);
   const [showTemporarySshLink, setShowTemporarySshLink] = useState(false);
+  const [externalMatchDialog, setExternalMatchDialog] = useState<ExternalMatchDialogState | null>(
+    null,
+  );
+  const [postLoginConfirm, setPostLoginConfirm] = useState<PostLoginConfirmState | null>(null);
   const allowProgrammaticWindowCloseRef = useRef(false);
   const handleSendCommandDraftConsumed = useCallback(() => {
     setSendCommandDraft(null);
@@ -824,6 +877,219 @@ function App() {
     [savedConnections],
   );
 
+  const connectSavedConnection = useCallback(
+    async (connection: SavedConnection, options?: { failureContext?: string }) => {
+      const pending = addPendingTab(
+        connection.name,
+        getConnectionSessionType(connection),
+        connection.id,
+      );
+      const { tabId, createRequestId } = pending;
+
+      try {
+        const sessionId = await createSessionForConnection(connection, createRequestId);
+        if (!hasTab(tabId)) {
+          await closeStaleCreatedSession(sessionId);
+          return;
+        }
+        updateTabSession(tabId, sessionId);
+        focusTerminalSession(sessionId);
+        recordRecentConnection(connection.id);
+        updateUi({ saved_connections_last_opened_connection_id: connection.id });
+        updateAutoIconForSessionStart(connection.id, sessionId);
+      } catch (error) {
+        if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
+          return;
+        }
+        const errorMessage = getErrorMessage(error);
+        logger.error({
+          domain: "session.lifecycle",
+          event: "connection.open_failed",
+          message: options?.failureContext ?? "Connection failed",
+          ids: { connection_id: connection.id },
+          error,
+        });
+        markTabConnectionFailed(tabId, errorMessage);
+        maybePromptConnectionEdit(connection.id, errorMessage, { sourceTabId: tabId });
+        toast.error(t("savedConnections.connectionFailed", { error: errorMessage }));
+      }
+    },
+    [
+      addPendingTab,
+      hasTab,
+      markTabConnectionFailed,
+      maybePromptConnectionEdit,
+      recordRecentConnection,
+      t,
+      updateAutoIconForSessionStart,
+      updateTabSession,
+      updateUi,
+    ],
+  );
+
+  const connectTemporaryConnection = useCallback(
+    async (config: TemporaryLinkConfig) => {
+      const pending = addPendingTab(config.name, getTemporaryLinkSessionType(config));
+      const { tabId, createRequestId } = pending;
+
+      try {
+        const sessionId = await createTemporarySession(config, createRequestId);
+        if (!hasTab(tabId)) {
+          await closeStaleCreatedSession(sessionId);
+          return;
+        }
+        updateTabSession(tabId, sessionId);
+        focusTerminalSession(sessionId);
+      } catch (error) {
+        if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
+          return;
+        }
+        const errorMessage = getErrorMessage(error);
+        logger.error({
+          domain: "session.lifecycle",
+          event: "temporary_link.open_failed",
+          message: "Temporary connection failed",
+          error,
+        });
+        markTabConnectionFailed(tabId, errorMessage);
+        toast.error(t("savedConnections.connectionFailed", { error: errorMessage }));
+      }
+    },
+    [addPendingTab, hasTab, markTabConnectionFailed, t, updateTabSession],
+  );
+
+  const chooseExternalConnection = useCallback(
+    (resolution: Extract<ExternalConnectionResolution, { kind: "ambiguous" }>) =>
+      new Promise<ExternalConnectionChoice>((resolve) => {
+        setExternalMatchDialog({
+          connections: resolution.connections,
+          temporary: resolution.temporary,
+          resolve,
+        });
+      }),
+    [],
+  );
+
+  const confirmExternalPostLogin = useCallback((connection: SavedConnection) => {
+    const command = connection.post_login?.command?.trim() ?? "";
+    if (!connection.post_login?.enabled || !command) return Promise.resolve(true);
+
+    return new Promise<boolean>((resolve) => {
+      setPostLoginConfirm({ connection, command, resolve });
+    });
+  }, []);
+
+  const handleExternalOpenRequest = useCallback(
+    async (request: ExternalOpenRequest) => {
+      logger.info({
+        domain: "app.lifecycle",
+        event: "external_open.request_received",
+        message: "Received external open request in target window",
+        ids: { request_id: request.id },
+        data: {
+          source: request.source,
+          target_window_label: request.targetWindowLabel,
+        },
+      });
+
+      const parsed = parseExternalOpenUrl(request.rawUrl);
+      if (!parsed.ok) {
+        logger.warn({
+          domain: "app.lifecycle",
+          event: "external_open.request_rejected",
+          message: "Rejected external open request in frontend",
+          ids: { request_id: request.id },
+          data: {
+            scheme: parsed.scheme,
+            source: request.source,
+            target_window_label: request.targetWindowLabel,
+            error_type: parsed.errorType,
+          },
+        });
+        toast.error(t(parsed.errorKey));
+        return;
+      }
+
+      const latestConnections = await invoke<SavedConnection[]>("get_saved_connections");
+      const resolution = findExternalConnectionMatches(latestConnections, parsed.intent);
+
+      if (resolution.kind === "saved") {
+        logger.info({
+          domain: "app.lifecycle",
+          event: "external_open.connection_matched",
+          message: "External open matched a saved connection",
+          ids: { request_id: request.id },
+          data: {
+            scheme: parsed.intent.protocol,
+            source: request.source,
+            target_window_label: request.targetWindowLabel,
+            candidate_count: 1,
+          },
+        });
+        if (await confirmExternalPostLogin(resolution.connection)) {
+          await connectSavedConnection(resolution.connection, {
+            failureContext: "External open saved connection failed",
+          });
+        }
+        return;
+      }
+
+      if (resolution.kind === "ambiguous") {
+        logger.info({
+          domain: "app.lifecycle",
+          event: "external_open.connection_ambiguous",
+          message: "External open matched multiple saved connections",
+          ids: { request_id: request.id },
+          data: {
+            scheme: parsed.intent.protocol,
+            source: request.source,
+            target_window_label: request.targetWindowLabel,
+            candidate_count: resolution.connections.length,
+          },
+        });
+        const choice = await chooseExternalConnection(resolution);
+        if (choice.kind === "saved") {
+          if (await confirmExternalPostLogin(choice.connection)) {
+            await connectSavedConnection(choice.connection, {
+              failureContext: "External open saved connection failed",
+            });
+          }
+        } else if (choice.kind === "temporary") {
+          await connectTemporaryConnection(choice.config);
+        }
+        return;
+      }
+
+      if (resolution.kind === "temporary") {
+        logger.info({
+          domain: "app.lifecycle",
+          event: "external_open.temporary_connection_created",
+          message: "External open will create a temporary connection",
+          ids: { request_id: request.id },
+          data: {
+            scheme: parsed.intent.protocol,
+            source: request.source,
+            target_window_label: request.targetWindowLabel,
+            candidate_count: 0,
+          },
+        });
+        await connectTemporaryConnection(resolution.config);
+      }
+    },
+    [
+      chooseExternalConnection,
+      confirmExternalPostLogin,
+      connectSavedConnection,
+      connectTemporaryConnection,
+      t,
+    ],
+  );
+
+  useExternalOpenRequests({
+    ready: settingsLoaded && startupRestoreComplete && !isLocked,
+    onRequest: handleExternalOpenRequest,
+  });
+
   const persistTerminalWindowLayout = useCallback(
     (layout: TerminalWindowNode | null, nextTabs: Tab[] = tabsRef.current) => {
       if (!settingsLoaded || !startupRestoreComplete || !appSettings.general.startup_restore)
@@ -1162,6 +1428,7 @@ function App() {
       }
 
       try {
+        await attachSessionBeforeClose(pane.sessionId);
         await invoke("close_session", { sessionId: pane.sessionId });
         clearSessionCommandHistory(pane.sessionId);
         setSyncGroups((prev) => purgeSessionFromGroups(pane.sessionId, prev));
@@ -1271,19 +1538,7 @@ function App() {
 
   const getQuickCommandPeerSessionIds = useCallback(
     (sessionId: string) => {
-      const peerSessionIds = new Set(getSyncPeers(sessionId, syncGroups));
-
-      if (broadcastToAll) {
-        for (const tab of tabs) {
-          for (const pane of collectSessionPanes(tab.root)) {
-            if (pane.sessionId !== sessionId && hasLiveSession(pane)) {
-              peerSessionIds.add(pane.sessionId);
-            }
-          }
-        }
-      }
-
-      return [...peerSessionIds];
+      return getSessionInputPeerIds(sessionId, syncGroups, tabs, broadcastToAll);
     },
     [broadcastToAll, syncGroups, tabs],
   );
@@ -2184,6 +2439,7 @@ function App() {
 
       if (!tab || !pane) {
         try {
+          await attachSessionBeforeClose(sessionId);
           await invoke("close_session", { sessionId });
           clearSessionCommandHistory(sessionId);
         } catch (error) {
@@ -2355,33 +2611,9 @@ function App() {
 
   const handleTemporarySshConnect = useCallback(
     async (config: TemporaryLinkConfig) => {
-      const pending = addPendingTab(config.name, getTemporaryLinkSessionType(config));
-      const { tabId, createRequestId } = pending;
-
-      try {
-        const sessionId = await createTemporarySession(config, createRequestId);
-        if (!hasTab(tabId)) {
-          await closeStaleCreatedSession(sessionId);
-          return;
-        }
-        updateTabSession(tabId, sessionId);
-        focusTerminalSession(sessionId);
-      } catch (error) {
-        if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
-          return;
-        }
-        const errorMessage = getErrorMessage(error);
-        logger.error({
-          domain: "session.lifecycle",
-          event: "temporary_link.open_failed",
-          message: "Temporary connection failed",
-          error,
-        });
-        markTabConnectionFailed(tabId, errorMessage);
-        toast.error(t("savedConnections.connectionFailed", { error: errorMessage }));
-      }
+      await connectTemporaryConnection(config);
     },
-    [addPendingTab, hasTab, markTabConnectionFailed, t, updateTabSession],
+    [connectTemporaryConnection],
   );
 
   useGlobalShortcuts(
@@ -2685,51 +2917,11 @@ function App() {
   const handleQuickOpenConnection = useCallback(
     async (connection: SavedConnection) => {
       setShowSessionQuickSwitcher(false);
-
-      const pending = addPendingTab(
-        connection.name,
-        getConnectionSessionType(connection),
-        connection.id,
-      );
-      const { tabId, createRequestId } = pending;
-
-      try {
-        const sessionId = await createSessionForConnection(connection, createRequestId);
-        if (!hasTab(tabId)) {
-          await closeStaleCreatedSession(sessionId);
-          return;
-        }
-        updateTabSession(tabId, sessionId);
-        focusTerminalSession(sessionId);
-        recordRecentConnection(connection.id);
-        updateAutoIconForSessionStart(connection.id, sessionId);
-      } catch (error) {
-        if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
-          return;
-        }
-        const errorMessage = getErrorMessage(error);
-        logger.error({
-          domain: "session.lifecycle",
-          event: "connection.open_failed",
-          message: "Connection failed from quick switcher",
-          ids: { connection_id: connection.id },
-          error,
-        });
-        markTabConnectionFailed(tabId, errorMessage);
-        maybePromptConnectionEdit(connection.id, errorMessage, { sourceTabId: tabId });
-        toast.error(t("savedConnections.connectionFailed", { error: errorMessage }));
-      }
+      await connectSavedConnection(connection, {
+        failureContext: "Connection failed from quick switcher",
+      });
     },
-    [
-      addPendingTab,
-      hasTab,
-      markTabConnectionFailed,
-      maybePromptConnectionEdit,
-      recordRecentConnection,
-      t,
-      updateAutoIconForSessionStart,
-      updateTabSession,
-    ],
+    [connectSavedConnection],
   );
 
   const handleQuickSwitcherNewSshSession = useCallback(() => {
@@ -2841,6 +3033,7 @@ function App() {
         onTemporarySshLink={handleOpenTemporarySshLink}
         onNewConnection={handleNewSession}
         onEditConnection={handleEditConnection}
+        onConnectConnection={connectSavedConnection}
         onSessionClick={handleSessionClick}
         onSessionReconnect={handleReconnectSessionById}
         onSessionDisconnect={handleDisconnectSessionById}
@@ -2869,10 +3062,48 @@ function App() {
       handleSessionClick,
       handleToggleSessionRecording,
       handleTransferResize,
+      connectSavedConnection,
       recordingSessions,
       uiConfig.transfer_height,
     ],
   );
+
+  const handleExternalMatchOpenChange = useCallback((open: boolean) => {
+    if (open) return;
+    setExternalMatchDialog((current) => {
+      current?.resolve({ kind: "cancelled" });
+      return null;
+    });
+  }, []);
+
+  const handleExternalMatchConnection = useCallback((connection: SavedConnection) => {
+    setExternalMatchDialog((current) => {
+      current?.resolve({ kind: "saved", connection });
+      return null;
+    });
+  }, []);
+
+  const handleExternalMatchTemporary = useCallback((config: TemporaryLinkConfig) => {
+    setExternalMatchDialog((current) => {
+      current?.resolve({ kind: "temporary", config });
+      return null;
+    });
+  }, []);
+
+  const handlePostLoginConfirmOpenChange = useCallback((open: boolean) => {
+    if (open) return;
+    setPostLoginConfirm((current) => {
+      current?.resolve(false);
+      return null;
+    });
+  }, []);
+
+  const handlePostLoginContinue = useCallback(() => {
+    setPostLoginConfirm((current) => {
+      current?.resolve(true);
+      return null;
+    });
+  }, []);
 
   return (
     <TransferProvider>
@@ -3048,6 +3279,36 @@ function App() {
         onOpenChange={setShowTemporarySshLink}
         onConnect={handleTemporarySshConnect}
       />
+      <ExternalConnectionMatchDialog
+        open={externalMatchDialog !== null}
+        connections={externalMatchDialog?.connections ?? []}
+        groups={savedGroups}
+        temporary={externalMatchDialog?.temporary ?? null}
+        onOpenChange={handleExternalMatchOpenChange}
+        onSelectConnection={handleExternalMatchConnection}
+        onUseTemporary={handleExternalMatchTemporary}
+      />
+      <AlertDialog open={postLoginConfirm !== null} onOpenChange={handlePostLoginConfirmOpenChange}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("externalOpen.postLoginConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("externalOpen.postLoginConfirmDescription", {
+                name: postLoginConfirm?.connection.name ?? "",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <pre className="max-h-40 overflow-auto rounded-md border bg-muted p-3 font-mono text-xs whitespace-pre-wrap">
+            {postLoginConfirm?.command ?? ""}
+          </pre>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePostLoginContinue}>
+              {t("externalOpen.continueConnection")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TransferProvider>
   );
 }

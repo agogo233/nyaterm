@@ -4,11 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdAdd, MdExpandMore } from "react-icons/md";
 import {
-  buildGroupPath,
-  type ConnectionOption,
-  sortLabel,
-} from "@/components/dialog/network/shared";
-import {
   DEFAULT_CONNECTION_ICON,
   LINUX_ICONS,
   resolveConnectionIcon,
@@ -16,6 +11,7 @@ import {
   SYSTEM_ICONS,
 } from "@/components/icons";
 import ChildWindowHeader from "@/components/layout/ChildWindowHeader";
+import { buildGroupPath, type ConnectionOption, sortLabel } from "@/components/network/shared";
 import { LocalTerminal } from "@/components/sessions/LocalTerminal";
 import { SerialForm } from "@/components/sessions/SerialForm";
 import { type SshAuthMode, SshForm } from "@/components/sessions/SshForm";
@@ -112,6 +108,7 @@ export default function NewSessionPage() {
   const [passwordId, setPasswordId] = useState("");
   const [password, setPassword] = useState("");
   const [hasPassword, setHasPassword] = useState(false);
+  const [passwordSecretsUnlocked, setPasswordSecretsUnlocked] = useState(false);
   const [keyId, setKeyId] = useState("");
   const [iconKey, setIconKey] = useState("");
   const [iconAutoDetect, setIconAutoDetect] = useState(true);
@@ -873,7 +870,7 @@ export default function NewSessionPage() {
                 </PopoverContent>
               </Popover>
             </div>
-            <div className="min-w-[12rem] flex-1">
+            <div className="min-w-48 flex-1">
               <Label className="text-xs font-medium text-foreground/80">
                 {t("dialog.connectionName")}
               </Label>
@@ -884,7 +881,7 @@ export default function NewSessionPage() {
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
-            <div className="min-w-[12rem] flex-1 sm:max-w-[18rem]">
+            <div className="min-w-48 flex-1 sm:max-w-[18rem]">
               <Label className="text-xs font-medium text-foreground/80">{t("dialog.group")}</Label>
               <Popover
                 open={showGroupDropdown}
@@ -912,7 +909,7 @@ export default function NewSessionPage() {
                   side="bottom"
                   sideOffset={4}
                   collisionPadding={16}
-                  className="w-[var(--radix-popover-trigger-width)] min-w-[12rem] overflow-hidden p-0"
+                  className="w-(--radix-popover-trigger-width) min-w-48 overflow-hidden p-0"
                 >
                   <div className="max-h-48 overflow-y-auto">
                     <button
@@ -1060,6 +1057,9 @@ export default function NewSessionPage() {
               connectionId={initialData?.id || editId}
               encoding={encoding}
               setEncoding={setEncoding}
+              passwordSecretsUnlocked={passwordSecretsUnlocked}
+              onUnlockPasswordSecrets={() => setPasswordSecretsUnlocked(true)}
+              onLockPasswordSecrets={() => setPasswordSecretsUnlocked(false)}
             />
           </TabsContent>
 
@@ -1111,6 +1111,9 @@ export default function NewSessionPage() {
               connectionId={initialData?.id || editId}
               encoding={encoding}
               setEncoding={setEncoding}
+              passwordSecretsUnlocked={passwordSecretsUnlocked}
+              onUnlockPasswordSecrets={() => setPasswordSecretsUnlocked(true)}
+              onLockPasswordSecrets={() => setPasswordSecretsUnlocked(false)}
             />
           </TabsContent>
 

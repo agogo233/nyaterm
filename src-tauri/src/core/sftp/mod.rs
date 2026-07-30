@@ -37,7 +37,7 @@ pub(crate) struct CopyResolvedTarget {
 }
 
 pub(crate) use duplicate::TransferDuplicateManager;
-pub(crate) use transfer::{active_transfer_count, transfer_target_directory};
+pub(crate) use transfer::{active_transfer_count, file_name_from_path, transfer_target_directory};
 pub use transfer::{cancel_transfer, pause_transfer, resume_transfer};
 pub(crate) use util::RemotePathRef;
 pub(crate) use util::sanitize_download_file_name;
@@ -667,36 +667,6 @@ async fn ssh_endpoint_fingerprint(
         .map(ssh_endpoint_fingerprint_from_config))
 }
 
-async fn clone_sftp_backend_pair(
-    manager: Arc<SessionManager>,
-    source_session_id: &str,
-    target_session_id: &str,
-) -> AppResult<(SftpBackend, SftpBackend)> {
-    let source_auto = get_or_create_auto_fs(&manager, source_session_id).await?;
-    let target_auto = get_or_create_auto_fs(&manager, target_session_id).await?;
-    let source_guard = source_auto.backend().await?;
-    let target_guard = target_auto.backend().await?;
-    let source = source_guard
-        .as_ref()
-        .and_then(|fs| fs.as_any().downcast_ref::<SftpBackend>())
-        .ok_or_else(|| {
-            AppError::Config(
-                "Cross-pane remote copy requires the SFTP backend for the source session"
-                    .to_string(),
-            )
-        })?;
-    let target = target_guard
-        .as_ref()
-        .and_then(|fs| fs.as_any().downcast_ref::<SftpBackend>())
-        .ok_or_else(|| {
-            AppError::Config(
-                "Cross-pane remote copy requires the SFTP backend for the target session"
-                    .to_string(),
-            )
-        })?;
-    Ok((source.clone(), target.clone()))
-}
-
 async fn clone_sftp_backend(
     manager: Arc<SessionManager>,
     session_id: &str,
@@ -712,6 +682,246 @@ async fn clone_sftp_backend(
             )
         })?;
     Ok(backend.clone())
+}
+
+async fn resolve_remote_copy_target_generic(
+    app: &tauri::AppHandle,
+    manager: &SessionManager,
+    fs: &dyn RemoteFs,
+    session_id: &str,
+    target_path: &str,
+    file_name: &str,
+    strategy: &str,
+) -> AppResult<Option<CopyResolvedTarget>> {
+    let existing = fs.stat(target_path).await.ok();
+    let Some(existing) = existing else {
+        return Ok(Some(CopyResolvedTarget {
+            path: target_path.to_string(),
+            existed: false,
+        }));
+    };
+
+    let resolved = match strategy {
+        "skip" => None,
+        "rename" => {
+            let mut candidate = target_path.to_string();
+            for index in 1..=999 {
+                candidate = remote_copy_rename_candidate(target_path, file_name, index);
+                if fs.stat(&candidate).await.is_err() {
+                    return Ok(Some(CopyResolvedTarget {
+                        path: candidate,
+                        existed: false,
+                    }));
+                }
+            }
+            Some(CopyResolvedTarget {
+                path: candidate,
+                existed: true,
+            })
+        }
+        "ask" => match duplicate::prompt_duplicate_choice(
+            app,
+            manager,
+            session_id,
+            target_path,
+            file_name,
+            existing.is_dir,
+        )
+        .await?
+        {
+            duplicate::DuplicateChoice::Skip => None,
+            duplicate::DuplicateChoice::Overwrite => Some(CopyResolvedTarget {
+                path: target_path.to_string(),
+                existed: true,
+            }),
+        },
+        _ => Some(CopyResolvedTarget {
+            path: target_path.to_string(),
+            existed: true,
+        }),
+    };
+
+    Ok(resolved)
+}
+
+async fn ensure_remote_dir_generic(fs: &dyn RemoteFs, path: &str) -> AppResult<()> {
+    let normalized = path.trim_end_matches('/');
+    if normalized.is_empty() || normalized == "/" {
+        return Ok(());
+    }
+
+    let absolute = normalized.starts_with('/');
+    let mut current = String::new();
+    for part in normalized.split('/').filter(|part| !part.is_empty()) {
+        current = if current.is_empty() {
+            if absolute {
+                format!("/{part}")
+            } else {
+                part.to_string()
+            }
+        } else {
+            join_remote_child_path(&current, part)
+        };
+        if fs.stat(&current).await.is_ok() {
+            continue;
+        }
+        fs.mkdir(&current, None).await?;
+    }
+
+    Ok(())
+}
+
+async fn ensure_remote_parent_dir_generic(fs: &dyn RemoteFs, path: &str) -> AppResult<()> {
+    if let Some((parent, _)) = path.rsplit_once('/')
+        && !parent.is_empty()
+    {
+        ensure_remote_dir_generic(fs, parent).await?;
+    }
+    Ok(())
+}
+
+fn remote_copy_temp_root() -> PathBuf {
+    std::env::temp_dir().join(format!("nyaterm-remote-copy-{}", uuid::Uuid::new_v4()))
+}
+
+fn remote_copy_rename_candidate(target_path: &str, file_name: &str, index: u16) -> String {
+    let path = Path::new(target_path);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(file_name);
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{value}"))
+        .unwrap_or_default();
+    let name = format!("{stem}({index}){ext}");
+    match target_path.rsplit_once('/').map(|(parent, _)| parent) {
+        Some("") => format!("/{name}"),
+        Some(parent) => format!("{}/{}", parent.trim_end_matches('/'), name),
+        None => name,
+    }
+}
+
+async fn cleanup_remote_copy_temp_root(path: &Path) {
+    let _ = tokio::fs::remove_dir_all(path).await;
+}
+
+#[derive(Clone, Debug)]
+struct GenericRemoteCopyFile {
+    source_path: String,
+    local_path: PathBuf,
+    target_path: String,
+}
+
+#[derive(Clone, Debug)]
+struct GenericLocalCopyFile {
+    local_path: PathBuf,
+    remote_path: String,
+}
+
+#[derive(Debug)]
+struct GenericRemoteCopyInventory {
+    files: Vec<GenericRemoteCopyFile>,
+    dirs: Vec<String>,
+    total_size: u64,
+}
+
+#[derive(Debug)]
+struct GenericLocalCopyInventory {
+    files: Vec<GenericLocalCopyFile>,
+    dirs: Vec<String>,
+    total_size: u64,
+}
+
+async fn collect_remote_copy_inventory_generic(
+    fs: &dyn RemoteFs,
+    source_root: &str,
+    local_root: &Path,
+    target_root: &str,
+) -> AppResult<GenericRemoteCopyInventory> {
+    let mut files = Vec::new();
+    let mut dirs = vec![target_root.to_string()];
+    let mut total_size = 0_u64;
+    let mut stack = vec![(
+        source_root.to_string(),
+        local_root.to_path_buf(),
+        target_root.to_string(),
+    )];
+
+    while let Some((source_dir, local_dir, target_dir)) = stack.pop() {
+        let entries = fs.list_dir(&source_dir).await?;
+        for entry in entries {
+            let source_child = join_remote_child_path(&source_dir, &entry.name);
+            let local_child = local_dir.join(sanitize_download_file_name(&entry.name));
+            let target_child = join_remote_child_path(&target_dir, &entry.name);
+            if entry.is_dir && !entry.is_symlink {
+                dirs.push(target_child.clone());
+                stack.push((source_child, local_child, target_child));
+            } else if !entry.is_symlink {
+                total_size = total_size.saturating_add(entry.size);
+                files.push(GenericRemoteCopyFile {
+                    source_path: source_child,
+                    local_path: local_child,
+                    target_path: target_child,
+                });
+            }
+        }
+    }
+
+    Ok(GenericRemoteCopyInventory {
+        files,
+        dirs,
+        total_size,
+    })
+}
+
+async fn collect_local_copy_inventory_generic(
+    source_root: &Path,
+    target_root: &str,
+) -> AppResult<GenericLocalCopyInventory> {
+    let mut files = Vec::new();
+    let mut dirs = vec![target_root.to_string()];
+    let mut total_size = 0_u64;
+    let mut stack = vec![(source_root.to_path_buf(), target_root.to_string())];
+
+    while let Some((local_dir, remote_dir)) = stack.pop() {
+        let mut read_dir = tokio::fs::read_dir(&local_dir).await.map_err(|error| {
+            AppError::Channel(format!("Failed to read local directory: {error}"))
+        })?;
+        while let Some(entry) = read_dir.next_entry().await.map_err(|error| {
+            AppError::Channel(format!("Failed to read local directory entry: {error}"))
+        })? {
+            let file_type = entry.file_type().await.map_err(|error| {
+                AppError::Channel(format!("Failed to read local file type: {error}"))
+            })?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let local_child = entry.path();
+            let remote_child = join_remote_child_path(&remote_dir, &name);
+            if file_type.is_dir() {
+                dirs.push(remote_child.clone());
+                stack.push((local_child, remote_child));
+            } else if file_type.is_file() {
+                let size = entry
+                    .metadata()
+                    .await
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0);
+                total_size = total_size.saturating_add(size);
+                files.push(GenericLocalCopyFile {
+                    local_path: local_child,
+                    remote_path: remote_child,
+                });
+            }
+        }
+    }
+
+    Ok(GenericLocalCopyInventory {
+        files,
+        dirs,
+        total_size,
+    })
 }
 
 async fn copy_local_directory_with_controller(
@@ -926,6 +1136,574 @@ fn emit_copy_cancelled(
     );
 }
 
+async fn copy_local_file_to_remote_generic(
+    app: &tauri::AppHandle,
+    fs: &dyn RemoteFs,
+    session_id: &str,
+    source_path: &str,
+    target_path: &str,
+    transfer_id: Option<String>,
+) -> AppResult<()> {
+    use transfer::{register_transfer, unregister_transfer};
+
+    let settings = crate::config::load_app_settings(app)
+        .map(|settings| settings.transfer)
+        .unwrap_or_default();
+    let total_size = tokio::fs::metadata(source_path)
+        .await
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let controller = transfer::create_child_file_transfer_controller(
+        transfer_id,
+        session_id,
+        file_name_from_local_path(source_path),
+        target_path,
+        source_path,
+        "copy",
+        None,
+    );
+    controller.update_progress(0, total_size);
+    register_transfer(controller.clone());
+    let _ = app.emit(
+        "transfer-event",
+        &controller.build_event("started", total_size, None),
+    );
+
+    let result = async {
+        ensure_remote_parent_dir_generic(fs, target_path).await?;
+        let child = transfer::create_child_file_transfer_controller(
+            None,
+            session_id,
+            file_name_from_local_path(source_path),
+            target_path,
+            source_path,
+            "copy",
+            Some(controller.id()),
+        );
+        let bytes = fs
+            .copy_local_file_to_remote_with_controller(
+                app,
+                session_id,
+                source_path,
+                target_path,
+                &settings,
+                child,
+                Some(controller.clone()),
+            )
+            .await?;
+        controller.update_progress(bytes, total_size);
+        Ok(bytes)
+    }
+    .await;
+
+    match result {
+        Ok(size) => {
+            controller.update_progress(size, size);
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event("completed", size, None),
+            );
+            unregister_transfer(&controller.id());
+            Ok(())
+        }
+        Err(error) => {
+            let status = if matches!(error, AppError::Cancelled(_)) {
+                "cancelled"
+            } else {
+                "error"
+            };
+            let message = (status == "error").then(|| error.to_string());
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event(status, 0, message),
+            );
+            unregister_transfer(&controller.id());
+            Err(error)
+        }
+    }
+}
+
+async fn copy_remote_file_to_local_generic(
+    app: &tauri::AppHandle,
+    fs: &dyn RemoteFs,
+    session_id: &str,
+    source_path: &str,
+    target_path: &str,
+    transfer_id: Option<String>,
+) -> AppResult<()> {
+    use transfer::{register_transfer, unregister_transfer};
+
+    let settings = crate::config::load_app_settings(app)
+        .map(|settings| settings.transfer)
+        .unwrap_or_default();
+    let total_size = fs
+        .stat(source_path)
+        .await
+        .map(|props| props.size)
+        .unwrap_or(0);
+    let controller = transfer::create_child_file_transfer_controller(
+        transfer_id,
+        session_id,
+        file_name_from_path(source_path),
+        source_path,
+        target_path,
+        "copy",
+        None,
+    );
+    controller.update_progress(0, total_size);
+    register_transfer(controller.clone());
+    let _ = app.emit(
+        "transfer-event",
+        &controller.build_event("started", total_size, None),
+    );
+
+    let result = async {
+        if let Some(parent) = Path::new(target_path).parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                AppError::Channel(format!("Failed to create local target directory: {error}"))
+            })?;
+        }
+        let child = transfer::create_child_file_transfer_controller(
+            None,
+            session_id,
+            file_name_from_path(source_path),
+            source_path,
+            target_path,
+            "copy",
+            Some(controller.id()),
+        );
+        let bytes = fs
+            .copy_remote_file_to_local_with_controller(
+                app,
+                session_id,
+                source_path,
+                target_path,
+                &settings,
+                child,
+                Some(controller.clone()),
+            )
+            .await?;
+        controller.update_progress(bytes, total_size);
+        Ok(bytes)
+    }
+    .await;
+
+    match result {
+        Ok(size) => {
+            controller.update_progress(size, size);
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event("completed", size, None),
+            );
+            unregister_transfer(&controller.id());
+            Ok(())
+        }
+        Err(error) => {
+            let status = if matches!(error, AppError::Cancelled(_)) {
+                "cancelled"
+            } else {
+                "error"
+            };
+            let message = (status == "error").then(|| error.to_string());
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event(status, 0, message),
+            );
+            unregister_transfer(&controller.id());
+            Err(error)
+        }
+    }
+}
+
+async fn copy_remote_file_to_remote_via_local(
+    app: &tauri::AppHandle,
+    source_fs: &dyn RemoteFs,
+    target_fs: &dyn RemoteFs,
+    source_session_id: &str,
+    target_session_id: &str,
+    source_path: &str,
+    target_path: &str,
+    transfer_id: Option<String>,
+) -> AppResult<()> {
+    use transfer::{register_transfer, unregister_transfer};
+
+    let settings = crate::config::load_app_settings(app)
+        .map(|settings| settings.transfer)
+        .unwrap_or_default();
+    let temp_root = remote_copy_temp_root();
+    let temp_file = temp_root.join(sanitize_download_file_name(&file_name_from_path(
+        source_path,
+    )));
+    let total_size = source_fs
+        .stat(source_path)
+        .await
+        .map(|props| props.size.saturating_mul(2))
+        .unwrap_or(0);
+    let controller = transfer::create_child_file_transfer_controller(
+        transfer_id,
+        source_session_id,
+        file_name_from_path(source_path),
+        source_path,
+        target_path,
+        "copy",
+        None,
+    );
+    controller.update_progress(0, total_size);
+    register_transfer(controller.clone());
+    let _ = app.emit(
+        "transfer-event",
+        &controller.build_event("started", total_size, None),
+    );
+
+    let result = async {
+        tokio::fs::create_dir_all(&temp_root)
+            .await
+            .map_err(|error| {
+                AppError::Channel(format!(
+                    "Failed to create temporary copy directory: {error}"
+                ))
+            })?;
+        let temp_file_text = temp_file.to_string_lossy().to_string();
+        let download_child = transfer::create_child_file_transfer_controller(
+            None,
+            source_session_id,
+            file_name_from_path(source_path),
+            source_path,
+            &temp_file_text,
+            "copy",
+            Some(controller.id()),
+        );
+        let downloaded = source_fs
+            .copy_remote_file_to_local_with_controller(
+                app,
+                source_session_id,
+                source_path,
+                &temp_file_text,
+                &settings,
+                download_child,
+                Some(controller.clone()),
+            )
+            .await?;
+        controller.update_progress(downloaded, total_size);
+        let _ = app.emit(
+            "transfer-event",
+            &controller.build_event("progress", total_size, None),
+        );
+
+        ensure_remote_parent_dir_generic(target_fs, target_path).await?;
+        let upload_child = transfer::create_child_file_transfer_controller(
+            None,
+            target_session_id,
+            file_name_from_path(target_path),
+            target_path,
+            &temp_file_text,
+            "copy",
+            Some(controller.id()),
+        );
+        let uploaded = target_fs
+            .copy_local_file_to_remote_with_controller(
+                app,
+                target_session_id,
+                &temp_file_text,
+                target_path,
+                &settings,
+                upload_child,
+                Some(controller.clone()),
+            )
+            .await?;
+        let total = downloaded.saturating_add(uploaded);
+        controller.update_progress(total, total_size);
+        Ok(total)
+    }
+    .await;
+
+    cleanup_remote_copy_temp_root(&temp_root).await;
+
+    match result {
+        Ok(size) => {
+            controller.update_progress(size, size);
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event("completed", size, None),
+            );
+            unregister_transfer(&controller.id());
+            Ok(())
+        }
+        Err(error) => {
+            let status = if matches!(error, AppError::Cancelled(_)) {
+                "cancelled"
+            } else {
+                "error"
+            };
+            let message = (status == "error").then(|| error.to_string());
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event(status, 0, message),
+            );
+            unregister_transfer(&controller.id());
+            Err(error)
+        }
+    }
+}
+
+async fn copy_local_directory_to_remote_generic(
+    app: &tauri::AppHandle,
+    fs: &dyn RemoteFs,
+    session_id: &str,
+    source_path: &str,
+    target_path: &str,
+    transfer_id: Option<String>,
+) -> AppResult<()> {
+    use transfer::{register_transfer, unregister_transfer, wait_for_transfer_ready};
+
+    let settings = crate::config::load_app_settings(app)
+        .map(|settings| settings.transfer)
+        .unwrap_or_default();
+    let inventory =
+        collect_local_copy_inventory_generic(Path::new(source_path), target_path).await?;
+    let total_files = inventory.files.len() as u64;
+    let total_size = inventory.total_size;
+    let controller = transfer::create_directory_transfer_controller(
+        transfer_id,
+        session_id,
+        file_name_from_local_path(source_path),
+        target_path,
+        source_path,
+        "copy",
+        total_files,
+        total_size,
+    );
+    register_transfer(controller.clone());
+    let _ = app.emit(
+        "transfer-event",
+        &controller.build_event("started", total_size, None),
+    );
+
+    let result = async {
+        for dir in &inventory.dirs {
+            ensure_remote_dir_generic(fs, dir).await?;
+        }
+
+        let mut bytes_done = 0_u64;
+        let mut completed = 0_u64;
+        for file in inventory.files {
+            wait_for_transfer_ready(&controller).await?;
+            ensure_remote_parent_dir_generic(fs, &file.remote_path).await?;
+            let local_path = file.local_path.to_string_lossy().to_string();
+            let child = transfer::create_child_file_transfer_controller(
+                None,
+                session_id,
+                file_name_from_path(&file.remote_path),
+                &file.remote_path,
+                &local_path,
+                "copy",
+                Some(controller.id()),
+            );
+            let uploaded = fs
+                .copy_local_file_to_remote_with_controller(
+                    app,
+                    session_id,
+                    &local_path,
+                    &file.remote_path,
+                    &settings,
+                    child,
+                    Some(controller.clone()),
+                )
+                .await?;
+            bytes_done = bytes_done.saturating_add(uploaded);
+            completed = completed.saturating_add(1);
+            controller.update_progress(bytes_done, total_size);
+            controller.update_item_progress(completed, total_files);
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event("progress", total_size, None),
+            );
+        }
+
+        Ok((bytes_done, completed))
+    }
+    .await;
+
+    match result {
+        Ok((bytes, completed)) => {
+            controller.update_progress(bytes, bytes);
+            controller.update_item_progress(completed, total_files);
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event("completed", 0, None),
+            );
+            unregister_transfer(&controller.id());
+            Ok(())
+        }
+        Err(error) => {
+            let status = if matches!(error, AppError::Cancelled(_)) {
+                "cancelled"
+            } else {
+                "error"
+            };
+            let message = (status == "error").then(|| error.to_string());
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event(status, 0, message),
+            );
+            unregister_transfer(&controller.id());
+            Err(error)
+        }
+    }
+}
+
+async fn copy_remote_directory_to_remote_via_local(
+    app: &tauri::AppHandle,
+    source_fs: &dyn RemoteFs,
+    target_fs: &dyn RemoteFs,
+    source_session_id: &str,
+    target_session_id: &str,
+    source_path: &str,
+    target_path: &str,
+    transfer_id: Option<String>,
+) -> AppResult<()> {
+    use transfer::{register_transfer, unregister_transfer, wait_for_transfer_ready};
+
+    let settings = crate::config::load_app_settings(app)
+        .map(|settings| settings.transfer)
+        .unwrap_or_default();
+    let temp_root = remote_copy_temp_root();
+    let local_root = temp_root.join(sanitize_download_file_name(&file_name_from_path(
+        source_path,
+    )));
+    let inventory =
+        collect_remote_copy_inventory_generic(source_fs, source_path, &local_root, target_path)
+            .await?;
+    let total_files = inventory.files.len() as u64;
+    let total_size = inventory.total_size.saturating_mul(2);
+    let controller = transfer::create_directory_transfer_controller(
+        transfer_id,
+        source_session_id,
+        file_name_from_path(source_path),
+        source_path,
+        target_path,
+        "copy",
+        total_files,
+        total_size,
+    );
+    register_transfer(controller.clone());
+    let _ = app.emit(
+        "transfer-event",
+        &controller.build_event("started", total_size, None),
+    );
+
+    let result = async {
+        tokio::fs::create_dir_all(&local_root)
+            .await
+            .map_err(|error| {
+                AppError::Channel(format!(
+                    "Failed to create temporary copy directory: {error}"
+                ))
+            })?;
+        for dir in &inventory.dirs {
+            ensure_remote_dir_generic(target_fs, dir).await?;
+        }
+
+        let mut bytes_done = 0_u64;
+        let mut completed = 0_u64;
+        for file in inventory.files {
+            wait_for_transfer_ready(&controller).await?;
+            if let Some(parent) = file.local_path.parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                    AppError::Channel(format!(
+                        "Failed to create temporary copy directory: {error}"
+                    ))
+                })?;
+            }
+            let local_path = file.local_path.to_string_lossy().to_string();
+            let download_child = transfer::create_child_file_transfer_controller(
+                None,
+                source_session_id,
+                file_name_from_path(&file.source_path),
+                &file.source_path,
+                &local_path,
+                "copy",
+                Some(controller.id()),
+            );
+            let downloaded = source_fs
+                .copy_remote_file_to_local_with_controller(
+                    app,
+                    source_session_id,
+                    &file.source_path,
+                    &local_path,
+                    &settings,
+                    download_child,
+                    Some(controller.clone()),
+                )
+                .await?;
+            bytes_done = bytes_done.saturating_add(downloaded);
+            controller.update_progress(bytes_done, total_size);
+
+            ensure_remote_parent_dir_generic(target_fs, &file.target_path).await?;
+            let upload_child = transfer::create_child_file_transfer_controller(
+                None,
+                target_session_id,
+                file_name_from_path(&file.target_path),
+                &file.target_path,
+                &local_path,
+                "copy",
+                Some(controller.id()),
+            );
+            let uploaded = target_fs
+                .copy_local_file_to_remote_with_controller(
+                    app,
+                    target_session_id,
+                    &local_path,
+                    &file.target_path,
+                    &settings,
+                    upload_child,
+                    Some(controller.clone()),
+                )
+                .await?;
+            bytes_done = bytes_done.saturating_add(uploaded);
+            completed = completed.saturating_add(1);
+            controller.update_progress(bytes_done, total_size);
+            controller.update_item_progress(completed, total_files);
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event("progress", total_size, None),
+            );
+        }
+
+        Ok((bytes_done, completed))
+    }
+    .await;
+
+    cleanup_remote_copy_temp_root(&temp_root).await;
+
+    match result {
+        Ok((bytes, completed)) => {
+            controller.update_progress(bytes, bytes);
+            controller.update_item_progress(completed, total_files);
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event("completed", 0, None),
+            );
+            unregister_transfer(&controller.id());
+            Ok(())
+        }
+        Err(error) => {
+            let status = if matches!(error, AppError::Cancelled(_)) {
+                "cancelled"
+            } else {
+                "error"
+            };
+            let message = (status == "error").then(|| error.to_string());
+            let _ = app.emit(
+                "transfer-event",
+                &controller.build_event(status, 0, message),
+            );
+            unregister_transfer(&controller.id());
+            Err(error)
+        }
+    }
+}
+
 pub async fn copy_file_entry(
     app: tauri::AppHandle,
     manager: Arc<SessionManager>,
@@ -982,16 +1760,19 @@ pub async fn copy_file_entry(
         }
         CopyEndpointKind::Remote => {
             let target = join_remote_child_path(&target_dir, &file_name);
-            let backend = clone_sftp_backend(manager.clone(), &target_session_id).await?;
-            match backend
-                .resolve_remote_copy_target_info(
-                    &app,
-                    manager.as_ref(),
-                    &target_session_id,
-                    &target,
-                    duplicate_strategy,
-                )
-                .await
+            let target_auto = get_or_create_auto_fs(&manager, &target_session_id).await?;
+            let target_guard = target_auto.backend().await?;
+            let target_fs = target_guard.as_ref().unwrap();
+            match resolve_remote_copy_target_generic(
+                &app,
+                manager.as_ref(),
+                target_fs.as_ref(),
+                &target_session_id,
+                &target,
+                &file_name,
+                duplicate_strategy,
+            )
+            .await?
             {
                 Some(target) => target,
                 None => {
@@ -1044,43 +1825,46 @@ pub async fn copy_file_entry(
             .await
         }
         (CopyEndpointKind::Local, CopyEndpointKind::Remote, false) => {
-            let backend = clone_sftp_backend(manager, &target_session_id).await?;
-            backend
-                .copy_local_file_to_remote(
-                    &app,
-                    &target_session_id,
-                    &source_path,
-                    &target_path,
-                    target_existed,
-                    transfer_id,
-                )
-                .await
+            let target_auto = get_or_create_auto_fs(&manager, &target_session_id).await?;
+            let target_guard = target_auto.backend().await?;
+            let target_fs = target_guard.as_ref().unwrap();
+            copy_local_file_to_remote_generic(
+                &app,
+                target_fs.as_ref(),
+                &target_session_id,
+                &source_path,
+                &target_path,
+                transfer_id,
+            )
+            .await
         }
         (CopyEndpointKind::Local, CopyEndpointKind::Remote, true) => {
-            let backend = clone_sftp_backend(manager, &target_session_id).await?;
-            backend
-                .copy_local_directory_to_remote(
-                    &app,
-                    &target_session_id,
-                    &source_path,
-                    &target_path,
-                    target_existed,
-                    transfer_id,
-                )
-                .await
+            let target_auto = get_or_create_auto_fs(&manager, &target_session_id).await?;
+            let target_guard = target_auto.backend().await?;
+            let target_fs = target_guard.as_ref().unwrap();
+            copy_local_directory_to_remote_generic(
+                &app,
+                target_fs.as_ref(),
+                &target_session_id,
+                &source_path,
+                &target_path,
+                transfer_id,
+            )
+            .await
         }
         (CopyEndpointKind::Remote, CopyEndpointKind::Local, false) => {
-            let backend = clone_sftp_backend(manager, &source_session_id).await?;
-            backend
-                .copy_remote_file_to_local(
-                    &app,
-                    &source_session_id,
-                    &source_path,
-                    &target_path,
-                    target_existed,
-                    transfer_id,
-                )
-                .await
+            let source_auto = get_or_create_auto_fs(&manager, &source_session_id).await?;
+            let source_guard = source_auto.backend().await?;
+            let source_fs = source_guard.as_ref().unwrap();
+            copy_remote_file_to_local_generic(
+                &app,
+                source_fs.as_ref(),
+                &source_session_id,
+                &source_path,
+                &target_path,
+                transfer_id,
+            )
+            .await
         }
         (CopyEndpointKind::Remote, CopyEndpointKind::Local, true) => {
             let backend = clone_sftp_backend(manager, &source_session_id).await?;
@@ -1096,34 +1880,82 @@ pub async fn copy_file_entry(
                 .await
         }
         (CopyEndpointKind::Remote, CopyEndpointKind::Remote, false) => {
-            let (source, target) =
-                clone_sftp_backend_pair(manager, &source_session_id, &target_session_id).await?;
-            source
-                .copy_remote_file_to_remote_streaming(
-                    &target,
-                    &app,
-                    &source_session_id,
-                    &source_path,
-                    &target_path,
-                    target_existed,
-                    transfer_id,
-                )
-                .await
+            let source_auto = get_or_create_auto_fs(&manager, &source_session_id).await?;
+            let target_auto = get_or_create_auto_fs(&manager, &target_session_id).await?;
+            let source_guard = source_auto.backend().await?;
+            let target_guard = target_auto.backend().await?;
+            let source_fs = source_guard.as_ref().unwrap();
+            let target_fs = target_guard.as_ref().unwrap();
+            match (
+                source_fs.as_any().downcast_ref::<SftpBackend>(),
+                target_fs.as_any().downcast_ref::<SftpBackend>(),
+            ) {
+                (Some(source), Some(target)) => {
+                    source
+                        .copy_remote_file_to_remote_streaming(
+                            target,
+                            &app,
+                            &source_session_id,
+                            &source_path,
+                            &target_path,
+                            target_existed,
+                            transfer_id,
+                        )
+                        .await
+                }
+                _ => {
+                    copy_remote_file_to_remote_via_local(
+                        &app,
+                        source_fs.as_ref(),
+                        target_fs.as_ref(),
+                        &source_session_id,
+                        &target_session_id,
+                        &source_path,
+                        &target_path,
+                        transfer_id,
+                    )
+                    .await
+                }
+            }
         }
         (CopyEndpointKind::Remote, CopyEndpointKind::Remote, true) => {
-            let (source, target) =
-                clone_sftp_backend_pair(manager, &source_session_id, &target_session_id).await?;
-            source
-                .copy_remote_directory_to_remote_streaming(
-                    &target,
-                    &app,
-                    &source_session_id,
-                    &source_path,
-                    &target_path,
-                    target_existed,
-                    transfer_id,
-                )
-                .await
+            let source_auto = get_or_create_auto_fs(&manager, &source_session_id).await?;
+            let target_auto = get_or_create_auto_fs(&manager, &target_session_id).await?;
+            let source_guard = source_auto.backend().await?;
+            let target_guard = target_auto.backend().await?;
+            let source_fs = source_guard.as_ref().unwrap();
+            let target_fs = target_guard.as_ref().unwrap();
+            match (
+                source_fs.as_any().downcast_ref::<SftpBackend>(),
+                target_fs.as_any().downcast_ref::<SftpBackend>(),
+            ) {
+                (Some(source), Some(target)) => {
+                    source
+                        .copy_remote_directory_to_remote_streaming(
+                            target,
+                            &app,
+                            &source_session_id,
+                            &source_path,
+                            &target_path,
+                            target_existed,
+                            transfer_id,
+                        )
+                        .await
+                }
+                _ => {
+                    copy_remote_directory_to_remote_via_local(
+                        &app,
+                        source_fs.as_ref(),
+                        target_fs.as_ref(),
+                        &source_session_id,
+                        &target_session_id,
+                        &source_path,
+                        &target_path,
+                        transfer_id,
+                    )
+                    .await
+                }
+            }
         }
     }
 }
@@ -1566,7 +2398,8 @@ pub async fn upload_local_directory(
 #[cfg(test)]
 mod tests {
     use super::{
-        cleanup_local_copy_temp, commit_local_copy_temp, get_home_dir,
+        cleanup_local_copy_temp, cleanup_remote_copy_temp_root, commit_local_copy_temp,
+        get_home_dir, remote_copy_rename_candidate, remote_copy_temp_root,
         ssh_endpoint_fingerprint_from_config,
     };
     use crate::config::{AiExecutionProfile, ProxySettings, SftpSettings};
@@ -1644,6 +2477,34 @@ mod tests {
         ] {
             assert_ne!(base_fp, ssh_endpoint_fingerprint_from_config(&config));
         }
+    }
+
+    #[test]
+    fn remote_copy_rename_candidate_preserves_parent_and_extension() {
+        assert_eq!(
+            remote_copy_rename_candidate("/tmp/report.txt", "report.txt", 2),
+            "/tmp/report(2).txt"
+        );
+        assert_eq!(
+            remote_copy_rename_candidate("archive", "archive", 1),
+            "archive(1)"
+        );
+        assert_eq!(
+            remote_copy_rename_candidate("/test_file.py", "test_file.py", 9),
+            "/test_file(9).py"
+        );
+    }
+
+    #[tokio::test]
+    async fn remote_copy_temp_root_cleanup_removes_staging_directory() {
+        let root = remote_copy_temp_root();
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).expect("create staging dir");
+        fs::write(nested.join("file.txt"), b"staged").expect("write staged file");
+
+        cleanup_remote_copy_temp_root(&root).await;
+
+        assert!(!root.exists());
     }
 
     #[tokio::test]

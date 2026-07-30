@@ -78,15 +78,12 @@ fn read_cloud_sync_history_from_log_dir(
             };
             if let Some(entry) = parse_history_entry(value) {
                 entries.push(entry);
-                if entries.len() >= limit {
-                    entries.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
-                    return Ok(entries);
-                }
             }
         }
     }
 
     entries.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
+    entries.truncate(limit);
     Ok(entries)
 }
 

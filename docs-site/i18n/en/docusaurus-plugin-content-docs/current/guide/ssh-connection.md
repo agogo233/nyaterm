@@ -194,13 +194,14 @@ If you just want a one-off connection without saving it, use a **temporary SSH l
 Two input forms are supported:
 
 - `ssh://user@host:port` URLs
+- `ssh://user:password@host:port` URLs; the password is used only for this temporary SSH session and is not saved
 - `ssh [-p port] [-l user] user@host` command strings
 
 Conventions and limits:
 
 - Default username is `root` and default port is `22`
 - Uses password authentication, with no proxy, jump host, post-login command, or X11
-- For safety, inline passwords (`user:pass@`) and unsupported options such as `-J`, `-L/-R/-D`, `-i`, and `-o ProxyJump/ProxyCommand` are rejected with a specific error message
+- For safety, only `ssh://` URLs may include one-time passwords; command-style inline passwords (`user:pass@host`) and unsupported options such as `-J`, `-L/-R/-D`, `-i`, and `-o ProxyJump/ProxyCommand` are rejected
 
 A temporary session never becomes a saved connection: NyaTerm strips the connection ID, proxy, jump host, post-login command, X11, and algorithm preferences, so it stays a one-off session.
 

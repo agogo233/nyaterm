@@ -26,7 +26,7 @@ use super::history::{
 };
 use super::model::resolve_request_model_config;
 use super::prompt::build_agent_prompt;
-use super::redaction::{redact_context, redact_sensitive_text};
+use super::redaction::{redact_context, redact_marker_values, redact_sensitive_text};
 use super::stream::{active_streams, emit_stream_event};
 use super::types::{
     AiChatRequest, AiMessage, AiMessageRole, AiModelDiscovery, AiSessionBackendMetadata,
@@ -1294,18 +1294,10 @@ async fn read_stderr(stderr: tokio::process::ChildStderr) {
 }
 
 fn sanitize_codex_log_line(line: &str) -> String {
-    let mut sanitized = line.to_string();
-    for marker in ["access_token=", "refresh_token=", "id_token=", "code="] {
-        while let Some(index) = sanitized.find(marker) {
-            let start = index + marker.len();
-            let end = sanitized[start..]
-                .find(['&', ' ', '"'])
-                .map(|offset| start + offset)
-                .unwrap_or(sanitized.len());
-            sanitized.replace_range(start..end, "[redacted]");
-        }
-    }
-    sanitized
+    redact_marker_values(
+        line,
+        &["access_token=", "refresh_token=", "id_token=", "code="],
+    )
 }
 
 pub async fn manager_from_app(app: &AppHandle) -> AppResult<Arc<CodexAppServerManager>> {
@@ -1330,7 +1322,7 @@ mod tests {
         assert!(sanitized.contains("access_token=[redacted]"));
         assert!(sanitized.contains("refresh_token=[redacted]"));
         assert!(sanitized.contains("id_token=[redacted]"));
-        assert!(sanitized.contains("code=[redacted]"));
+        assert!(sanitized.contains("code=[redacted]&state=ok"));
     }
 
     #[test]

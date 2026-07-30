@@ -1103,8 +1103,8 @@ mod tests {
     }
 
     #[test]
-    fn injection_timeout_is_5s_and_falls_back_to_normal() {
-        assert_eq!(INJECT_TIMEOUT_SECS, 5);
+    fn injection_timeout_is_30s_and_falls_back_to_normal() {
+        assert_eq!(INJECT_TIMEOUT_SECS, 30);
 
         let mut wait_initial = IoPhase::WaitInitial;
         assert_eq!(

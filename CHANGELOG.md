@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 
 This changelog is inferred from release bump commits in git history (for example `chore: bump version to vX.Y.Z`) and grouped by Conventional Commit type.
 
+## [1.1.18] - 2026-07-29
+
+### Added
+
+- **external-open:** Add external connection handling, URL parsing, saved-connection matching, and confirmation dialogs for opening connection links from outside NyaTerm.
+- **terminal:** Add `TerminalFitScheduler` with tests, improve search lifecycle hooks, add external file-drop handling, and refresh terminal layout/output more reliably after reconnect and visibility changes.
+- **session:** Add session attachment support and hibernation logging.
+- **sftp:** Add remote file copy operations with controller support, and preserve permissions during remote file write operations.
+- **file-explorer:** Add an editable path button, search entry, active session targeting, and improved file-window target handling.
+- **header:** Add header status visibility controls, confirmation dialogs, and refreshed header actions/icons.
+- **security-auth:** Add credential, private key, and OTP management dialogs, plus improved key-management UI and backend handling.
+- **network:** Add Proxy and Tunnel management pages.
+- **quick-commands:** Add command preview, copy support, and category selection state management.
+- **ai-settings:** Add AI model refresh and improve model discovery.
+- **updater:** Add automatic updates for Windows portable builds.
+
+### Changed
+
+- **sftp:** Modularize the SFTP backend and improve upload cancellation handling.
+- **importer:** Unify secret encryption logic across importers.
+- **updater:** Unify portable updates on Cloudflare R2.
+- **docker:** Update Docker command paths.
+- **settings:** Improve close handling and unsaved-change confirmation.
+- **i18n:** Update credential, SSH key, proxy/tunnel, terminal display, header status, and external-connection localization.
+
+### Fixed
+
+- **terminal:** Improve terminal snapshot serialization and reconnect handling, refresh timestamps on Enter and suggestion execution, and improve reconnect/session handling for synchronized input.
+- **sync:** Use session input peer IDs for sync peer selection.
+- **window:** Avoid child-window loading flashes and improve child-window logging/conflict warnings.
+- **sftp:** Improve directory removal logic with raw path matching.
+- **file-explorer:** Improve resize handling in the path bar.
+- **ssh:** Increase command injection timeout from 5 to 30 seconds.
+- **redaction:** Add marker-value redaction for sensitive data.
+- **ui:** Improve responsive class names in SSH and new-session forms.
+
+### CI
+
+- **updater:** Add signed portable target verification for `latest.json`.
+- **gitee:** Improve Python dependency installation in the release workflow.
+
+### Documentation
+
+- **readme:** Update badge links and formatting in the Chinese README.
+
 ## [1.1.17] - 2026-07-22
 
 ### Fixed

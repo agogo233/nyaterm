@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import {
   MdClose,
   MdDescription,
+  MdDns,
   MdDoneAll,
   MdKeyboardArrowDown,
   MdOpenInNew,
@@ -44,6 +45,7 @@ import {
 import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
 import { cn, formatSize, parseJsonSearchParam } from "@/lib/utils";
+import type { FileWindowTarget } from "@/lib/windowManager";
 
 const MAX_EDITOR_FILE_BYTES = 5 * 1024 * 1024;
 
@@ -57,6 +59,7 @@ interface RemoteFileEditorData {
   name: string;
   size: number;
   mtime: number;
+  target?: FileWindowTarget;
 }
 
 interface RemoteFileEditorOpenPayload {
@@ -73,6 +76,7 @@ interface EditorTab {
   name: string;
   size: number;
   mtime: number;
+  target?: FileWindowTarget;
   content: string;
   baseSize: number;
   baseMtime: number;
@@ -131,6 +135,7 @@ function createTab(data: RemoteFileEditorData): EditorTab {
     name: data.name,
     size: data.size,
     mtime: data.mtime,
+    target: data.target,
     id: tabId(data),
     content: "",
     baseSize: data.size,
@@ -142,6 +147,11 @@ function createTab(data: RemoteFileEditorData): EditorTab {
     lastSavedAt: null,
     language: languageFromFilename(data.name || path),
   };
+}
+
+function formatTargetLabel(target?: FileWindowTarget) {
+  if (!target) return "";
+  return target.label;
 }
 
 export default function RemoteFileEditorPage() {
@@ -327,9 +337,8 @@ export default function RemoteFileEditorPage() {
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();
-    const title = activeTab
-      ? `${activeTab.dirty ? "* " : ""}${activeTab.name || activeTab.remotePath}`
-      : t("fileEditor.title");
+    const fileLabel = activeTab ? activeTab.name || activeTab.remotePath : t("fileEditor.title");
+    const title = activeTab ? `${activeTab.dirty ? "* " : ""}${fileLabel}` : t("fileEditor.title");
     currentWindow.setTitle(title).catch(() => {});
   }, [activeTab, t]);
 
@@ -589,11 +598,20 @@ export default function RemoteFileEditorPage() {
     ? Boolean(tabs.find((tab) => tab.id === pendingCloseTabId)?.saving)
     : savingTabs.length > 0;
   const activeMtimeText = formatRemoteMtime(activeTab?.mtime);
+  const activeTarget = activeTab?.target;
+  const activeTargetLabel =
+    formatTargetLabel(activeTarget) ||
+    (activeTab?.backend !== "local" ? activeTab?.sessionId || t("fileEditor.remoteTarget") : "");
+  const activeTargetTitle = [activeTargetLabel, activeTarget?.detail].filter(Boolean).join(" - ");
+  const shouldShowTarget = activeTab?.backend !== "local" && !!activeTargetLabel;
+  const activeHeaderTitle = activeTab
+    ? `${dirtyTabs.length > 0 ? "* " : ""}${activeTab.name || activeTab.remotePath}`
+    : t("fileEditor.title");
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
       <ChildWindowHeader
-        title={`${dirtyTabs.length > 0 ? "* " : ""}${activeTab?.name || t("fileEditor.title")}`}
+        title={activeHeaderTitle}
         icon={<MdDescription className="text-base" />}
         windowControls
         onClose={() => {
@@ -709,11 +727,22 @@ export default function RemoteFileEditorPage() {
         </div>
 
         <div className="flex min-h-0 shrink-0 flex-col gap-2 border-b bg-muted/10 px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between">
-          <div
-            className="min-w-0 truncate font-mono text-xs text-muted-foreground"
-            title={activeTab?.remotePath}
-          >
-            {activeTab?.remotePath}
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            {shouldShowTarget ? (
+              <div
+                className="flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-sm border bg-background/70 px-2 py-1 text-xs text-muted-foreground"
+                title={activeTargetTitle || activeTargetLabel}
+              >
+                <MdDns className="shrink-0 text-sm" />
+                <span className="truncate">{activeTargetLabel}</span>
+              </div>
+            ) : null}
+            <div
+              className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+              title={activeTab?.remotePath}
+            >
+              {activeTab?.remotePath}
+            </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button

@@ -173,6 +173,27 @@ fn sftp_channel_open_retry_rejects_policy_and_type_failures() {
 }
 
 #[test]
+fn write_text_permission_restore_preserves_posix_mode_bits() {
+    assert_eq!(
+        permissions_to_preserve_after_write(Some(0o100644)),
+        Some(0o644)
+    );
+    assert_eq!(
+        permissions_to_preserve_after_write(Some(0o100755)),
+        Some(0o755)
+    );
+    assert_eq!(
+        permissions_to_preserve_after_write(Some(0o104755)),
+        Some(0o4755)
+    );
+}
+
+#[test]
+fn write_text_permission_restore_skips_missing_permission_attrs() {
+    assert_eq!(permissions_to_preserve_after_write(None), None);
+}
+
+#[test]
 fn directory_concurrency_keeps_at_least_one_worker() {
     let concurrency = sftp_directory_concurrency(Some(2));
 

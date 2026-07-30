@@ -10,6 +10,62 @@ export type ChangelogRelease = {
 
 const changelogReleasesEn: ChangelogRelease[] = [
   {
+    version: '[1.1.18] - 2026-07-29',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          '**external-open:** Add external connection handling, URL parsing, saved-connection matching, and confirmation dialogs for opening connection links from outside NyaTerm.',
+          '**terminal:** Add `TerminalFitScheduler` with tests, improve search lifecycle hooks, add external file-drop handling, and refresh terminal layout/output more reliably after reconnect and visibility changes.',
+          '**session:** Add session attachment support and hibernation logging.',
+          '**sftp:** Add remote file copy operations with controller support, and preserve permissions during remote file write operations.',
+          '**file-explorer:** Add an editable path button, search entry, active session targeting, and improved file-window target handling.',
+          '**header:** Add header status visibility controls, confirmation dialogs, and refreshed header actions/icons.',
+          '**security-auth:** Add credential, private key, and OTP management dialogs, plus improved key-management UI and backend handling.',
+          '**network:** Add Proxy and Tunnel management pages.',
+          '**quick-commands:** Add command preview, copy support, and category selection state management.',
+          '**ai-settings:** Add AI model refresh and improve model discovery.',
+          '**updater:** Add automatic updates for Windows portable builds.',
+        ],
+      },
+      {
+        title: 'Changed',
+        items: [
+          '**sftp:** Modularize the SFTP backend and improve upload cancellation handling.',
+          '**importer:** Unify secret encryption logic across importers.',
+          '**updater:** Unify portable updates on Cloudflare R2.',
+          '**docker:** Update Docker command paths.',
+          '**settings:** Improve close handling and unsaved-change confirmation.',
+          '**i18n:** Update credential, SSH key, proxy/tunnel, terminal display, header status, and external-connection localization.',
+        ],
+      },
+      {
+        title: 'Fixed',
+        items: [
+          '**terminal:** Improve terminal snapshot serialization and reconnect handling, refresh timestamps on Enter and suggestion execution, and improve reconnect/session handling for synchronized input.',
+          '**sync:** Use session input peer IDs for sync peer selection.',
+          '**window:** Avoid child-window loading flashes and improve child-window logging/conflict warnings.',
+          '**sftp:** Improve directory removal logic with raw path matching.',
+          '**file-explorer:** Improve resize handling in the path bar.',
+          '**ssh:** Increase command injection timeout from 5 to 30 seconds.',
+          '**redaction:** Add marker-value redaction for sensitive data.',
+          '**ui:** Improve responsive class names in SSH and new-session forms.',
+        ],
+      },
+      {
+        title: 'CI',
+        items: [
+          '**updater:** Add signed portable target verification for `latest.json`.',
+          '**gitee:** Improve Python dependency installation in the release workflow.',
+        ],
+      },
+      {
+        title: 'Documentation',
+        items: ['**readme:** Update badge links and formatting in the Chinese README.'],
+      },
+    ],
+  },
+  {
     version: '[1.1.17] - 2026-07-22',
     sections: [
       {
@@ -1668,6 +1724,62 @@ const changelogReleasesEn: ChangelogRelease[] = [
 ];
 
 const changelogReleasesZhCN: ChangelogRelease[] = [
+  {
+    version: '[1.1.18] - 2026-07-29',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**external-open:** 新增外部连接打开处理、URL 解析、已保存连接匹配和确认对话框，可从 NyaTerm 外部打开连接链接。',
+          '**terminal:** 新增 `TerminalFitScheduler` 与相关测试，增强搜索生命周期 hooks，支持终端外部文件拖放，并在重连和可见性变化后更可靠地刷新终端布局与输出。',
+          '**session:** 新增会话附加支持和休眠日志。',
+          '**sftp:** 新增带 controller 支持的远程文件复制，并在远程文件写入时恢复权限。',
+          '**file-explorer:** 新增可编辑路径按钮、搜索入口、活跃会话目标和文件窗口目标处理增强。',
+          '**header:** 新增 header 状态可见性控制、确认对话框，并刷新 header 操作和图标。',
+          '**security-auth:** 新增凭据、私钥和 OTP 管理对话框，并增强密钥管理 UI 与后端处理。',
+          '**network:** 新增 Proxy 和 Tunnel 管理页面。',
+          '**quick-commands:** 新增命令预览、复制能力和分类选择状态管理。',
+          '**ai-settings:** 新增 AI 模型刷新，并改进模型发现。',
+          '**updater:** 新增 Windows 便携版自动更新支持。',
+        ],
+      },
+      {
+        title: '变更',
+        items: [
+          '**sftp:** 模块化 SFTP 后端，并改进上传取消处理。',
+          '**importer:** 统一各导入器的 secret 加密逻辑。',
+          '**updater:** 将便携版更新统一到 Cloudflare R2。',
+          '**docker:** 更新 Docker 命令路径。',
+          '**settings:** 改进关闭处理和未保存变更确认。',
+          '**i18n:** 更新凭据、SSH 密钥、代理 / 隧道、终端显示、header 状态和外部连接相关本地化文案。',
+        ],
+      },
+      {
+        title: '修复',
+        items: [
+          '**terminal:** 改进终端快照序列化与重连处理，在 Enter 和命令建议执行时刷新时间戳，并改进同步输入的重连 / 会话处理。',
+          '**sync:** 使用会话输入 peer ID 选择同步输入目标。',
+          '**window:** 避免子窗口加载闪烁，并改进子窗口日志和冲突警告。',
+          '**sftp:** 使用 raw path 匹配改进目录删除逻辑。',
+          '**file-explorer:** 改进路径栏 resize 处理。',
+          '**ssh:** 将命令注入超时时间从 5 秒增加到 30 秒。',
+          '**redaction:** 新增敏感数据 marker value 脱敏。',
+          '**ui:** 改进 SSH 表单和新建会话表单的响应式 class。',
+        ],
+      },
+      {
+        title: 'CI',
+        items: [
+          '**updater:** 为 `latest.json` 新增 signed portable target 校验。',
+          '**gitee:** 改进 release workflow 中的 Python 依赖安装。',
+        ],
+      },
+      {
+        title: '文档',
+        items: ['**readme:** 更新中文 README 的 badge 链接和格式。'],
+      },
+    ],
+  },
   {
     version: '[1.1.17] - 2026-07-22',
     sections: [
