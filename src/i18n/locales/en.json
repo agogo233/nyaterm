@@ -1396,6 +1396,11 @@
     "ungroupedConnections": "Ungrouped",
     "user": "User",
     "windtermHint": ".wind/profiles/default.v10/terminal/user.sessions",
+    "windtermMasterPasswordConfirm": "Import",
+    "windtermMasterPasswordDesc": "This WindTerm profile uses a master password. Enter it to decrypt saved auto-login fields during import.",
+    "windtermMasterPasswordImporting": "Importing...",
+    "windtermMasterPasswordLabel": "WindTerm master password",
+    "windtermMasterPasswordTitle": "WindTerm Master Password",
     "workingDir": "Working dir"
   },
   "secretUnlock": {

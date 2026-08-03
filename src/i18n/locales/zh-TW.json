@@ -1393,6 +1393,11 @@
     "terminalPath": "終端路徑",
     "user": "使用者",
     "windtermHint": ".wind/profiles/default.v10/terminal/user.sessions",
+    "windtermMasterPasswordConfirm": "匯入",
+    "windtermMasterPasswordDesc": "此 WindTerm profile 已啟用主密碼。請輸入主密碼，以便在匯入時解密自動登入欄位。",
+    "windtermMasterPasswordImporting": "正在匯入...",
+    "windtermMasterPasswordLabel": "WindTerm 主密碼",
+    "windtermMasterPasswordTitle": "WindTerm 主密碼",
     "workingDir": "工作目錄"
   },
   "secretUnlock": {

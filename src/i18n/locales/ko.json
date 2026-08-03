@@ -1393,6 +1393,11 @@
     "ungroupedConnections": "그룹 없음",
     "user": "사용자",
     "windtermHint": ".wind/profiles/default.v10/terminal/user.sessions",
+    "windtermMasterPasswordConfirm": "가져오기",
+    "windtermMasterPasswordDesc": "이 WindTerm 프로필은 마스터 비밀번호를 사용합니다. 가져오는 동안 자동 로그인 필드를 복호화하려면 입력하세요.",
+    "windtermMasterPasswordImporting": "가져오는 중...",
+    "windtermMasterPasswordLabel": "WindTerm 마스터 비밀번호",
+    "windtermMasterPasswordTitle": "WindTerm 마스터 비밀번호",
     "workingDir": "작업 디렉터리"
   },
   "secretUnlock": {

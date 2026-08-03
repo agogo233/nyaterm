@@ -1396,6 +1396,11 @@
     "ungroupedConnections": "未分组",
     "user": "用户",
     "windtermHint": ".wind/profiles/default.v10/terminal/user.sessions",
+    "windtermMasterPasswordConfirm": "导入",
+    "windtermMasterPasswordDesc": "此 WindTerm profile 启用了主密码。请输入主密码以在导入时解密自动登录字段。",
+    "windtermMasterPasswordImporting": "正在导入...",
+    "windtermMasterPasswordLabel": "WindTerm 主密码",
+    "windtermMasterPasswordTitle": "WindTerm 主密码",
     "workingDir": "工作目录"
   },
   "secretUnlock": {

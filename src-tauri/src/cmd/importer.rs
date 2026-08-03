@@ -1,8 +1,13 @@
 use crate::error::AppResult;
 
 #[tauri::command]
-pub fn import_sessions(app: tauri::AppHandle, file_path: String) -> AppResult<usize> {
-    let count = crate::core::importer::import_sessions(app.clone(), file_path)?;
+pub fn import_sessions(
+    app: tauri::AppHandle,
+    file_path: String,
+    windterm_master_password: Option<String>,
+) -> AppResult<usize> {
+    let count =
+        crate::core::importer::import_sessions(app.clone(), file_path, windterm_master_password)?;
     tauri::async_runtime::spawn(async move {
         crate::core::cloud_sync::notify_config_changed(&app).await;
     });

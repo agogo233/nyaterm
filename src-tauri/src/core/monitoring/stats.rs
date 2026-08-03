@@ -66,33 +66,106 @@ pub struct RemoteStats {
 
 pub const SYSINFO_SCRIPT: &str = r#"sh -c '
 base=${TMPDIR:-/tmp}/sysinfo.$$;
+hostf=$base.host;
+archf=$base.arch;
 cpu1=$base.cpu1;
 cpu2=$base.cpu2;
+cpucoref=$base.cpucores;
 net1=$base.net1;
 net2=$base.net2;
 netr=$base.netr;
 diskf=$base.disk;
+diskraw=$base.diskraw;
+dfraw=$base.dfraw;
 
-trap "rm -f \"$cpu1\" \"$cpu2\" \"$net1\" \"$net2\" \"$netr\" \"$diskf\"" 0 HUP INT TERM;
+trap "rm -f \"$base\".*" 0 HUP INT TERM;
 
-host=$(cat /proc/sys/kernel/hostname 2>/dev/null);
-[ -n "$host" ] || host=$(uname -n);
+run_limited() {
+  run_out=$1;
+  run_seconds=$2;
+  shift 2;
+  run_tmp=$run_out.tmp;
+
+  rm -f "$run_out" "$run_tmp";
+
+  (
+    "$@" >"$run_tmp" 2>/dev/null
+  ) &
+  run_pid=$!;
+
+  (
+    sleep "$run_seconds" 2>/dev/null || sleep 1;
+    kill "$run_pid" 2>/dev/null;
+    sleep 1;
+    kill -9 "$run_pid" 2>/dev/null;
+  ) &
+  run_watch=$!;
+
+  wait "$run_pid" 2>/dev/null;
+  run_status=$?;
+
+  kill "$run_watch" 2>/dev/null;
+  wait "$run_watch" 2>/dev/null;
+
+  if [ "$run_status" -eq 0 ]; then
+    mv "$run_tmp" "$run_out" 2>/dev/null || return 1;
+    return 0;
+  fi;
+
+  rm -f "$run_tmp";
+  : >"$run_out";
+  return 1;
+}
+
+host=unknown;
+if [ -r /proc/sys/kernel/hostname ]; then
+  IFS= read -r host </proc/sys/kernel/hostname || host=unknown;
+fi;
+
+if [ -z "$host" ] || [ "$host" = "unknown" ]; then
+  if run_limited "$hostf" 1 uname -n && [ -s "$hostf" ]; then
+    IFS= read -r host <"$hostf" || host=unknown;
+  fi;
+fi;
+
+[ -n "$host" ] || host=unknown;
 host=$(printf "%s" "$host" | tr "\t\r\n" "   ");
 
-read upraw _ </proc/uptime;
-uptime_sec=${upraw%.*};
+uptime_sec=0;
+if [ -r /proc/uptime ]; then
+  read upraw _ </proc/uptime || upraw=0;
+  uptime_sec=${upraw%.*};
+fi;
+[ -n "$uptime_sec" ] || uptime_sec=0;
 
+os=unknown;
 if [ -r /etc/os-release ]; then
   . /etc/os-release;
   os=${PRETTY_NAME:-unknown};
 else
-  os=$(uname -s);
+  if run_limited "$hostf" 1 uname -s && [ -s "$hostf" ]; then
+    IFS= read -r os <"$hostf" || os=unknown;
+  fi;
 fi;
+[ -n "$os" ] || os=unknown;
 os=$(printf "%s" "$os" | tr "\t\r\n" "   ");
 
-arch=$(uname -m);
+arch=unknown;
+if run_limited "$archf" 1 uname -m && [ -s "$archf" ]; then
+  IFS= read -r arch <"$archf" || arch=unknown;
+fi;
+[ -n "$arch" ] || arch=unknown;
 
-read l1 l5 l15 _ </proc/loadavg;
+l1=0;
+l5=0;
+l15=0;
+if [ -r /proc/loadavg ]; then
+  read l1 l5 l15 _ </proc/loadavg || {
+    l1=0;
+    l5=0;
+    l15=0;
+  };
+fi;
 
 cpu_model=$(awk -F: '"'"'
 /^(model name|Hardware|Processor|cpu model)[[:space:]]*:/ && !m {
@@ -106,6 +179,7 @@ END {
 '"'"' /proc/cpuinfo 2>/dev/null);
 
 cpu_model=$(printf "%s" "$cpu_model" | tr "\t\r\n" "   ");
+[ -n "$cpu_model" ] || cpu_model=unknown;
 
 cpu_cores=$(awk '"'"'
 /^processor[[:space:]]*:/ { c++ }
@@ -113,8 +187,13 @@ END { print c+0 }
 '"'"' /proc/cpuinfo 2>/dev/null);
 
 case $cpu_cores in
-  ""|0) cpu_cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0) ;;
+  ""|0)
+    if run_limited "$cpucoref" 1 getconf _NPROCESSORS_ONLN && [ -s "$cpucoref" ]; then
+      IFS= read -r cpu_cores <"$cpucoref" || cpu_cores=0;
+    fi;
+    ;;
 esac;
+[ -n "$cpu_cores" ] || cpu_cores=0;
 
 awk '"'"'
 /^cpu/ {
@@ -123,7 +202,7 @@ awk '"'"'
   for (i=2; i<=NF; i++) total+=$i;
   print $1, idle, total;
 }
-'"'"' /proc/stat >"$cpu1";
+'"'"' /proc/stat >"$cpu1" 2>/dev/null || : >"$cpu1";
 
 awk '"'"'
 NR>2 {
@@ -136,7 +215,7 @@ NR>2 {
   split(a[2], f, /[ \t]+/);
   print nic "\t" f[1] "\t" f[9];
 }
-'"'"' /proc/net/dev >"$net1";
+'"'"' /proc/net/dev >"$net1" 2>/dev/null || : >"$net1";
 
 interval=0.2;
 sleep "$interval" 2>/dev/null || {
@@ -151,7 +230,7 @@ awk '"'"'
   for (i=2; i<=NF; i++) total+=$i;
   print $1, idle, total;
 }
-'"'"' /proc/stat >"$cpu2";
+'"'"' /proc/stat >"$cpu2" 2>/dev/null || : >"$cpu2";
 
 awk '"'"'
 NR>2 {
@@ -164,7 +243,7 @@ NR>2 {
   split(a[2], f, /[ \t]+/);
   print nic "\t" f[1] "\t" f[9];
 }
-'"'"' /proc/net/dev >"$net2";
+'"'"' /proc/net/dev >"$net2" 2>/dev/null || : >"$net2";
 
 cpu_usage=$(awk '"'"'
 NR==FNR {
@@ -178,7 +257,8 @@ $1=="cpu" {
   cpu=(dtotal>0) ? (1-didle/dtotal)*100 : 0;
   printf "%.1f", cpu;
 }
-'"'"' "$cpu1" "$cpu2");
+'"'"' "$cpu1" "$cpu2" 2>/dev/null);
+[ -n "$cpu_usage" ] || cpu_usage=0;
 
 set -- $(awk '"'"'
 /MemTotal:/ { t=$2 }
@@ -187,13 +267,18 @@ set -- $(awk '"'"'
 /^Cached:/ { c=$2 }
 /SReclaimable:/ { s=$2 }
 END {
+  if (!t) t=0;
+  if (!a) a=0;
+  if (!b) b=0;
+  if (!c) c=0;
+  if (!s) s=0;
   printf "%.0f %.0f %.0f\n", (t-a)*1024, a*1024, (b+c+s)*1024;
 }
-'"'"' /proc/meminfo);
+'"'"' /proc/meminfo 2>/dev/null);
 
-mem_used=$1;
-mem_avail=$2;
-mem_cache=$3;
+mem_used=${1:-0};
+mem_avail=${2:-0};
+mem_cache=${3:-0};
 
 printf "SYSTEM\t%s\t%s\t%s\t%s\n" "$host" "$uptime_sec" "$os" "$arch";
 printf "LOAD\t%s\t%s\t%s\n" "$l1" "$l5" "$l15";
@@ -212,7 +297,7 @@ NR==FNR {
   n=substr($1,4);
   printf "CPUCORE\t%s\t%.1f\n", n, cpu;
 }
-'"'"' "$cpu1" "$cpu2";
+'"'"' "$cpu1" "$cpu2" 2>/dev/null;
 
 printf "MEMORY\t%s\t%s\t%s\n" "$mem_used" "$mem_avail" "$mem_cache";
 
@@ -239,7 +324,7 @@ FNR==NR {
 
   printf "%s\t%.0f\t%.0f\n", nic, rxv, txv;
 }
-'"'"' "$net1" "$net2" >"$netr";
+'"'"' "$net1" "$net2" >"$netr" 2>/dev/null || : >"$netr";
 
 found_net=0;
 
@@ -248,7 +333,10 @@ if [ -s "$netr" ]; then
     [ -n "$nic" ] || continue;
     [ -e "/sys/class/net/$nic/device" ] || continue;
 
-    state=$(cat "/sys/class/net/$nic/operstate" 2>/dev/null || echo unknown);
+    state=unknown;
+    if [ -r "/sys/class/net/$nic/operstate" ]; then
+      IFS= read -r state <"/sys/class/net/$nic/operstate" || state=unknown;
+    fi;
     [ "$state" = "up" ] || continue;
 
     printf "NETWORK\t%s\t%s\t%s\t%s\n" "$nic" "$state" "$rx" "$tx";
@@ -261,7 +349,8 @@ fi;
 : >"$diskf";
 
 if command -v findmnt >/dev/null 2>&1; then
-  findmnt -b -rn -o SOURCE,TARGET,FSTYPE,SIZE,AVAIL,USE% 2>/dev/null | awk '"'"'
+  if run_limited "$diskraw" 2 findmnt -b -rn -o SOURCE,TARGET,FSTYPE,SIZE,AVAIL,USE%; then
+    awk '"'"'
   BEGIN {
     OFS="\t";
   }
@@ -283,11 +372,13 @@ if command -v findmnt >/dev/null 2>&1; then
 
     printf "%s\t%s\t%s\t%s\t%s\n", src, mp, total, avail, usep;
   }
-  '"'"' >"$diskf";
+  '"'"' "$diskraw" >"$diskf" 2>/dev/null || : >"$diskf";
+  fi;
 fi;
 
 if [ ! -s "$diskf" ] && command -v df >/dev/null 2>&1; then
-  df -B1 -P 2>/dev/null | awk '"'"'
+  if run_limited "$dfraw" 2 df -B1 -P; then
+    awk '"'"'
   BEGIN {
     OFS="\t";
   }
@@ -306,7 +397,8 @@ if [ ! -s "$diskf" ] && command -v df >/dev/null 2>&1; then
 
     printf "%s\t%s\t%s\t%s\t%s\n", src, mp, total, avail, usep;
   }
-  '"'"' >"$diskf";
+  '"'"' "$dfraw" >"$diskf" 2>/dev/null || : >"$diskf";
+  fi;
 fi;
 
 if [ -s "$diskf" ]; then
@@ -411,4 +503,86 @@ pub fn parse_stats_output(output: &str) -> RemoteStats {
     };
 
     stats
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_stats_output;
+
+    #[test]
+    fn parse_stats_output_parses_complete_snapshot() {
+        let stats = parse_stats_output(
+            "SYSTEM\tnode-1\t12345\tUbuntu 24.04\tx86_64\n\
+             LOAD\t0.10\t0.20\t0.30\n\
+             CPU\tAMD Ryzen\t8\t12.5\n\
+             CPUCORE\t0\t10.0\n\
+             CPUCORE\t1\t15.0\n\
+             MEMORY\t1000\t3000\t500\n\
+             NETWORK\teth0\tup\t100\t200\n\
+             NETWORK\twlan0\tup\t50\t25\n\
+             DISK\t/dev/sda1\t/\t10000\t4000\t60\n",
+        );
+
+        assert_eq!(stats.system.hostname, "node-1");
+        assert_eq!(stats.system.uptime_sec, 12345);
+        assert_eq!(stats.system.os, "Ubuntu 24.04");
+        assert_eq!(stats.system.arch, "x86_64");
+        assert_eq!(stats.load.load1, 0.10);
+        assert_eq!(stats.cpu.model, "AMD Ryzen");
+        assert_eq!(stats.cpu.cores, 8);
+        assert_eq!(stats.cpu.usage, 12.5);
+        assert_eq!(stats.cpu.per_core, vec![10.0, 15.0]);
+        assert_eq!(stats.memory.used, 1000);
+        assert_eq!(stats.memory.available, 3000);
+        assert_eq!(stats.memory.cached, 500);
+        assert_eq!(stats.networks.len(), 2);
+        assert_eq!(stats.network_summary.rx_bytes_per_sec, 150.0);
+        assert_eq!(stats.network_summary.tx_bytes_per_sec, 225.0);
+        assert_eq!(stats.disks.len(), 1);
+        assert_eq!(stats.disks[0].mount, "/");
+        assert_eq!(stats.disks[0].available, 4000);
+    }
+
+    #[test]
+    fn parse_stats_output_keeps_partial_snapshot_without_disks() {
+        let without_disk = parse_stats_output(
+            "SYSTEM\tnode-1\t12345\tUbuntu 24.04\tx86_64\n\
+             LOAD\t0.10\t0.20\t0.30\n\
+             CPU\tAMD Ryzen\t8\t12.5\n\
+             MEMORY\t1000\t3000\t500\n\
+             NETWORK\teth0\tup\t100\t200\n",
+        );
+
+        assert_eq!(without_disk.cpu.usage, 12.5);
+        assert_eq!(without_disk.memory.available, 3000);
+        assert_eq!(without_disk.network_summary.rx_bytes_per_sec, 100.0);
+        assert!(without_disk.disks.is_empty());
+
+        let placeholder_disk = parse_stats_output(
+            "SYSTEM\tnode-1\t12345\tUbuntu 24.04\tx86_64\n\
+             LOAD\t0.10\t0.20\t0.30\n\
+             CPU\tAMD Ryzen\t8\t12.5\n\
+             MEMORY\t1000\t3000\t500\n\
+             NETWORK\teth0\tup\t100\t200\n\
+             DISK\t-\t-\t0\t0\t0\n",
+        );
+
+        assert_eq!(placeholder_disk.cpu.usage, 12.5);
+        assert_eq!(placeholder_disk.network_summary.tx_bytes_per_sec, 200.0);
+        assert!(placeholder_disk.disks.is_empty());
+    }
+
+    #[test]
+    fn parse_stats_output_deduplicates_disk_mounts() {
+        let stats = parse_stats_output(
+            "DISK\t/dev/sda1\t/\t10000\t4000\t60\n\
+             DISK\t/dev/disk/by-uuid/root\t/\t10000\t3000\t70\n\
+             DISK\t/dev/sdb1\t/data\t20000\t15000\t25\n",
+        );
+
+        assert_eq!(stats.disks.len(), 2);
+        assert_eq!(stats.disks[0].device, "/dev/sda1");
+        assert_eq!(stats.disks[0].mount, "/");
+        assert_eq!(stats.disks[1].mount, "/data");
+    }
 }

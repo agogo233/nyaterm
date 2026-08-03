@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn windterm_import_splits_user_at_host_targets() {
-        let sessions = parse_windterm_content(
+        let prepared = parse_windterm_content(
             r#"
 [
   {
@@ -180,16 +180,22 @@ mod tests {
         )
         .expect("parse windterm sessions");
 
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].name, "Prod web");
-        assert_eq!(sessions[0].host, "192.168.1.10");
-        assert_eq!(sessions[0].username, "deploy");
-        assert_eq!(sessions[0].port, 2222);
+        assert_eq!(prepared.connections.len(), 1);
+        assert_eq!(prepared.connections[0].name, "Prod web");
+        assert!(matches!(
+            &prepared.connections[0].config,
+            ConnectionType::Ssh {
+                host,
+                username,
+                port,
+                ..
+            } if host == "192.168.1.10" && username == "deploy" && *port == 2222
+        ));
     }
 
     #[test]
     fn windterm_import_defaults_username_when_target_has_no_user() {
-        let sessions = parse_windterm_content(
+        let prepared = parse_windterm_content(
             r#"
 [
   {
@@ -201,9 +207,176 @@ mod tests {
         )
         .expect("parse windterm sessions");
 
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].host, "192.168.1.10");
-        assert_eq!(sessions[0].username, "root");
+        assert_eq!(prepared.connections.len(), 1);
+        assert!(matches!(
+            &prepared.connections[0].config,
+            ConnectionType::Ssh {
+                host, username, ..
+            } if host == "192.168.1.10" && username == "root"
+        ));
+    }
+
+    #[test]
+    fn windterm_decrypts_encrypted_auto_login() {
+        let crypto = derive_windterm_crypto("fingerprint-1", "master-secret");
+        let encrypted = encrypt_windterm_auto_login_for_test(
+            r#"{"Password":"secret","PasswordEnabled":true,"session.user":"deploy"}"#,
+            &crypto,
+        );
+        let content = format!(
+            r#"
+[
+  {{
+    "session.protocol": "SSH",
+    "session.target": "192.168.1.10",
+    "session.autoLogin": "{encrypted}"
+  }}
+]
+"#
+        );
+
+        let prepared =
+            parse_windterm_content_with_crypto(&content, Some(&crypto), None).expect("parse");
+
+        assert_eq!(prepared.connections.len(), 1);
+        assert!(matches!(
+            &prepared.connections[0].config,
+            ConnectionType::Ssh { username, .. } if username == "deploy"
+        ));
+        let auth = prepared.connections[0].auth.as_ref().expect("auth");
+        assert_eq!(auth.mode, "password");
+        assert_eq!(auth.password.as_deref(), Some("test-encrypted:secret"));
+    }
+
+    #[test]
+    fn windterm_requires_master_password_when_enabled() {
+        let root = importer_test_dir("windterm-master-password-required");
+        let terminal = root.join("terminal");
+        std::fs::create_dir_all(&terminal).expect("create windterm profile");
+        let sessions_path = terminal.join("user.sessions");
+        std::fs::write(&sessions_path, "[]").expect("write sessions");
+        std::fs::write(
+            root.join("user.config"),
+            r#"{"application.fingerprint":"fingerprint-1","application.masterPassword":true}"#,
+        )
+        .expect("write config");
+
+        let error = parse_windterm(sessions_path.to_str().expect("utf8 path"), None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("WindTerm master password is required")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn windterm_password_auth_uses_inline_encrypted_password() {
+        let prepared = parse_windterm_content(
+            r#"
+[
+  {
+    "session.protocol": "SSH",
+    "session.target": "fallback@example.com",
+    "session.autoLogin": "{\"Password\":\"secret\",\"PasswordEnabled\":true,\"session.user\":\"deploy\"}"
+  }
+]
+"#,
+        )
+        .expect("parse windterm sessions");
+
+        assert!(prepared.passwords.is_empty());
+        assert!(prepared.ssh_keys.is_empty());
+        assert!(matches!(
+            &prepared.connections[0].config,
+            ConnectionType::Ssh { username, .. } if username == "deploy"
+        ));
+        let auth = prepared.connections[0].auth.as_ref().expect("auth");
+        assert_eq!(auth.mode, "password");
+        assert!(auth.password_id.is_none());
+        assert_eq!(auth.password.as_deref(), Some("test-encrypted:secret"));
+    }
+
+    #[test]
+    fn windterm_key_auth_reads_key_file_and_reuses_matching_keys() {
+        let root = importer_test_dir("windterm-key-auth");
+        let terminal = root.join("terminal");
+        std::fs::create_dir_all(&terminal).expect("create windterm profile");
+        let key_path = root.join("id_ed25519");
+        std::fs::write(&key_path, "private key material").expect("write key");
+        let escaped_key_path =
+            serde_json::to_string(&key_path.to_string_lossy()).expect("escape key path");
+        let auto_login = serde_json::json!({
+            "Public Key": {
+                "windows.pass": "passphrase",
+                "windows.path": key_path.to_string_lossy(),
+            },
+            "session.user": "root",
+        })
+        .to_string();
+        let escaped_auto_login = serde_json::to_string(&auto_login).expect("escape auto login");
+        let content = format!(
+            r#"
+[
+  {{
+    "session.protocol": "SSH",
+    "session.target": "one.example.com",
+    "session.label": "One",
+    "session.autoLogin": {escaped_auto_login}
+  }},
+  {{
+    "session.protocol": "SSH",
+    "session.target": "two.example.com",
+    "session.label": "Two",
+    "ssh.identityFilePath.windows": {escaped_key_path}
+  }}
+]
+"#
+        );
+        let sessions_path = terminal.join("user.sessions");
+
+        let prepared = parse_windterm_content_with_crypto(&content, None, Some(&sessions_path))
+            .expect("parse windterm sessions");
+
+        assert_eq!(prepared.connections.len(), 2);
+        assert_eq!(prepared.ssh_keys.len(), 1);
+        assert_eq!(
+            prepared.ssh_keys[0].key.as_deref(),
+            Some("test-encrypted:private key material")
+        );
+        assert_eq!(
+            prepared.ssh_keys[0].passphrase.as_deref(),
+            Some("test-encrypted:passphrase")
+        );
+        let first_auth = prepared.connections[0].auth.as_ref().expect("first auth");
+        let second_auth = prepared.connections[1].auth.as_ref().expect("second auth");
+        assert_eq!(first_auth.mode, "key");
+        assert_eq!(second_auth.mode, "key");
+        assert_eq!(first_auth.key_id, second_auth.key_id);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn windterm_unreadable_key_path_falls_back_to_none_auth() {
+        let prepared = parse_windterm_content(
+            r#"
+[
+  {
+    "session.protocol": "SSH",
+    "session.target": "example.com",
+    "ssh.identityFilePath.windows": "Z:/definitely/missing/key"
+  }
+]
+"#,
+        )
+        .expect("parse windterm sessions");
+
+        assert!(prepared.ssh_keys.is_empty());
+        let auth = prepared.connections[0].auth.as_ref().expect("auth");
+        assert_eq!(auth.mode, "none");
+        assert!(auth.key_id.is_none());
     }
 
     #[test]
@@ -360,6 +533,18 @@ mod tests {
             .expect("time")
             .as_nanos();
         std::env::temp_dir().join(format!("nyaterm-importer-{name}-{nanos}"))
+    }
+
+    fn encrypt_windterm_auto_login_for_test(plaintext: &str, crypto: &WindtermCrypto) -> String {
+        use cbc::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+
+        let mut buffer = vec![0_u8; plaintext.len() + WINDTERM_AES_IV_LENGTH];
+        buffer[..plaintext.len()].copy_from_slice(plaintext.as_bytes());
+        let ciphertext =
+            cbc::Encryptor::<aes::Aes256>::new(&crypto.key.into(), &crypto.iv.into())
+                .encrypt_padded_mut::<Pkcs7>(&mut buffer, plaintext.len())
+                .expect("encrypt windterm payload");
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, ciphertext)
     }
 
     #[test]

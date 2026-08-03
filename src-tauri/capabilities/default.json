@@ -23,6 +23,10 @@
           "app": true
         },
         {
+          "path": "$TEMP/nyaterm/**/.*",
+          "app": true
+        },
+        {
           "path": "**",
           "app": true
         }

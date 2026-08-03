@@ -1,16 +1,20 @@
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { ComponentType } from "react";
+import { type ComponentType, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdDataObject, MdOpenInNew, MdTerminal } from "react-icons/md";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useApp } from "@/context/AppContext";
 import { useConfigTransfer } from "@/hooks/useConfigTransfer";
 import { invoke } from "@/lib/invoke";
@@ -115,6 +119,9 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
   const { i18n, t } = useTranslation();
   const { refreshConnections } = useApp();
   const { handleImport, passwordAlert } = useConfigTransfer();
+  const [windtermImportPath, setWindtermImportPath] = useState<string | null>(null);
+  const [windtermMasterPassword, setWindtermMasterPassword] = useState("");
+  const [windtermImporting, setWindtermImporting] = useState(false);
   const docsUrl = i18n.language.toLowerCase().startsWith("zh")
     ? SESSION_IMPORT_DOC_URLS.zh
     : SESSION_IMPORT_DOC_URLS.en;
@@ -126,6 +133,33 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
 
     const Icon = source.icon;
     return <Icon className="h-10 w-10 text-[var(--df-primary)]" />;
+  };
+
+  const finishSessionImport = (count: number) => {
+    if (count > 0) {
+      toast.success(t("savedConnections.importSuccess", { count }));
+      refreshConnections();
+    } else {
+      toast.info(t("savedConnections.importSuccess", { count: 0 }));
+    }
+  };
+
+  const isWindtermMasterPasswordRequired = (error: unknown) =>
+    String(error).includes("WindTerm master password is required");
+
+  const importSelectedSessions = async (
+    source: ImportSource,
+    selected: string,
+    windtermPassword?: string,
+  ) => {
+    const count =
+      source.id === "termius"
+        ? await invoke<number>("import_termius_sessions", { indexedDbPath: selected })
+        : await invoke<number>("import_sessions", {
+            filePath: selected,
+            windtermMasterPassword: windtermPassword,
+          });
+    finishSessionImport(count);
   };
 
   const handleSelect = async (source: ImportSource) => {
@@ -169,18 +203,16 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
             filters: [{ name: source.name, extensions: source.extensions ?? [] }],
           });
     if (!selected) return;
+    const selectedPath = Array.isArray(selected) ? selected[0] : selected;
+    if (!selectedPath) return;
     try {
-      const count =
-        source.id === "termius"
-          ? await invoke<number>("import_termius_sessions", { indexedDbPath: selected })
-          : await invoke<number>("import_sessions", { filePath: selected });
-      if (count > 0) {
-        toast.success(t("savedConnections.importSuccess", { count }));
-        refreshConnections();
-      } else {
-        toast.info(t("savedConnections.importSuccess", { count: 0 }));
-      }
+      await importSelectedSessions(source, selectedPath);
     } catch (e) {
+      if (source.id === "windterm" && isWindtermMasterPasswordRequired(e)) {
+        setWindtermImportPath(selectedPath);
+        setWindtermMasterPassword("");
+        return;
+      }
       logger.error({
         domain: "settings.persistence",
         event: "sessions.import_failed",
@@ -188,6 +220,30 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
         error: e,
       });
       toast.error(t("savedConnections.importFailed", { error: e }));
+    }
+  };
+
+  const handleWindtermPasswordSubmit = async () => {
+    if (!windtermImportPath || windtermImporting) return;
+    setWindtermImporting(true);
+    try {
+      await importSelectedSessions(
+        IMPORT_SOURCES.find((source) => source.id === "windterm")!,
+        windtermImportPath,
+        windtermMasterPassword,
+      );
+      setWindtermImportPath(null);
+      setWindtermMasterPassword("");
+    } catch (error) {
+      logger.error({
+        domain: "settings.persistence",
+        event: "sessions.import_windterm_failed",
+        message: "Import WindTerm sessions failed",
+        error,
+      });
+      toast.error(t("savedConnections.importFailed", { error }));
+    } finally {
+      setWindtermImporting(false);
     }
   };
 
@@ -243,6 +299,67 @@ export default function ImportDialog({ open, onClose }: ImportDialogProps) {
               <MdOpenInNew className="text-[0.75rem]" />
             </button>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={windtermImportPath !== null}
+        onOpenChange={(v) => {
+          if (!v && !windtermImporting) {
+            setWindtermImportPath(null);
+            setWindtermMasterPassword("");
+          }
+        }}
+      >
+        <DialogContent className="w-[min(420px,calc(100vw-2rem))] sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="text-sm">
+              {t("savedConnections.windtermMasterPasswordTitle")}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {t("savedConnections.windtermMasterPasswordDesc")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="windterm-master-password" className="text-xs">
+              {t("savedConnections.windtermMasterPasswordLabel")}
+            </Label>
+            <Input
+              id="windterm-master-password"
+              type="password"
+              value={windtermMasterPassword}
+              disabled={windtermImporting}
+              autoFocus
+              onChange={(event) => setWindtermMasterPassword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleWindtermPasswordSubmit();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={windtermImporting}
+              onClick={() => {
+                setWindtermImportPath(null);
+                setWindtermMasterPassword("");
+              }}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="button"
+              disabled={windtermImporting}
+              onClick={() => void handleWindtermPasswordSubmit()}
+            >
+              {windtermImporting
+                ? t("savedConnections.windtermMasterPasswordImporting")
+                : t("savedConnections.windtermMasterPasswordConfirm")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
       {passwordAlert}
