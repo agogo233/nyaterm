@@ -8,7 +8,7 @@ import {
 import { invoke } from "@/lib/invoke";
 import { getTrackedCommand, type TerminalInputState } from "@/lib/terminalInputTracker";
 import type { SuggestionCursorPosition } from "@/lib/terminalSuggestionPosition";
-import type { FuzzyResult } from "@/types/global";
+import type { FuzzyResult, QuickCommandsConfig } from "@/types/global";
 
 interface XTermCoreWithRenderDimensions {
   _core?: {
@@ -25,11 +25,29 @@ interface XTermCoreWithRenderDimensions {
   };
 }
 
+interface CommandHistorySearchOptions {
+  manual?: boolean;
+}
+
+const EMPTY_MANUAL_HISTORY_LIMIT = 8;
+const EMPTY_MANUAL_QUICK_COMMAND_LIMIT = 8;
+
+function isWithinCommandLengthLimits(command: string, minLength: number, maxLength: number) {
+  const length = command.trim().length;
+  return length >= minLength && length <= maxLength;
+}
+
+function quickCommandRank(command: QuickCommandsConfig["commands"][number]) {
+  const useCount = command.use_count ?? 0;
+  const updatedAt = command.updated_at ?? command.created_at ?? 0;
+  return (command.pinned ? 1_000_000_000 : 0) + useCount * 1_000_000 + updatedAt;
+}
+
 export function useCommandHistory(
   terminalRef: React.RefObject<Terminal | null>,
   inputStateRef: React.RefObject<TerminalInputState>,
   applySuggestion: (command: string, execute: boolean) => void,
-  canShowSuggestions: () => boolean,
+  canShowSuggestions: (options?: { allowEmpty?: boolean }) => boolean,
   enabled: boolean,
   minCommandLength: number,
   maxCommandLength: number,
@@ -124,21 +142,8 @@ export function useCommandHistory(
     };
   }, []);
 
-  const triggerSearch = useCallback(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    const requestId = ++searchRequestIdRef.current;
-
-    if (!enabledRef.current) {
-      dismissSuggestions();
-      return;
-    }
-
-    if (!canShowSuggestions()) {
-      dismissSuggestions();
-      return;
-    }
-
-    searchTimerRef.current = setTimeout(async () => {
+  const runSearch = useCallback(
+    async (requestId: number, options: CommandHistorySearchOptions = {}) => {
       if (requestId !== searchRequestIdRef.current) {
         return;
       }
@@ -149,6 +154,63 @@ export function useCommandHistory(
       }
 
       const pattern = getTrackedCommand(inputStateRef.current);
+      if (!pattern.trim() && options.manual) {
+        try {
+          const [history, quickCommands] = await Promise.all([
+            invoke<string[]>("get_command_history"),
+            invoke<QuickCommandsConfig>("get_quick_commands"),
+          ]);
+          if (requestId !== searchRequestIdRef.current || !enabledRef.current) {
+            return;
+          }
+
+          const historyResults: FuzzyResult[] = history
+            .filter((command) =>
+              isWithinCommandLengthLimits(
+                command,
+                minCommandLengthRef.current,
+                maxCommandLengthRef.current,
+              ),
+            )
+            .filter((command) => !deletedHistoryCommandsRef.current.has(command))
+            .slice(0, EMPTY_MANUAL_HISTORY_LIMIT)
+            .map((command, index) => ({
+              command,
+              display: command,
+              indices: [],
+              score: 2_000 - index,
+              source: "history",
+            }));
+
+          const quickCommandResults: FuzzyResult[] = quickCommands.commands
+            .filter((command) => command.command.trim())
+            .sort((left, right) => quickCommandRank(right) - quickCommandRank(left))
+            .slice(0, EMPTY_MANUAL_QUICK_COMMAND_LIMIT)
+            .map((quickCommand, index) => ({
+              command: quickCommand.command,
+              display: quickCommand.label || quickCommand.command,
+              indices: [],
+              score: 1_000 - index,
+              source: "quickCommand",
+            }));
+
+          const merged = [...historyResults, ...quickCommandResults].slice(0, 12);
+          suggestionsRef.current = merged;
+          selectedIndexRef.current = -1;
+          showSuggestionsRef.current = merged.length > 0;
+          setSuggestions(merged);
+          setSelectedIndex(-1);
+          setShowSuggestions(merged.length > 0);
+
+          if (merged.length > 0) {
+            setCursorPosition(getCursorViewportPosition());
+          }
+        } catch {
+          // Ignore errors
+        }
+        return;
+      }
+
       if (!pattern.trim() || !canShowSuggestions()) {
         dismissSuggestions();
         return;
@@ -196,8 +258,37 @@ export function useCommandHistory(
       } catch {
         // Ignore errors
       }
-    }, 80);
-  }, [canShowSuggestions, dismissSuggestions, getCursorViewportPosition, inputStateRef]);
+    },
+    [canShowSuggestions, dismissSuggestions, getCursorViewportPosition, inputStateRef],
+  );
+
+  const triggerSearch = useCallback(
+    (options: CommandHistorySearchOptions = {}) => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = null;
+      const requestId = ++searchRequestIdRef.current;
+
+      if (!enabledRef.current) {
+        dismissSuggestions();
+        return;
+      }
+
+      if (!canShowSuggestions({ allowEmpty: options.manual })) {
+        dismissSuggestions();
+        return;
+      }
+
+      if (options.manual) {
+        void runSearch(requestId, options);
+        return;
+      }
+
+      searchTimerRef.current = setTimeout(() => {
+        void runSearch(requestId, options);
+      }, 80);
+    },
+    [canShowSuggestions, dismissSuggestions, runSearch],
+  );
 
   useEffect(() => {
     minCommandLengthRef.current = normalizeCommandSuggestionMinChars(

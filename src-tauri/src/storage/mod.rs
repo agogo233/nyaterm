@@ -7,6 +7,8 @@ mod history;
 mod known_hosts;
 mod master_key;
 mod migration;
+mod notes;
+mod rdp_known_hosts;
 mod sessions;
 mod settings_impl;
 mod tables;
@@ -15,12 +17,15 @@ mod util;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use rdp_known_hosts::RdpCertificateMetadata;
+
 #[allow(unused_imports)]
 pub use tables::{
     COMMAND_HISTORY_TABLE, CONNECTIONS_TABLE, CREDENTIALS_TABLE, GROUPS_TABLE,
     IDX_CONNECTIONS_BY_GROUP_TABLE, IDX_CONNECTIONS_BY_LAST_USED_TABLE,
-    IDX_CONNECTIONS_BY_PROTOCOL_TABLE, KNOWN_HOSTS_TABLE, META_TABLE, OTP_ACCOUNTS_TABLE,
-    PROXIES_TABLE, SETTINGS_TABLE, TUNNELS_TABLE,
+    IDX_CONNECTIONS_BY_PROTOCOL_TABLE, KNOWN_HOSTS_TABLE, META_TABLE, NOTE_FOLDERS_TABLE,
+    NOTES_TABLE, OTP_ACCOUNTS_TABLE, PROXIES_TABLE, RDP_KNOWN_HOSTS_TABLE, SETTINGS_TABLE,
+    TUNNELS_TABLE,
 };
 
 use crate::error::{AppError, AppResult};
@@ -209,6 +214,79 @@ pub(crate) fn replace_command_history_entries(
     storage()?.replace_command_history(entries)
 }
 
+pub(crate) fn list_note_folders() -> AppResult<Vec<crate::config::NoteFolder>> {
+    storage()?.list_note_folders()
+}
+
+pub(crate) fn list_notes() -> AppResult<Vec<crate::config::NoteDocument>> {
+    storage()?.list_notes()
+}
+
+pub(crate) fn list_note_summaries() -> AppResult<Vec<crate::config::NoteSummary>> {
+    storage()?.list_note_summaries()
+}
+
+pub(crate) fn get_note(note_id: &str) -> AppResult<Option<crate::config::NoteDocument>> {
+    storage()?.get_note(note_id)
+}
+
+pub(crate) fn create_note_folder(
+    parent_id: Option<String>,
+    name: Option<String>,
+) -> AppResult<crate::config::NoteFolder> {
+    storage()?.create_note_folder(parent_id, name)
+}
+
+pub(crate) fn create_note(
+    parent_id: Option<String>,
+    title: Option<String>,
+    markdown: Option<String>,
+) -> AppResult<crate::config::NoteDocument> {
+    storage()?.create_note(parent_id, title, markdown)
+}
+
+pub(crate) fn update_note(
+    note_id: &str,
+    title: String,
+    markdown: String,
+    expected_revision: u64,
+    force: bool,
+) -> AppResult<crate::config::NoteUpdateResult> {
+    storage()?.update_note(note_id, title, markdown, expected_revision, force)
+}
+
+pub(crate) fn rename_note_node(
+    node_kind: &str,
+    node_id: &str,
+    name: String,
+) -> AppResult<crate::config::NoteNodeChange> {
+    storage()?.rename_note_node(node_kind, node_id, name)
+}
+
+pub(crate) fn move_note_node(
+    node_kind: &str,
+    node_id: &str,
+    parent_id: Option<String>,
+    sort_order: i64,
+) -> AppResult<crate::config::NoteNodeChange> {
+    storage()?.move_note_node(node_kind, node_id, parent_id, sort_order)
+}
+
+pub(crate) fn delete_note_node(
+    node_kind: &str,
+    node_id: &str,
+) -> AppResult<crate::config::DeleteNoteNodeResult> {
+    storage()?.delete_note_node(node_kind, node_id)
+}
+
+pub(crate) fn load_notes_snapshot() -> AppResult<crate::config::NotesSnapshot> {
+    storage()?.load_notes_snapshot()
+}
+
+pub(crate) fn replace_notes_snapshot(snapshot: &crate::config::NotesSnapshot) -> AppResult<()> {
+    storage()?.replace_notes_snapshot(snapshot)
+}
+
 pub(crate) fn check_known_host(
     host_identifier: &str,
     key_type: &str,
@@ -231,6 +309,23 @@ pub(crate) fn render_known_hosts_export() -> AppResult<String> {
 
 pub(crate) fn replace_known_hosts_export(content: &str) -> AppResult<()> {
     storage()?.replace_known_hosts_export(content)
+}
+
+pub(crate) fn check_rdp_known_host(
+    host: &str,
+    port: u16,
+    sha256_fingerprint: &str,
+) -> AppResult<KnownHostCheck> {
+    storage()?.check_rdp_known_host(host, port, sha256_fingerprint)
+}
+
+pub(crate) fn upsert_rdp_known_host(
+    host: &str,
+    port: u16,
+    sha256_fingerprint: &str,
+    certificate: RdpCertificateMetadata,
+) -> AppResult<()> {
+    storage()?.upsert_rdp_known_host(host, port, sha256_fingerprint, certificate)
 }
 
 pub(crate) fn load_master_key_token() -> AppResult<Option<String>> {
@@ -305,7 +400,10 @@ impl Storage {
     }
     pub fn migrate_if_needed(&self) -> AppResult<()> {
         match self.get_schema_version_optional()? {
-            Some(version) if version >= tables::SCHEMA_VERSION => return Ok(()),
+            Some(version) if version >= tables::SCHEMA_VERSION => {
+                self.ensure_current_v3_tables()?;
+                return Ok(());
+            }
             Some(version) => {
                 tracing::info!(schema_version = version, "Migrating redb storage schema");
             }

@@ -5,6 +5,100 @@ pub enum PortableSnapshotKind {
     Backup,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AgentEndpointTargetPlatform {
+    Unix,
+    Windows,
+}
+
+impl AgentEndpointTargetPlatform {
+    pub(crate) fn current() -> Self {
+        if cfg!(windows) {
+            Self::Windows
+        } else {
+            Self::Unix
+        }
+    }
+}
+
+fn agent_endpoint_supported_on_platform(
+    endpoint: &config::SshAgentEndpoint,
+    platform: AgentEndpointTargetPlatform,
+) -> bool {
+    match (platform, endpoint) {
+        (_, config::SshAgentEndpoint::Auto) => true,
+        (AgentEndpointTargetPlatform::Unix, config::SshAgentEndpoint::Environment { .. }) => true,
+        (AgentEndpointTargetPlatform::Unix, config::SshAgentEndpoint::UnixSocket { .. }) => true,
+        (AgentEndpointTargetPlatform::Windows, config::SshAgentEndpoint::Pageant) => true,
+        (AgentEndpointTargetPlatform::Windows, config::SshAgentEndpoint::WindowsOpenSsh) => true,
+        _ => false,
+    }
+}
+
+/// Removes device-specific Agent endpoints that cannot work on the restore target.
+pub(crate) fn normalize_backup_sessions_for_platform(
+    sessions: &mut config::SessionsConfig,
+    platform: AgentEndpointTargetPlatform,
+) -> crate::error::AppResult<bool> {
+    let mut changed = false;
+    for connection in &mut sessions.connections {
+        #[allow(deprecated)]
+        {
+            changed |= config::migrate_legacy_ssh_agent_settings(connection);
+        }
+        let config::ConnectionType::Ssh {
+            auth_agent_endpoint,
+            agent_forwarding_config,
+            ..
+        } = &mut connection.config
+        else {
+            continue;
+        };
+
+        if let Some(endpoint) = auth_agent_endpoint {
+            config::validate_ssh_agent_endpoint_shape(endpoint)?;
+        }
+        if let Some(forwarding) = agent_forwarding_config {
+            config::validate_ssh_agent_forwarding_shape(forwarding)?;
+        }
+
+        let auth_uses_agent = connection
+            .auth
+            .as_ref()
+            .is_some_and(|auth| auth.mode == "agent");
+        if auth_agent_endpoint
+            .as_ref()
+            .is_some_and(|endpoint| !agent_endpoint_supported_on_platform(endpoint, platform))
+        {
+            *auth_agent_endpoint = auth_uses_agent.then_some(config::SshAgentEndpoint::Auto);
+            changed = true;
+        }
+
+        if let Some(forwarding) = agent_forwarding_config {
+            let original_len = forwarding.sources.external_agent_endpoints.len();
+            forwarding
+                .sources
+                .external_agent_endpoints
+                .retain(|endpoint| agent_endpoint_supported_on_platform(endpoint, platform));
+            changed |= original_len != forwarding.sources.external_agent_endpoints.len();
+
+            if forwarding.sources.external_agent_endpoints.is_empty()
+                && forwarding.sources.external_agent
+            {
+                forwarding.sources.external_agent = false;
+                changed = true;
+            }
+            if !forwarding.sources.external_agent && !forwarding.sources.stored_keys {
+                if forwarding.enabled {
+                    forwarding.enabled = false;
+                    changed = true;
+                }
+            }
+        }
+    }
+    Ok(changed)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortableSnapshot {
     pub schema_version: u32,
@@ -41,6 +135,14 @@ pub struct PortableSnapshot {
     pub master_key_token: Option<String>,
     #[serde(default)]
     pub known_hosts: String,
+    #[serde(default)]
+    pub notes: config::NotesSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct DecodedPortableSnapshot {
+    pub snapshot: PortableSnapshot,
+    pub source_payload_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +186,7 @@ struct SnapshotHashInput<'a> {
     history: &'a [crate::core::history::HistoryEntry],
     master_key_token: &'a Option<String>,
     known_hosts: &'a str,
+    notes: &'a config::NotesSnapshot,
 }
 
 #[derive(Serialize)]
@@ -102,6 +205,25 @@ struct SnapshotRawHashInput<'a> {
     history: &'a RawValue,
     master_key_token: &'a RawValue,
     known_hosts: &'a RawValue,
+}
+
+#[derive(Serialize)]
+struct SnapshotRawHashInputWithNotes<'a> {
+    settings: &'a RawValue,
+    sessions: &'a RawValue,
+    keys: &'a RawValue,
+    passwords: &'a RawValue,
+    credentials: &'a RawValue,
+    otp: &'a RawValue,
+    proxies: &'a RawValue,
+    proxy_groups: &'a RawValue,
+    tunnels: &'a RawValue,
+    tunnel_groups: &'a RawValue,
+    quick_commands: &'a RawValue,
+    history: &'a RawValue,
+    master_key_token: &'a RawValue,
+    known_hosts: &'a RawValue,
+    notes: &'a RawValue,
 }
 
 #[derive(Serialize)]
@@ -144,6 +266,10 @@ pub struct PortableUiSettings {
     #[serde(default = "default_portable_docker_manager_interval")]
     pub docker_manager_interval: u32,
     pub saved_connections_sort_mode: String,
+    #[serde(default)]
+    pub asset_sort_key: Option<String>,
+    #[serde(default)]
+    pub asset_sort_direction: Option<String>,
     pub activity_bar_layout: ActivityBarLayout,
 }
 
@@ -219,6 +345,8 @@ impl PortableAppSettings {
                 show_docker_manager: settings.ui.show_docker_manager,
                 docker_manager_interval: settings.ui.docker_manager_interval,
                 saved_connections_sort_mode: settings.ui.saved_connections_sort_mode.clone(),
+                asset_sort_key: settings.ui.asset_sort_key.clone(),
+                asset_sort_direction: settings.ui.asset_sort_direction.clone(),
                 activity_bar_layout: settings.ui.activity_bar_layout.clone(),
             },
         }
@@ -268,6 +396,8 @@ impl PortableAppSettings {
         current.ui.show_docker_manager = self.ui.show_docker_manager;
         current.ui.docker_manager_interval = self.ui.docker_manager_interval;
         current.ui.saved_connections_sort_mode = self.ui.saved_connections_sort_mode;
+        current.ui.asset_sort_key = self.ui.asset_sort_key;
+        current.ui.asset_sort_direction = self.ui.asset_sort_direction;
         current.ui.activity_bar_layout = self.ui.activity_bar_layout;
 
         // Preserve device-local UI state.
@@ -275,6 +405,7 @@ impl PortableAppSettings {
         current.ui.left_width = ui_state.left_width;
         current.ui.right_width = ui_state.right_width;
         current.ui.quick_cmd_height = ui_state.quick_cmd_height;
+        current.ui.quick_cmd_category_width = ui_state.quick_cmd_category_width;
         current.ui.quick_cmd_selected_category = ui_state.quick_cmd_selected_category;
         current.ui.active_left_panel = ui_state.active_left_panel;
         current.ui.active_right_panel = ui_state.active_right_panel;
@@ -283,6 +414,8 @@ impl PortableAppSettings {
         current.ui.serial_send_height = ui_state.serial_send_height;
         current.ui.zoom_level = ui_state.zoom_level;
         current.ui.transfer_height = ui_state.transfer_height;
+        current.ui.notes_expanded_folder_ids = ui_state.notes_expanded_folder_ids;
+        current.ui.notes_last_selected_node_id = ui_state.notes_last_selected_node_id;
         current
     }
 }
@@ -314,6 +447,7 @@ fn preserve_device_local_settings(
     transfer.recording_path = device_transfer.recording_path.clone();
 }
 
+#[allow(deprecated)]
 pub fn strip_device_local_sessions(sessions: &mut config::SessionsConfig) {
     for connection in &mut sessions.connections {
         match &mut connection.config {
@@ -330,11 +464,24 @@ pub fn strip_device_local_sessions(sessions: &mut config::SessionsConfig) {
             config::ConnectionType::Serial { port_name, .. } => {
                 port_name.clear();
             }
-            config::ConnectionType::Ssh { .. } | config::ConnectionType::Telnet { .. } => {}
+            config::ConnectionType::Ssh {
+                auth_agent_endpoint,
+                legacy_agent_forwarding,
+                agent_forwarding_config,
+                ..
+            } => {
+                *auth_agent_endpoint = None;
+                *legacy_agent_forwarding = None;
+                *agent_forwarding_config = None;
+            }
+            config::ConnectionType::Telnet { .. }
+            | config::ConnectionType::Rdp { .. }
+            | config::ConnectionType::Vnc { .. } => {}
         }
     }
 }
 
+#[allow(deprecated)]
 pub fn preserve_device_local_sessions(
     incoming: &mut config::SessionsConfig,
     current: &config::SessionsConfig,
@@ -375,6 +522,24 @@ pub fn preserve_device_local_sessions(
                 },
             ) => {
                 *port_name = device_port_name.clone();
+            }
+            (
+                config::ConnectionType::Ssh {
+                    auth_agent_endpoint,
+                    legacy_agent_forwarding,
+                    agent_forwarding_config,
+                    ..
+                },
+                config::ConnectionType::Ssh {
+                    auth_agent_endpoint: device_auth_agent_endpoint,
+                    legacy_agent_forwarding: device_legacy_agent_forwarding,
+                    agent_forwarding_config: device_agent_forwarding_config,
+                    ..
+                },
+            ) => {
+                *auth_agent_endpoint = device_auth_agent_endpoint.clone();
+                *legacy_agent_forwarding = *device_legacy_agent_forwarding;
+                *agent_forwarding_config = device_agent_forwarding_config.clone();
             }
             _ => {}
         }

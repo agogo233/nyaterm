@@ -9,16 +9,19 @@ import FileExplorer from "@/components/panel/file-explorer";
 import FileTransfer from "@/components/panel/file-explorer/FileTransfer";
 import GpuMonitor from "@/components/panel/GpuMonitor";
 import NetworkPanel from "@/components/panel/NetworkPanel";
+import NotesPanel from "@/components/panel/notes/NotesPanel";
 import ProcessManager from "@/components/panel/ProcessManager";
 import RecordingPanel from "@/components/panel/RecordingPanel";
 import ResourceMonitor from "@/components/panel/ResourceMonitor";
 import SyncBackupHistoryPanel from "@/components/panel/SyncBackupHistoryPanel";
 import SavedConnections from "@/components/panel/saved-connections";
 import SecurityAuthPanel from "@/components/panel/security-auth";
+import type { RemoteGpuOverviewState } from "@/hooks/useRemoteGpuOverview";
+import type { RemoteNpuOverviewState } from "@/hooks/useRemoteNpuOverview";
 import type { RemoteStatsState } from "@/hooks/useRemoteStats";
 import type { AIOpenIntent } from "@/lib/aiEvents";
 import type { NewSessionTarget } from "@/lib/windowManager";
-import type { SavedConnection, SessionInfo, SessionPane } from "@/types/global";
+import type { RecordingMode, RecordingStatus, SavedConnection, SessionInfo, SessionPane } from "@/types/global";
 
 interface AppPanelContentProps {
   panelId: string | null;
@@ -28,7 +31,11 @@ interface AppPanelContentProps {
   activeSshSessionId: string | null;
   remoteStatsEnabled: boolean;
   remoteStats: RemoteStatsState;
-  recordingSessions: Set<string>;
+  gpuMonitorEnabled: boolean;
+  gpuOverviewState: RemoteGpuOverviewState;
+  npuMonitorEnabled: boolean;
+  npuOverviewState: RemoteNpuOverviewState;
+  recordingStatuses: RecordingStatus[];
   aiIntent: AIOpenIntent | null;
   transferHeight: number;
   onTransferResize: (delta: number) => void;
@@ -45,7 +52,7 @@ interface AppPanelContentProps {
   onSessionDisconnect: (sessionId: string) => Promise<void> | void;
   canReconnect: (sessionId: string) => boolean;
   onCommandSend: (command: string, execute?: boolean) => void;
-  onToggleSessionRecording: (session: SessionInfo) => Promise<void> | void;
+  onToggleSessionRecording: (session: SessionInfo, mode?: RecordingMode) => Promise<void> | void;
   onSaveSessionTranscript: (session: SessionInfo) => Promise<void> | void;
 }
 
@@ -57,7 +64,11 @@ export default function AppPanelContent({
   activeSshSessionId,
   remoteStatsEnabled,
   remoteStats,
-  recordingSessions,
+  gpuMonitorEnabled,
+  gpuOverviewState,
+  npuMonitorEnabled,
+  npuOverviewState,
+  recordingStatuses,
   aiIntent,
   transferHeight,
   onTransferResize,
@@ -75,6 +86,7 @@ export default function AppPanelContent({
 }: AppPanelContentProps) {
   const liveActivePane =
     activePane && !activePane.connecting && !activePane.connectError ? activePane : null;
+  const liveTerminalPane = liveActivePane?.paneKind === "terminal" ? liveActivePane : null;
 
   const aiEverMounted = useRef(false);
   if (panelId === "aiAssistant") aiEverMounted.current = true;
@@ -87,9 +99,9 @@ export default function AppPanelContent({
             <div className="flex-1 min-h-0 overflow-hidden">
               <FileExplorer
                 activeSessionId={activeSessionId}
-                activeSessionType={liveActivePane ? liveActivePane.type : null}
-                activeConnectionId={liveActivePane?.connectionId ?? null}
-                activeSessionName={liveActivePane?.name ?? null}
+                activeSessionType={liveTerminalPane ? liveTerminalPane.type : null}
+                activeConnectionId={liveTerminalPane?.connectionId ?? null}
+                activeSessionName={liveTerminalPane?.name ?? null}
               />
             </div>
             <ResizeHandle direction="vertical" onResize={onTransferResize} />
@@ -100,6 +112,8 @@ export default function AppPanelContent({
         );
       case "network":
         return <NetworkPanel />;
+      case "notes":
+        return <NotesPanel />;
       case "securityAuth":
         return <SecurityAuthPanel activeSessionId={activeSessionId} />;
       case "syncBackupHistory":
@@ -126,7 +140,7 @@ export default function AppPanelContent({
         return (
           <RecordingPanel
             activeSessionId={activeSessionId}
-            recordingSessions={recordingSessions}
+            recordingStatuses={recordingStatuses}
             onSessionClick={onSessionClick}
             onToggleRecording={onToggleSessionRecording}
             onSaveTranscript={onSaveSessionTranscript}
@@ -143,9 +157,21 @@ export default function AppPanelContent({
           />
         );
       case "gpuMonitor":
-        return <GpuMonitor activeSessionId={activeSshSessionId} />;
+        return (
+          <GpuMonitor
+            activeSessionId={activeSshSessionId}
+            enabled={gpuMonitorEnabled}
+            gpuOverviewState={gpuOverviewState}
+          />
+        );
       case "ascendNpuMonitor":
-        return <AscendNpuMonitor activeSessionId={activeSshSessionId} />;
+        return (
+          <AscendNpuMonitor
+            activeSessionId={activeSshSessionId}
+            enabled={npuMonitorEnabled}
+            npuOverviewState={npuOverviewState}
+          />
+        );
       case "processManager":
         return <ProcessManager activeSessionId={activeSshSessionId} />;
       case "dockerManager":
@@ -165,7 +191,7 @@ export default function AppPanelContent({
       {aiEverMounted.current && (
         <div className={isAiActive ? "h-full" : "hidden"}>
           <AIAssistantPanel
-            activePane={liveActivePane}
+            activePane={liveTerminalPane}
             activeConnection={activeConnection}
             intent={aiIntent}
           />

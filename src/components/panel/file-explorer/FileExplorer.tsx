@@ -83,6 +83,7 @@ import type {
   FileExplorerProps,
   SavedConnection,
   SessionInfo,
+  SessionType,
 } from "@/types/global";
 import { FileExplorerDialogs } from "./FileExplorerDialogs";
 import {
@@ -169,6 +170,12 @@ function isFileBrowsableSession(session: SessionInfo) {
     (session.session_type === "Local" ||
       (session.session_type === "SSH" && session.remote_file_browser_enabled))
   );
+}
+
+function toFileExplorerSessionType(session: SessionInfo): SessionType | null {
+  return session.session_type === "Local" || session.session_type === "SSH"
+    ? session.session_type
+    : null;
 }
 
 function getSessionExplorerKind(session: SessionInfo): FileExplorerBackendKind {
@@ -545,7 +552,7 @@ function FileExplorer(props: FileExplorerProps) {
           >
             <FileExplorerPane
               activeSessionId={selectedTarget.id}
-              activeSessionType={selectedTarget.session_type}
+              activeSessionType={toFileExplorerSessionType(selectedTarget)}
               activeConnectionId={null}
               activeSessionName={selectedTarget.name}
               headerMeta={`${selectedTarget.name} · ${
@@ -1744,6 +1751,22 @@ function FileExplorerPane({
     () => filteredSortedFiles.filter((file) => selectedFiles.has(file.name)),
     [filteredSortedFiles, selectedFiles],
   );
+  const footerStats = useMemo(
+    () => ({
+      selectedFileSize: selectedRealFiles.reduce(
+        (sum, file) => (file.is_dir ? sum : sum + file.size),
+        0,
+      ),
+      selectedItemCount: selectedRealFiles.length,
+      totalFileSize: visibleFiles.reduce((sum, file) => (file.is_dir ? sum : sum + file.size), 0),
+      totalItemCount: visibleFiles.length,
+    }),
+    [selectedRealFiles, visibleFiles],
+  );
+  const footerSizeText =
+    footerStats.selectedItemCount > 0 && footerStats.selectedFileSize > 0
+      ? `${formatSize(footerStats.selectedFileSize)}/${formatSize(footerStats.totalFileSize)}`
+      : formatSize(footerStats.totalFileSize);
   const fileAiActions = useMemo(
     () =>
       appSettings.ai.enabled
@@ -2414,9 +2437,18 @@ function FileExplorerPane({
     if (!target) return;
 
     try {
-      const localDir = await openDialog({ directory: true });
-      if (!localDir || typeof localDir !== "string") return;
-      await uploadLocalEntriesToTarget(target, [{ path: localDir, isDir: true }]);
+      const localDirs = await openDialog({ directory: true, multiple: true });
+      if (!localDirs) return;
+      const pathList = (Array.isArray(localDirs) ? localDirs : [localDirs]).filter(
+        (localDir): localDir is string => typeof localDir === "string",
+      );
+      await uploadLocalEntriesToTarget(
+        target,
+        pathList.map((path) => ({
+          path,
+          isDir: true,
+        })),
+      );
     } catch (error) {
       logger.error({
         domain: "transfer.lifecycle",
@@ -2960,16 +2992,17 @@ function FileExplorerPane({
           }}
         >
           <div className="flex gap-4">
-            {!directoryLoading && !error && visibleFiles.length > 0 && (
+            {!directoryLoading && !error && footerStats.totalItemCount > 0 && (
               <>
-                <span>{t("fileExplorer.totalItems", { count: visibleFiles.length })}</span>
-                {visibleFiles.some((f) => !f.is_dir) && (
-                  <span>
-                    {formatSize(
-                      visibleFiles.filter((f) => !f.is_dir).reduce((sum, f) => sum + f.size, 0),
-                    )}
-                  </span>
-                )}
+                <span>
+                  {footerStats.selectedItemCount > 0
+                    ? t("fileExplorer.selectedItems", {
+                        selected: footerStats.selectedItemCount,
+                        total: footerStats.totalItemCount,
+                      })
+                    : t("fileExplorer.totalItems", { count: footerStats.totalItemCount })}
+                </span>
+                <span>{footerSizeText}</span>
               </>
             )}
           </div>

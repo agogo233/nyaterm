@@ -1,4 +1,6 @@
-use super::client::{SshHandle, SshHandler, SshPostLoginConfig, SshStartupCommand};
+use super::client::{
+    SshDiagnosticContext, SshDiagnosticStage, SshHandle, SshPostLoginConfig, SshStartupCommand,
+};
 use crate::config::SftpCwdFollowMode;
 use crate::core::capture::OutputCaptureProcessor;
 use crate::core::input::remap_del_to_bs;
@@ -14,7 +16,7 @@ use crate::core::{
 };
 use crate::error::{AppError, AppResult};
 use russh::{ChannelMsg, client};
-use std::{pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc, time::Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Sleep, timeout};
@@ -23,44 +25,130 @@ const INJECT_TIMEOUT_SECS: u64 = 30;
 const INITIAL_INJECT_DELAY_MS: u64 = 500;
 const SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES: usize = 64 * 1024;
 
+#[derive(Debug)]
+enum ShellDetectionResult {
+    Detected { shell: ShellKind },
+    NoSupportedShell,
+    TimedOut,
+    ChannelOpenFailed,
+    ExecFailed,
+}
+
 /// Tries to detect the remote shell via an exec channel with a timeout.
 ///
-/// Returns the detected [`ShellKind`], or `None` when the exec channel
-/// fails / returns empty output — which is the normal behaviour of
-/// non-standard "shells" such as JumpServer (koko).
-async fn detect_shell_type(handle: &mut client::Handle<SshHandler>) -> Option<ShellKind> {
+/// Produces the same runtime outcome as the previous `Option<ShellKind>`
+/// contract: only `Detected` enables integration, all other outcomes skip it.
+async fn detect_shell_type<H: client::Handler>(
+    handle: &mut client::Handle<H>,
+    session_id: &str,
+    timeout_ms: u64,
+) -> ShellDetectionResult {
+    tracing::info!(
+        session_id = %session_id,
+        timeout_ms,
+        "SSH shell detection starting"
+    );
+
+    let started = Instant::now();
     let fut = async {
-        let mut ch = handle.channel_open_session().await.ok()?;
-        ch.exec(
-            true,
-            r#"printf '%s\n' "$SHELL"; ps -p $$ -o comm= 2>/dev/null || true"#,
-        )
-        .await
-        .ok()?;
+        let mut ch = match handle.channel_open_session().await {
+            Ok(channel) => channel,
+            Err(error) => {
+                return Err(("channel_open", error.to_string(), 0usize));
+            }
+        };
+        tracing::info!(
+            session_id = %session_id,
+            "SSH shell detection channel opened"
+        );
+
+        if let Err(error) = ch
+            .exec(
+                true,
+                r#"printf '%s\n' "$SHELL"; ps -p $$ -o comm= 2>/dev/null || true"#,
+            )
+            .await
+        {
+            return Err(("exec", error.to_string(), 0usize));
+        }
+        tracing::info!(
+            session_id = %session_id,
+            "SSH shell detection exec request sent"
+        );
 
         let mut output = String::new();
+        let mut output_bytes = 0usize;
         while let Some(msg) = ch.wait().await {
             if let ChannelMsg::Data { ref data } = msg {
+                output_bytes += data.len();
                 output.push_str(&String::from_utf8_lossy(data));
             }
         }
 
-        let kind = ShellKind::from_name(output.trim());
-        if kind == ShellKind::Unknown {
-            None
-        } else {
-            Some(kind)
-        }
+        Ok((ShellKind::from_name(output.trim()), output_bytes))
     };
 
-    timeout(Duration::from_millis(1200), fut)
-        .await
-        .ok()
-        .flatten()
+    match timeout(Duration::from_millis(timeout_ms), fut).await {
+        Ok(Ok((shell, output_bytes))) if shell != ShellKind::Unknown => {
+            tracing::info!(
+                session_id = %session_id,
+                shell = ?shell,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                output_bytes,
+                "SSH shell detection completed"
+            );
+            ShellDetectionResult::Detected { shell }
+        }
+        Ok(Ok((_shell, output_bytes))) => {
+            tracing::info!(
+                session_id = %session_id,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                output_bytes,
+                "SSH shell detection returned no supported shell"
+            );
+            ShellDetectionResult::NoSupportedShell
+        }
+        Ok(Err(("channel_open", error, _output_bytes))) => {
+            tracing::warn!(
+                session_id = %session_id,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                %error,
+                "SSH shell detection channel open failed"
+            );
+            ShellDetectionResult::ChannelOpenFailed
+        }
+        Ok(Err(("exec", error, _output_bytes))) => {
+            tracing::warn!(
+                session_id = %session_id,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                %error,
+                "SSH shell detection exec failed"
+            );
+            ShellDetectionResult::ExecFailed
+        }
+        Ok(Err((_stage, error, _output_bytes))) => {
+            tracing::warn!(
+                session_id = %session_id,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                %error,
+                "SSH shell detection failed"
+            );
+            ShellDetectionResult::NoSupportedShell
+        }
+        Err(_) => {
+            tracing::warn!(
+                session_id = %session_id,
+                timeout_ms,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "SSH shell detection timed out"
+            );
+            ShellDetectionResult::TimedOut
+        }
+    }
 }
 
-async fn exec_remote_command(
-    handle: &mut client::Handle<SshHandler>,
+async fn exec_remote_command<H: client::Handler>(
+    handle: &mut client::Handle<H>,
     command: &str,
     timeout_ms: u64,
 ) -> AppResult<String> {
@@ -181,8 +269,8 @@ rm -f "$block_tmp"
     ))
 }
 
-async fn install_remote_shell_integration(
-    handle: &mut client::Handle<SshHandler>,
+async fn install_remote_shell_integration<H: client::Handler>(
+    handle: &mut client::Handle<H>,
     shell: ShellKind,
 ) -> AppResult<()> {
     let Some(command) = remote_install_command(shell) else {
@@ -201,11 +289,17 @@ async fn install_remote_shell_integration(
 /// The injection script is **not** sent here — the IO loop defers it until
 /// the shell has produced its initial output (banner / MOTD) so that the
 /// welcome text is not swallowed.
-pub(super) async fn open_shell_channel(
-    handle: &mut client::Handle<SshHandler>,
+pub(super) async fn open_shell_channel<H: client::Handler>(
+    handle: &mut client::Handle<H>,
     session_id: &str,
     x11_fake_cookie_hex: Option<&str>,
+    agent_forwarding: bool,
+    terminal_type: &str,
+    sftp_enabled: bool,
+    network_device_profile: bool,
     cwd_follow_mode: SftpCwdFollowMode,
+    shell_detection_timeout_ms: u64,
+    diagnostics: Option<SshDiagnosticContext>,
 ) -> AppResult<(
     russh::Channel<client::Msg>,
     Option<String>,
@@ -213,12 +307,44 @@ pub(super) async fn open_shell_channel(
     Option<ShellKind>,
     Option<String>,
 )> {
-    let channel = handle
-        .channel_open_session()
-        .await
-        .map_err(|error| AppError::Channel(format!("Failed to open channel: {}", error)))?;
+    if let Some(diagnostics) = diagnostics.as_ref() {
+        diagnostics.set_stage(SshDiagnosticStage::OpeningInteractiveChannel);
+    }
+    tracing::info!(
+        session_id = %session_id,
+        "SSH interactive channel opening"
+    );
+    let channel = match handle.channel_open_session().await {
+        Ok(channel) => {
+            tracing::info!(
+                session_id = %session_id,
+                "SSH interactive channel opened"
+            );
+            channel
+        }
+        Err(error) => {
+            tracing::warn!(
+                session_id = %session_id,
+                %error,
+                "SSH interactive channel open failed"
+            );
+            return Err(AppError::Channel(format!(
+                "Failed to open channel: {}",
+                error
+            )));
+        }
+    };
 
     let mut local_notice = None;
+    if agent_forwarding {
+        if let Err(error) = channel.agent_forward(false).await {
+            tracing::warn!(
+                session_id = %session_id,
+                %error,
+                "Could not enable SSH Agent forwarding"
+            );
+        }
+    }
     if let Some(fake_cookie_hex) = x11_fake_cookie_hex {
         if let Err(error) = channel
             .request_x11(true, false, "MIT-MAGIC-COOKIE-1", fake_cookie_hex, 0)
@@ -233,30 +359,92 @@ pub(super) async fn open_shell_channel(
         }
     }
 
-    channel
-        .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
+    if let Some(diagnostics) = diagnostics.as_ref() {
+        diagnostics.set_stage(SshDiagnosticStage::RequestingPty);
+    }
+    tracing::info!(
+        session_id = %session_id,
+        terminal = %terminal_type,
+        cols = 80,
+        rows = 24,
+        "SSH PTY request sending"
+    );
+    if let Err(error) = channel
+        .request_pty(false, terminal_type, 80, 24, 0, 0, &[])
         .await
-        .map_err(|error| AppError::Channel(format!("PTY request failed: {}", error)))?;
+    {
+        tracing::warn!(
+            session_id = %session_id,
+            %error,
+            "SSH PTY request failed"
+        );
+        return Err(AppError::Channel(format!("PTY request failed: {}", error)));
+    }
+    tracing::info!(
+        session_id = %session_id,
+        "SSH PTY request completed"
+    );
 
-    channel
-        .request_shell(false)
-        .await
-        .map_err(|error| AppError::Channel(format!("Shell request failed: {}", error)))?;
+    if let Some(diagnostics) = diagnostics.as_ref() {
+        diagnostics.set_stage(SshDiagnosticStage::RequestingShell);
+    }
+    tracing::info!(
+        session_id = %session_id,
+        "SSH shell request sending"
+    );
+    if let Err(error) = channel.request_shell(false).await {
+        tracing::warn!(
+            session_id = %session_id,
+            %error,
+            "SSH shell request failed"
+        );
+        return Err(AppError::Channel(format!(
+            "Shell request failed: {}",
+            error
+        )));
+    }
+    tracing::info!(
+        session_id = %session_id,
+        "SSH shell request completed"
+    );
 
+    if let Some(diagnostics) = diagnostics.as_ref() {
+        diagnostics.set_stage(SshDiagnosticStage::PreparingIntegration);
+    }
     let ready_marker = osc::build_ready_marker(session_id);
 
     let mut detected_shell = None;
     let injection_script = match cwd_follow_mode {
         SftpCwdFollowMode::Off => {
-            tracing::debug!(
+            let reason = if network_device_profile {
+                "network_device_profile"
+            } else if sftp_enabled {
+                "cwd_follow_disabled"
+            } else {
+                "sftp_disabled"
+            };
+            tracing::info!(
                 session_id = %session_id,
-                "SSH shell integration disabled by connection settings"
+                mode = ?cwd_follow_mode,
+                detected_shell = ?detected_shell,
+                has_injection_script = false,
+                has_ready_marker = false,
+                reason,
+                "SSH shell integration skipped"
             );
             None
         }
         SftpCwdFollowMode::ShellIntegration | SftpCwdFollowMode::RcFile => {
-            match detect_shell_type(handle).await {
-                Some(shell_kind) => {
+            if let Some(diagnostics) = diagnostics.as_ref() {
+                diagnostics.set_stage(SshDiagnosticStage::DetectingShell);
+            }
+            let detection_result =
+                detect_shell_type(handle, session_id, shell_detection_timeout_ms).await;
+            if let Some(diagnostics) = diagnostics.as_ref() {
+                diagnostics.set_stage(SshDiagnosticStage::PreparingIntegration);
+            }
+            match detection_result {
+                ShellDetectionResult::Detected { shell: shell_kind } => {
                     detected_shell = Some(shell_kind);
                     let script = if cwd_follow_mode == SftpCwdFollowMode::RcFile {
                         match install_remote_shell_integration(handle, shell_kind).await {
@@ -282,24 +470,60 @@ pub(super) async fn open_shell_channel(
                         osc::injection_script(shell_kind, &ready_marker)
                     };
                     if script.is_some() {
-                        tracing::debug!(
+                        tracing::info!(
                             session_id = %session_id,
-                            shell = ?shell_kind,
-                            "Will inject OSC 7 hook after initial output"
+                            mode = ?cwd_follow_mode,
+                            detected_shell = ?detected_shell,
+                            has_injection_script = true,
+                            has_ready_marker = true,
+                            "SSH shell integration prepared"
                         );
                     } else {
-                        tracing::debug!(
+                        tracing::info!(
                             session_id = %session_id,
-                            shell = ?shell_kind,
-                            "Shell detected but no injection script available — skipping"
+                            mode = ?cwd_follow_mode,
+                            detected_shell = ?detected_shell,
+                            has_injection_script = false,
+                            has_ready_marker = false,
+                            reason = "no_script_available",
+                            "SSH shell integration skipped"
                         );
                     }
                     script
                 }
-                None => {
-                    tracing::debug!(
+                ShellDetectionResult::TimedOut => {
+                    tracing::info!(
                         session_id = %session_id,
-                        "Shell detection returned no output — skipping OSC 7 injection"
+                        mode = ?cwd_follow_mode,
+                        detected_shell = ?detected_shell,
+                        has_injection_script = false,
+                        has_ready_marker = false,
+                        reason = "shell_detection_timeout",
+                        "SSH shell integration skipped"
+                    );
+                    None
+                }
+                ShellDetectionResult::NoSupportedShell => {
+                    tracing::info!(
+                        session_id = %session_id,
+                        mode = ?cwd_follow_mode,
+                        detected_shell = ?detected_shell,
+                        has_injection_script = false,
+                        has_ready_marker = false,
+                        reason = "shell_unknown",
+                        "SSH shell integration skipped"
+                    );
+                    None
+                }
+                ShellDetectionResult::ChannelOpenFailed | ShellDetectionResult::ExecFailed => {
+                    tracing::info!(
+                        session_id = %session_id,
+                        mode = ?cwd_follow_mode,
+                        detected_shell = ?detected_shell,
+                        has_injection_script = false,
+                        has_ready_marker = false,
+                        reason = "shell_unknown",
+                        "SSH shell integration skipped"
                     );
                     None
                 }
@@ -337,6 +561,16 @@ enum IoPhase {
     Suppressing,
     /// Normal operation — strip our OSC sequences, forward everything else.
     Normal,
+}
+
+impl std::fmt::Display for IoPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WaitInitial => f.write_str("WaitInitial"),
+            Self::Suppressing => f.write_str("Suppressing"),
+            Self::Normal => f.write_str("Normal"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -461,14 +695,15 @@ async fn handle_osc_result(
     result: &osc::OscResult,
     suppressed_visible_fallback: &mut String,
     shell_kind: Option<ShellKind>,
+    injection_sent_at: &mut Option<Instant>,
 ) {
     match handle_injection_result(phase, result) {
         InjectionEvent::Inject => {
-            tracing::debug!(
+            tracing::info!(
                 session_id = %session_id,
                 shell = ?shell_kind,
-                visible_bytes = result.visible.len(),
-                "Sending SSH shell integration injection"
+                phase = "WaitInitial",
+                "SSH shell integration injection sending"
             );
             emit_output(
                 app,
@@ -484,6 +719,13 @@ async fn handle_osc_result(
 
             if let Some(script) = pending_script.take() {
                 let _ = channel.data(script.as_bytes()).await;
+                *injection_sent_at = Some(Instant::now());
+                tracing::info!(
+                    session_id = %session_id,
+                    shell = ?shell_kind,
+                    phase_transition = "WaitInitial -> Suppressing",
+                    "SSH shell integration injection sent"
+                );
             }
             inject_deadline
                 .as_mut()
@@ -498,11 +740,16 @@ async fn handle_osc_result(
                 .saturating_sub(visible_after_ready.len())
                 + suppressed_visible_fallback.len();
             suppressed_visible_fallback.clear();
-            tracing::debug!(
+            tracing::info!(
                 session_id = %session_id,
                 shell = ?shell_kind,
+                elapsed_ms = injection_sent_at
+                    .as_ref()
+                    .map(|started| started.elapsed().as_millis() as u64)
+                    .unwrap_or(0),
                 suppressed_visible_bytes,
                 ready_after_visible_bytes = visible_after_ready.len(),
+                phase_transition = "Suppressing -> Normal",
                 "SSH shell integration ready marker received"
             );
             emit_metadata(app, cwd_event, cwd, manager, session_id, result).await;
@@ -548,6 +795,7 @@ pub(super) async fn ssh_io_loop(
     backspace_mode: String,
     initial_notice: Option<String>,
     encoding: String,
+    diagnostics: Option<SshDiagnosticContext>,
 ) {
     let backspace_as_bs = backspace_mode == "ctrl_h";
     let output_event = format!("terminal-output-{}", session_id);
@@ -567,13 +815,26 @@ pub(super) async fn ssh_io_loop(
 
     let mut capture_processor = OutputCaptureProcessor::new();
 
-    let mut phase = if injection_script.is_some() {
+    let has_injection_script = injection_script.is_some();
+    let mut phase = if has_injection_script {
         IoPhase::WaitInitial
     } else {
         IoPhase::Normal
     };
+    if let Some(diagnostics) = diagnostics.as_ref() {
+        diagnostics.set_stage(SshDiagnosticStage::IoRunning);
+    }
+    tracing::info!(
+        session_id = %session_id,
+        initial_phase = %phase,
+        has_injection_script,
+        shell_kind = ?shell_kind,
+        "SSH IO loop started"
+    );
     let mut suppressed_visible_fallback = String::new();
     let mut pending_script = injection_script;
+    let mut initial_remote_data_logged = false;
+    let mut injection_sent_at: Option<Instant> = None;
     let mut pending_post_login = post_login.and_then(|config| {
         build_startup_command_input(&config.command).map(|input| PendingStartupCommand {
             input,
@@ -628,9 +889,6 @@ pub(super) async fn ssh_io_loop(
                         }
                         if backspace_as_bs {
                             remap_del_to_bs(&mut data);
-                        }
-                        if let Some(ref recorder) = recording_mgr {
-                            recorder.write_input(&session_id, &data);
                         }
                         let send_data = encode_terminal_input(&data, &encoding);
                         let _ = channel.data(&send_data[..]).await;
@@ -704,6 +962,15 @@ pub(super) async fn ssh_io_loop(
             msg = channel.wait(), if !output_paused => {
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
+                        if !initial_remote_data_logged {
+                            initial_remote_data_logged = true;
+                            tracing::info!(
+                                session_id = %session_id,
+                                bytes = data.len(),
+                                phase = %phase,
+                                "SSH terminal received initial remote data"
+                            );
+                        }
                         // ZMODEM: if a transfer is active, route raw bytes to it.
                         if let Some(ref mut transfer) = zmodem_transfer {
                             let direction = transfer.direction();
@@ -738,6 +1005,9 @@ pub(super) async fn ssh_io_loop(
                                 ZmodemDetectResult::Detected { direction, passthrough, initial_bytes } => {
                                     // Forward any pre-header bytes to the terminal.
                                     if !passthrough.is_empty() {
+                                        if let Some(ref recorder) = recording_mgr {
+                                            recorder.write_raw_output(&session_id, &passthrough);
+                                        }
                                         let pre = output_decoder.decode(&passthrough);
                                         if !pre.is_empty() {
                                             output.push_owned(pre);
@@ -770,6 +1040,9 @@ pub(super) async fn ssh_io_loop(
                                     continue;
                                 }
                                 ZmodemDetectResult::NoMatch { passthrough } => {
+                                    if let Some(ref recorder) = recording_mgr {
+                                        recorder.write_raw_output(&session_id, &passthrough);
+                                    }
                                     let text = output_decoder.decode(&passthrough);
                                     let mut result = stripper.push(&text);
 
@@ -792,6 +1065,7 @@ pub(super) async fn ssh_io_loop(
                                         &result,
                                         &mut suppressed_visible_fallback,
                                         shell_kind,
+                                        &mut injection_sent_at,
                                     ).await;
                                     arm_post_login_timer(
                                         &phase,
@@ -803,6 +1077,9 @@ pub(super) async fn ssh_io_loop(
                             }
                     }
                     Some(ChannelMsg::ExtendedData { ref data, .. }) => {
+                        if let Some(ref recorder) = recording_mgr {
+                            recorder.write_raw_output(&session_id, data);
+                        }
                         let text = output_decoder.decode(data);
                         if let Some(ref recorder) = recording_mgr {
                             recorder.write_output(&session_id, &text);
@@ -859,11 +1136,19 @@ pub(super) async fn ssh_io_loop(
             }
             _ = &mut initial_inject_deadline, if should_send_initial_injection(&phase, pending_script.is_some()) => {
                 if let Some(script) = pending_script.take() {
-                    let _ = channel.data(script.as_bytes()).await;
-                    tracing::debug!(
+                    tracing::info!(
                         session_id = %session_id,
                         shell = ?shell_kind,
-                        "Sending SSH shell integration injection after initial delay"
+                        phase = %phase,
+                        "SSH shell integration injection sending"
+                    );
+                    let _ = channel.data(script.as_bytes()).await;
+                    injection_sent_at = Some(Instant::now());
+                    tracing::info!(
+                        session_id = %session_id,
+                        shell = ?shell_kind,
+                        phase_transition = "WaitInitial -> Suppressing",
+                        "SSH shell integration injection sent"
                     );
                     on_initial_injection_sent(&mut phase);
                     inject_deadline.as_mut().reset(
@@ -873,17 +1158,28 @@ pub(super) async fn ssh_io_loop(
                 }
             }
             _ = &mut inject_deadline, if phase != IoPhase::Normal => {
+                let previous_phase = phase.to_string();
                 let timeout_event = handle_injection_timeout(&mut phase);
                 let flushed = stripper.flush();
+                let osc_buffer_bytes = flushed.len();
+                let suppressed_visible_bytes = suppressed_visible_fallback.len();
                 let discarded_visible_bytes = discard_suppressed_output(
                     &mut suppressed_visible_fallback,
                     flushed,
                 );
-                tracing::debug!(
+                let phase_transition = format!("{previous_phase} -> {phase}");
+                tracing::warn!(
                     session_id = %session_id,
                     shell = ?shell_kind,
+                    elapsed_ms = injection_sent_at
+                        .as_ref()
+                        .map(|started| started.elapsed().as_millis() as u64)
+                        .unwrap_or(0),
+                    suppressed_visible_bytes,
+                    osc_buffer_bytes,
                     discarded_visible_bytes,
-                    "Injection timeout — discarding suppressed shell integration output"
+                    phase_transition = %phase_transition,
+                    "SSH shell integration injection timed out"
                 );
                 let _ = timeout_event;
                 arm_post_login_timer(&phase, &pending_post_login, &mut post_login_deadline);
@@ -901,9 +1197,6 @@ pub(super) async fn ssh_io_loop(
                     continue;
                 }
                 if let Some(pending) = pending_post_login.take() {
-                    if let Some(ref recorder) = recording_mgr {
-                        recorder.write_input(&session_id, &pending.input);
-                    }
                     let _ = channel.data(&pending.input[..]).await;
                     tracing::info!(
                         session_id = %session_id,
@@ -918,9 +1211,6 @@ pub(super) async fn ssh_io_loop(
                     continue;
                 }
                 if let Some(pending) = pending_startup_command.take() {
-                    if let Some(ref recorder) = recording_mgr {
-                        recorder.write_input(&session_id, &pending.input);
-                    }
                     let _ = channel.data(&pending.input[..]).await;
                     tracing::info!(
                         session_id = %session_id,
@@ -1042,11 +1332,145 @@ mod tests {
         INITIAL_INJECT_DELAY_MS, INJECT_TIMEOUT_SECS, InjectionEvent, InjectionTimeoutEvent,
         IoPhase, PendingStartupCommand, SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES,
         append_suppressed_visible, build_startup_command_input, discard_suppressed_output,
-        handle_injection_result, handle_injection_timeout, should_send_initial_injection,
+        handle_injection_result, handle_injection_timeout, open_shell_channel,
+        should_send_initial_injection,
     };
+    use crate::config::SftpCwdFollowMode;
     use crate::core::ssh::osc::OscResult;
+    use russh::{Channel, ChannelId, Disconnect, client, server};
     use std::pin::Pin;
-    use tokio::time::Sleep;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tokio::time::{Duration, Sleep, timeout};
+
+    struct TestClient;
+
+    impl client::Handler for TestClient {
+        type Error = russh::Error;
+
+        async fn check_server_key(
+            &mut self,
+            _server_public_key: &russh::keys::PublicKey,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    struct TestServer {
+        agent_request_tx: mpsc::UnboundedSender<()>,
+    }
+
+    impl server::Handler for TestServer {
+        type Error = russh::Error;
+
+        async fn auth_none(&mut self, _user: &str) -> Result<server::Auth, Self::Error> {
+            Ok(server::Auth::Accept)
+        }
+
+        async fn channel_open_session(
+            &mut self,
+            _channel: Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
+            _session: &mut server::Session,
+        ) -> Result<(), Self::Error> {
+            reply.accept().await;
+            Ok(())
+        }
+
+        async fn agent_request(
+            &mut self,
+            _channel: ChannelId,
+            _session: &mut server::Session,
+        ) -> Result<bool, Self::Error> {
+            let _ = self.agent_request_tx.send(());
+            Ok(true)
+        }
+    }
+
+    async fn assert_agent_forwarding_request(enabled: bool) {
+        let (client_stream, server_stream) = tokio::io::duplex(1024 * 1024);
+        let (agent_request_tx, mut agent_request_rx) = mpsc::unbounded_channel();
+        let mut rng = russh::keys::key::safe_rng();
+        let server_config = Arc::new(server::Config {
+            auth_rejection_time: Duration::ZERO,
+            auth_rejection_time_initial: Some(Duration::ZERO),
+            keys: vec![
+                russh::keys::PrivateKey::random(&mut rng, russh::keys::Algorithm::Ed25519)
+                    .expect("test server key"),
+            ],
+            ..server::Config::default()
+        });
+        let server_task = tokio::spawn(async move {
+            let session = server::run_stream(
+                server_config,
+                server_stream,
+                TestServer { agent_request_tx },
+            )
+            .await
+            .expect("fake SSH server handshake");
+            session.await.expect("fake SSH server session");
+        });
+
+        let mut handle = client::connect_stream(
+            Arc::new(client::Config::default()),
+            client_stream,
+            TestClient,
+        )
+        .await
+        .expect("fake SSH client handshake");
+        assert!(
+            handle
+                .authenticate_none("test")
+                .await
+                .expect("none authentication")
+                .success()
+        );
+
+        let (channel, ..) = open_shell_channel(
+            &mut handle,
+            "agent-forwarding-test",
+            None,
+            enabled,
+            "xterm-256color",
+            false,
+            false,
+            SftpCwdFollowMode::Off,
+            100,
+            None,
+        )
+        .await
+        .expect("interactive shell channel");
+
+        if enabled {
+            timeout(Duration::from_secs(1), agent_request_rx.recv())
+                .await
+                .expect("fake server should receive Agent forwarding request")
+                .expect("Agent forwarding request channel");
+        } else {
+            assert!(
+                timeout(Duration::from_millis(100), agent_request_rx.recv())
+                    .await
+                    .is_err(),
+                "disabled forwarding must not send auth-agent-req@openssh.com"
+            );
+        }
+
+        drop(channel);
+        handle
+            .disconnect(Disconnect::ByApplication, "test complete", "")
+            .await
+            .expect("disconnect fake SSH session");
+        timeout(Duration::from_secs(1), server_task)
+            .await
+            .expect("fake SSH server should stop")
+            .expect("fake SSH server task");
+    }
+
+    #[tokio::test]
+    async fn interactive_shell_requests_agent_forwarding_only_when_enabled() {
+        assert_agent_forwarding_request(false).await;
+        assert_agent_forwarding_request(true).await;
+    }
 
     #[test]
     fn post_login_input_normalizes_line_endings_and_adds_enter() {

@@ -1,5 +1,7 @@
 use crate::core::SessionManager;
-use crate::core::monitoring::stats::{RemoteStats, SYSINFO_SCRIPT, parse_stats_output};
+use crate::core::monitoring::stats::{
+    RemoteStats, RemoteStatsSampler, SYSINFO_SCRIPT, parse_stats_output,
+};
 use crate::core::remote_exec::{ensure_success, exec_ssh_session_command};
 use crate::error::{AppError, AppResult};
 use std::sync::Arc;
@@ -8,8 +10,22 @@ use std::time::Duration;
 #[tauri::command]
 pub async fn get_remote_stats(
     state: tauri::State<'_, Arc<SessionManager>>,
+    sampler: tauri::State<'_, Arc<RemoteStatsSampler>>,
     session_id: String,
 ) -> AppResult<RemoteStats> {
+    let remote_stats_enabled = {
+        let sessions = state.sessions.lock().await;
+        let session = sessions.get(&session_id).ok_or_else(|| {
+            AppError::SessionNotFound(format!("Session '{}' not found", session_id))
+        })?;
+        session.info.remote_stats_enabled
+    };
+    if !remote_stats_enabled {
+        return Err(AppError::Config(
+            "Remote stats are disabled for this session profile".to_string(),
+        ));
+    }
+
     let output = exec_ssh_session_command(
         state.inner(),
         &session_id,
@@ -18,8 +34,9 @@ pub async fn get_remote_stats(
     )
     .await?;
     let output = ensure_success(output, "Failed to fetch stats")?;
+    let parsed = parse_stats_output(&output.stdout)?;
 
-    Ok(parse_stats_output(&output.stdout))
+    Ok(sampler.complete_snapshot(&session_id, parsed).await)
 }
 
 #[tauri::command]

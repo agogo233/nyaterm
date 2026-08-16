@@ -3,11 +3,17 @@ pub async fn apply_portable_snapshot(
     snapshot: &PortableSnapshot,
 ) -> AppResult<()> {
     validate_portable_snapshot(snapshot)?;
+    install_snapshot_master_key_token(snapshot)?;
 
     let mut sessions = snapshot.sessions.clone();
     if snapshot.snapshot_kind == PortableSnapshotKind::Sync {
         let current_sessions = config::load_sessions(app).unwrap_or_default();
         preserve_device_local_sessions(&mut sessions, &current_sessions);
+    } else {
+        normalize_backup_sessions_for_platform(
+            &mut sessions,
+            AgentEndpointTargetPlatform::current(),
+        )?;
     }
     config::save_sessions(app, &sessions)?;
     config::save_keys(app, &snapshot.keys)?;
@@ -20,6 +26,7 @@ pub async fn apply_portable_snapshot(
     config::save_tunnel_groups(app, &snapshot.tunnel_groups)?;
     config::save_quick_commands(app, &snapshot.quick_commands)?;
     crate::storage::replace_command_history_entries(&snapshot.history)?;
+    crate::storage::replace_notes_snapshot(&snapshot.notes)?;
 
     let merged = snapshot.settings.clone().apply_to(
         config::load_app_settings(app).unwrap_or_default(),
@@ -30,9 +37,6 @@ pub async fn apply_portable_snapshot(
     persisted.ai = config::encrypt_ai_settings(merged.ai.clone())?;
     config::save_app_settings(app, &persisted)?;
 
-    if let Some(master_key) = &snapshot.master_key_token {
-        crate::storage::save_master_key_token(master_key)?;
-    }
     if !snapshot.known_hosts.is_empty() {
         crate::storage::replace_known_hosts_export(&snapshot.known_hosts)?;
     }
@@ -51,6 +55,26 @@ pub async fn apply_portable_snapshot(
     let _ = app.emit("quick-commands-changed", ());
     let _ = app.emit("settings-changed", ());
     let _ = app.emit("command-history-changed", ());
+    let _ = app.emit(
+        "notes-changed",
+        crate::config::NotesChangedEvent {
+            kind: "replaced".to_string(),
+            node_kind: None,
+            ids: Vec::new(),
+            folders: Vec::new(),
+            notes: Vec::new(),
+            tree_changed: Some(true),
+        },
+    );
 
+    Ok(())
+}
+
+fn install_snapshot_master_key_token(snapshot: &PortableSnapshot) -> AppResult<()> {
+    let Some(master_key) = &snapshot.master_key_token else {
+        return Ok(());
+    };
+    crate::storage::save_master_key_token(master_key)?;
+    crate::utils::crypto::verify_master_key_token()?;
     Ok(())
 }

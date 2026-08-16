@@ -4,7 +4,31 @@ import { MOD, resolveIndexedKeys } from "@/lib/shortcutRegistry";
 
 export { MOD };
 
-const HOTKEY_OPTIONS = { enableOnFormTags: true, preventDefault: true } as const;
+const REMOTE_DESKTOP_INPUT_ROOT_SELECTOR =
+  '[data-remote-desktop-input-root="true"], [data-rdp-input-root="true"]';
+
+function isElement(value: EventTarget | null): value is Element {
+  return value instanceof Element;
+}
+
+function isInsideRemoteDesktopInputRoot(event: KeyboardEvent) {
+  if (
+    event
+      .composedPath()
+      .some((target) => isElement(target) && target.matches(REMOTE_DESKTOP_INPUT_ROOT_SELECTOR))
+  ) {
+    return true;
+  }
+  return (
+    isElement(event.target) && event.target.closest(REMOTE_DESKTOP_INPUT_ROOT_SELECTOR) !== null
+  );
+}
+
+const HOTKEY_OPTIONS = {
+  enableOnFormTags: true,
+  preventDefault: true,
+  ignoreEventWhen: isInsideRemoteDesktopInputRoot,
+} as const;
 
 export interface ShortcutCallbacks {
   onNewSession: () => void;
@@ -30,6 +54,7 @@ export interface ShortcutCallbacks {
   onLockScreen: () => void;
   onManageSyncGroups: () => void;
   onClearTerminal: () => void;
+  onToggleRecording: () => void;
 }
 
 export function useGlobalShortcuts(
@@ -76,6 +101,7 @@ export function useGlobalShortcuts(
 
   useHotkeys(k("terminal.manageSyncGroups"), cb.onManageSyncGroups, HOTKEY_OPTIONS);
   useHotkeys(k("terminal.clear"), cb.onClearTerminal, HOTKEY_OPTIONS);
+  useHotkeys(k("terminal.recording.toggle"), cb.onToggleRecording, HOTKEY_OPTIONS);
 
   useHotkeys(k("special.lockScreen"), cb.onLockScreen, HOTKEY_OPTIONS);
 }

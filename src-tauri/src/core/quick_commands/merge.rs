@@ -3,25 +3,47 @@ fn merge_import(
     import_config: ImportConfig,
 ) -> AppResult<ImportStats> {
     let mut stats = ImportStats::default();
-    let mut category_names = BTreeMap::new();
+    let mut category_names: BTreeMap<(Option<String>, String), String> = BTreeMap::new();
     for category in &config.categories {
-        category_names.insert(category.name.clone(), category.id.clone());
+        category_names.insert(
+            (category.parent_id.clone(), category.name.clone()),
+            category.id.clone(),
+        );
     }
 
     for category in import_config.categories {
         let name = require_text(&category.name, "category.name")?;
-        let id_input = category.id.unwrap_or_else(|| slugify(&name));
-        let id = normalize_id(&id_input, "category.id")?;
+        let parent_id = trim_optional(category.parent_id)
+            .map(|value| normalize_id(&value, "category.parent_id"))
+            .transpose()?;
+        let id = match category.id {
+            Some(id_input) => normalize_id(&id_input, "category.id")?,
+            None => category_names
+                .get(&(parent_id.clone(), name.clone()))
+                .cloned()
+                .unwrap_or_else(|| unique_category_id(config, &slugify(&name))),
+        };
+        let existing_sort_order = config
+            .categories
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.sort_order);
+        let sort_order = category
+            .sort_order
+            .or(existing_sort_order)
+            .unwrap_or_else(|| next_import_category_sort_order(config, parent_id.as_deref()));
         if upsert_category(
             config,
             QuickCommandCategory {
                 id: id.clone(),
                 name: name.clone(),
+                parent_id: parent_id.clone(),
+                sort_order,
             },
         ) {
             stats.added_categories += 1;
         }
-        category_names.insert(name, id);
+        category_names.insert((parent_id, name), id);
     }
 
     let mut seen_ids = BTreeSet::new();
@@ -29,7 +51,11 @@ fn merge_import(
 
     for command in import_config.commands {
         let label = require_text(&command.label, "command.label")?;
-        let command_text = require_text(&command.command, "command.command")?;
+        let command_text = if command.preserve_command_text {
+            require_preserved_text(&command.command, "command.command")?
+        } else {
+            require_text(&command.command, "command.command")?
+        };
         let id_input = command
             .id
             .unwrap_or_else(|| format!("cmd-{}", Uuid::new_v4()));
@@ -49,6 +75,7 @@ fn merge_import(
                     &mut category_names,
                     &category_id,
                     &category_id,
+                    None,
                     &mut stats,
                 );
                 Some(category_id)
@@ -56,14 +83,15 @@ fn merge_import(
             (None, Some(category_name)) => {
                 let category_name = require_text(&category_name, "command.category")?;
                 let category_id = category_names
-                    .get(&category_name)
+                    .get(&(None, category_name.clone()))
                     .cloned()
-                    .unwrap_or_else(|| slugify(&category_name));
+                    .unwrap_or_else(|| unique_category_id(config, &slugify(&category_name)));
                 ensure_category(
                     config,
                     &mut category_names,
                     &category_id,
                     &category_name,
+                    None,
                     &mut stats,
                 );
                 Some(category_id)
@@ -106,6 +134,7 @@ fn merge_import(
             updated_at: Some(now),
             created_at: Some(now),
             use_count: None,
+            sort_order: command.sort_order,
         };
 
         if upsert_command(config, imported) {
@@ -120,21 +149,25 @@ fn merge_import(
 
 fn ensure_category(
     config: &mut QuickCommandsConfig,
-    category_names: &mut BTreeMap<String, String>,
+    category_names: &mut BTreeMap<(Option<String>, String), String>,
     id: &str,
     name: &str,
+    parent_id: Option<String>,
     stats: &mut ImportStats,
 ) {
     if config.categories.iter().any(|category| category.id == id) {
-        category_names.insert(name.to_string(), id.to_string());
+        category_names.insert((parent_id, name.to_string()), id.to_string());
         return;
     }
 
+    let sort_order = next_import_category_sort_order(config, parent_id.as_deref());
     config.categories.push(QuickCommandCategory {
         id: id.to_string(),
         name: name.to_string(),
+        parent_id: parent_id.clone(),
+        sort_order,
     });
-    category_names.insert(name.to_string(), id.to_string());
+    category_names.insert((parent_id, name.to_string()), id.to_string());
     stats.added_categories += 1;
 }
 
@@ -170,12 +203,53 @@ fn upsert_command(config: &mut QuickCommandsConfig, command: QuickCommand) -> bo
     }
 }
 
+fn unique_category_id(config: &QuickCommandsConfig, preferred_id: &str) -> String {
+    if !config
+        .categories
+        .iter()
+        .any(|category| category.id == preferred_id)
+    {
+        return preferred_id.to_string();
+    }
+
+    for index in 2.. {
+        let candidate = format!("{preferred_id}-{index}");
+        if !config
+            .categories
+            .iter()
+            .any(|category| category.id == candidate)
+        {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded category id suffix search should always return")
+}
+
+fn next_import_category_sort_order(config: &QuickCommandsConfig, parent_id: Option<&str>) -> i32 {
+    config
+        .categories
+        .iter()
+        .filter(|category| category.parent_id.as_deref() == parent_id)
+        .map(|category| category.sort_order)
+        .max()
+        .unwrap_or(-1)
+        + 1
+}
+
 fn require_text(value: &str, field: &str) -> AppResult<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(AppError::Config(format!("{field} cannot be empty")));
     }
     Ok(trimmed.to_string())
+}
+
+fn require_preserved_text(value: &str, field: &str) -> AppResult<String> {
+    if value.trim().is_empty() {
+        return Err(AppError::Config(format!("{field} cannot be empty")));
+    }
+    Ok(value.to_string())
 }
 
 fn normalize_id(value: &str, field: &str) -> AppResult<String> {

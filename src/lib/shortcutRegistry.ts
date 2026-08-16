@@ -67,10 +67,22 @@ export const SHORTCUT_REGISTRY: ShortcutDefinition[] = [
     defaultKeys: "ctrl+l, meta+l",
   },
   {
+    id: "terminal.recording.toggle",
+    category: "terminal",
+    labelKey: "settings.shortcutLabels.toggleRecording",
+    defaultKeys: "ctrl+alt+r, meta+alt+r",
+  },
+  {
     id: "terminal.selectAll",
     category: "terminal",
     labelKey: "terminalCtx.selectAll",
     defaultKeys: "ctrl+shift+a, meta+shift+a",
+  },
+  {
+    id: "terminal.showCommandSuggestions",
+    category: "terminal",
+    labelKey: "settings.shortcutLabels.showCommandSuggestions",
+    defaultKeys: "alt+r",
   },
   {
     id: "terminal.manageSyncGroups",

@@ -47,6 +47,10 @@ struct ImportCategory {
     #[serde(default)]
     id: Option<String>,
     name: String,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    sort_order: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +59,8 @@ struct ImportCommand {
     id: Option<String>,
     label: String,
     command: String,
+    #[serde(skip)]
+    preserve_command_text: bool,
     #[serde(default)]
     category_id: Option<String>,
     #[serde(default)]
@@ -73,6 +79,8 @@ struct ImportCommand {
     source: Option<String>,
     #[serde(default)]
     risk_level: Option<String>,
+    #[serde(default)]
+    sort_order: Option<i32>,
 }
 
 #[derive(Debug, Default)]

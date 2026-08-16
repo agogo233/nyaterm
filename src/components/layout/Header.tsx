@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BiExport, BiImport } from "react-icons/bi";
 import { GrUpgrade } from "react-icons/gr";
@@ -19,12 +20,14 @@ import {
   MdFitScreen,
   MdInfo,
   MdKeyboardArrowDown,
+  MdKeyboardArrowUp,
   MdListAlt,
   MdMemory,
   MdMenu,
   MdMenuBook,
   MdMerge,
   MdOutlineMonitorHeart,
+  MdOutlineStickyNote2,
   MdPalette,
   MdRestartAlt,
   MdSearch,
@@ -68,8 +71,10 @@ import {
 import { useApp } from "@/context/AppContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useConfigTransfer } from "@/hooks/useConfigTransfer";
+import type { RemoteGpuOverviewState } from "@/hooks/useRemoteGpuOverview";
+import type { RemoteNpuOverviewState } from "@/hooks/useRemoteNpuOverview";
 import type { RemoteStatsState } from "@/hooks/useRemoteStats";
-import { resolveDisplayKeys } from "@/hooks/useShortcutMap";
+import { resolveDisplayKeys, resolveShortcutKeys } from "@/hooks/useShortcutMap";
 import { AVAILABLE_LANGUAGES } from "@/i18n";
 import { HEADER_STATUS_MODES, normalizeHeaderStatusMode } from "@/lib/headerStatus";
 import { invoke } from "@/lib/invoke";
@@ -81,7 +86,13 @@ import {
   resetTerminalFontSizeDelta,
 } from "@/lib/terminalFontSize";
 import { getActivePane, getTabDisplayName } from "@/lib/workspaceTabs";
-import type { AppearanceSettings, SavedConnection, Tab } from "@/types/global";
+import type {
+  AppearanceSettings,
+  RemoteGpuOverview,
+  RemoteNpuOverview,
+  SavedConnection,
+  Tab,
+} from "@/types/global";
 import ImportDialog from "../dialog/connections/ImportDialog";
 import { resolveConnectionIcon } from "../icons";
 import NyaTermLogo from "../NyaTermLogo";
@@ -151,6 +162,7 @@ const iconMap: Record<string, React.ElementType> = {
   memory: MdMemory,
   speed: MdSpeed,
   monitor_heart: MdOutlineMonitorHeart,
+  sticky_note: MdOutlineStickyNote2,
   nvidia: SiNvidia,
   ascend: AscendIcon,
   list_alt: MdListAlt,
@@ -200,7 +212,8 @@ function HeaderStatusDivider() {
   );
 }
 
-function formatPct(value: number): string {
+function formatPct(value: number | null): string {
+  if (value == null) return "--";
   return `${Math.round(Math.min(100, Math.max(0, value)))}%`;
 }
 
@@ -216,10 +229,34 @@ function formatRate(bytesPerSec: number): string {
   return `${formatBytes(bytesPerSec)}/s`;
 }
 
-function getPressureColor(usagePercent: number): string | undefined {
+function formatMemoryMbCompact(value: number): string {
+  if (value >= 1024) {
+    const gib = value / 1024;
+    const rounded = Math.round(gib * 10) / 10;
+    if (rounded < 10 && !Number.isInteger(rounded)) {
+      return `${rounded.toFixed(1)}G`;
+    }
+    return `${Math.round(gib)}G`;
+  }
+  return `${Math.round(value)}M`;
+}
+
+function getPressureColor(usagePercent: number | null): string | undefined {
+  if (usagePercent == null) return undefined;
   if (usagePercent >= 90) return "#f87171";
   if (usagePercent >= 75) return "#f59e0b";
   return undefined;
+}
+
+function getHardwareCardLimit(width: number): number {
+  if (width >= 1180) return 4;
+  if (width >= 920) return 3;
+  if (width >= 700) return 2;
+  return 1;
+}
+
+function getHardwareStatusCompact(visibleCardCount: number, hiddenCount: number, cardLimit: number): boolean {
+  return cardLimit <= 1 || (cardLimit <= 2 && visibleCardCount >= 2) || visibleCardCount >= 3 || hiddenCount > 0;
 }
 
 function formatUptimeShort(
@@ -235,6 +272,278 @@ function formatUptimeShort(
   return t("headerStatus.uptimeMinutes", { count: Math.max(1, Math.floor(seconds / 60)) });
 }
 
+interface HeaderHardwareCard {
+  id: string;
+  indexLabel: string;
+  title: string;
+  utilizationPercent: number | null;
+  memoryPercent: number | null;
+  memoryText: string;
+  temperatureText: string;
+  powerText: string;
+}
+
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
+function formatOptionalPct(value: number | null): string {
+  return value == null ? "--" : `${Math.round(clampPercent(value))}%`;
+}
+
+function formatOptionalTemperature(value?: number | null): string {
+  return value == null ? "-" : `${Math.round(value)} C`;
+}
+
+function formatOptionalWatts(value?: number | null): string {
+  if (value == null) return "-";
+  return `${value < 100 ? value.toFixed(1) : Math.round(value)} W`;
+}
+
+function sortHardwareCardsByIndex(cards: HeaderHardwareCard[]): HeaderHardwareCard[] {
+  return [...cards].sort(
+    (left, right) =>
+      Number(left.indexLabel.split(":")[0]) - Number(right.indexLabel.split(":")[0]) ||
+      left.indexLabel.localeCompare(right.indexLabel),
+  );
+}
+
+function buildGpuHardwareCards(overview: RemoteGpuOverview): HeaderHardwareCard[] {
+  return overview.gpus.map((gpu) => {
+    const memoryPercent =
+      gpu.memory_total_mb > 0 ? (gpu.memory_used_mb / gpu.memory_total_mb) * 100 : null;
+    const memoryText =
+      gpu.memory_total_mb > 0
+        ? `${formatMemoryMbCompact(gpu.memory_used_mb)}/${formatMemoryMbCompact(gpu.memory_total_mb)}`
+        : "-";
+
+    return {
+      id: gpu.uuid || `gpu-${gpu.index}`,
+      indexLabel: gpu.index.toString(),
+      title: gpu.name || `GPU ${gpu.index}`,
+      utilizationPercent: gpu.utilization_gpu_percent ?? null,
+      memoryPercent,
+      memoryText,
+      temperatureText: formatOptionalTemperature(gpu.temperature_c),
+      powerText:
+        gpu.power_draw_w == null && gpu.power_limit_w == null
+          ? "-"
+          : gpu.power_limit_w == null
+            ? formatOptionalWatts(gpu.power_draw_w)
+            : `${formatOptionalWatts(gpu.power_draw_w)} / ${formatOptionalWatts(gpu.power_limit_w)}`,
+    };
+  });
+}
+
+function buildNpuHardwareCards(overview: RemoteNpuOverview): HeaderHardwareCard[] {
+  return overview.npus.map((npu) => {
+    const totalMb =
+      npu.hbm_total_mb != null && npu.hbm_total_mb > 0 ? npu.hbm_total_mb : npu.memory_total_mb;
+    const usedMb =
+      npu.hbm_total_mb != null && npu.hbm_total_mb > 0
+        ? (npu.hbm_used_mb ?? 0)
+        : npu.memory_used_mb;
+    const memoryPercent = totalMb > 0 ? (usedMb / totalMb) * 100 : null;
+    const memoryText =
+      totalMb > 0 ? `${formatMemoryMbCompact(usedMb)}/${formatMemoryMbCompact(totalMb)}` : "-";
+
+    return {
+      id: npu.device_key || `npu-${npu.index}-${npu.chip_id}`,
+      indexLabel: npu.index.toString(),
+      title: npu.name || `NPU ${npu.index}`,
+      utilizationPercent: npu.utilization_aicore_percent ?? null,
+      memoryPercent,
+      memoryText,
+      temperatureText: formatOptionalTemperature(npu.temperature_c),
+      powerText: formatOptionalWatts(npu.power_draw_w),
+    };
+  });
+}
+
+function buildHardwareTitle(
+  label: "GPU" | "NPU",
+  cards: HeaderHardwareCard[],
+  utilizationLabel: string,
+): string {
+  if (cards.length === 0) return label;
+  return cards
+    .map(
+      (card) =>
+        `${label} ${card.indexLabel} ${card.title} - ${utilizationLabel} ${formatOptionalPct(
+          card.utilizationPercent,
+        )} - MEM ${card.memoryText} - TEMP ${card.temperatureText} - POWER ${card.powerText}`,
+    )
+    .join("\n");
+}
+
+function HeaderHardwareStatus({
+  cards,
+  compact,
+  hiddenCount,
+  icon,
+  label,
+  onNextPage,
+  onPreviousPage,
+}: {
+  cards: HeaderHardwareCard[];
+  compact: boolean;
+  hiddenCount: number;
+  icon: React.ReactNode;
+  label: "GPU" | "NPU";
+  onNextPage: () => void;
+  onPreviousPage: () => void;
+}) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-2 font-mono tabular-nums leading-none">
+      <span className="inline-flex shrink-0 items-center gap-1 text-[0.6875rem] font-semibold text-[var(--df-text-muted)]">
+        <span className="inline-flex text-[0.875rem] text-[var(--df-text-dimmed)]">{icon}</span>
+        {label}
+      </span>
+      <span className="flex min-w-0 items-center">
+        {cards.map((card, index) => (
+          <span key={card.id} className="inline-flex shrink-0 items-center">
+            {index > 0 && <HeaderHardwareSeparator />}
+            <HeaderHardwareCardCell card={card} compact={compact} />
+          </span>
+        ))}
+        {hiddenCount > 0 && (
+          <span className="inline-flex shrink-0 items-center">
+            {cards.length > 0 && <HeaderHardwareSeparator />}
+            <HeaderHardwarePager
+              hiddenCount={hiddenCount}
+              label={label}
+              onNextPage={onNextPage}
+              onPreviousPage={onPreviousPage}
+            />
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+function HeaderHardwarePager({
+  hiddenCount,
+  label,
+  onNextPage,
+  onPreviousPage,
+}: {
+  hiddenCount: number;
+  label: "GPU" | "NPU";
+  onNextPage: () => void;
+  onPreviousPage: () => void;
+}) {
+  const stopDrag = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  };
+
+  return (
+    <span
+      className="pointer-events-auto grid h-[1.625rem] w-5 shrink-0 grid-rows-2 overflow-hidden rounded-sm border border-[var(--df-border)] text-[0.625rem] text-[var(--df-text-muted)]"
+      title={`${label} +${hiddenCount}`}
+    >
+      <button
+        type="button"
+        className="flex min-h-0 items-center justify-center border-b border-[var(--df-border)] leading-none transition-colors hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] hover:text-[var(--df-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--df-primary)]"
+        aria-label={`${label} previous cards`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onPreviousPage();
+        }}
+        onMouseDown={stopDrag}
+      >
+        <MdKeyboardArrowUp className="text-[0.75rem]" />
+      </button>
+      <button
+        type="button"
+        className="flex min-h-0 items-center justify-center leading-none transition-colors hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] hover:text-[var(--df-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--df-primary)]"
+        aria-label={`${label} next cards`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onNextPage();
+        }}
+        onMouseDown={stopDrag}
+      >
+        <MdKeyboardArrowDown className="text-[0.6875rem]" />
+      </button>
+    </span>
+  );
+}
+
+function HeaderHardwareSeparator() {
+  return (
+    <span
+      aria-hidden="true"
+      className="mx-1.5 inline-flex h-[1.625rem] shrink-0 items-center text-[0.6875rem] leading-none text-[var(--df-text-dimmed)] opacity-80"
+    >
+      |
+    </span>
+  );
+}
+
+function HeaderHardwareCardCell({
+  card,
+  compact,
+}: {
+  card: HeaderHardwareCard;
+  compact: boolean;
+}) {
+  return (
+    <span className="grid shrink-0 grid-rows-2 gap-y-0.5">
+      <HeaderHardwareCardRow card={card} compact={compact} row="utilization" />
+      <HeaderHardwareCardRow card={card} compact={compact} row="memory" />
+    </span>
+  );
+}
+
+function HeaderHardwareCardRow({
+  card,
+  compact,
+  row,
+}: {
+  card: HeaderHardwareCard;
+  compact: boolean;
+  row: "utilization" | "memory";
+}) {
+  const value = row === "utilization" ? card.utilizationPercent : card.memoryPercent;
+  const text = row === "utilization" ? formatOptionalPct(card.utilizationPercent) : card.memoryText;
+
+  return (
+    <span
+      className={`grid shrink-0 items-center gap-x-1 text-[0.625rem] ${
+        compact ? "w-[2.95rem] grid-cols-[1rem_1.75rem]" : "w-[7.45rem] grid-cols-[1rem_2.75rem_1fr]"
+      }`}
+    >
+      <span className="text-right text-[var(--df-text-muted)]">
+        {row === "utilization" ? card.indexLabel : ""}
+      </span>
+      <HeaderMiniProgress value={value} />
+      {!compact && <span className="truncate text-[var(--df-text-muted)]">{text}</span>}
+    </span>
+  );
+}
+
+function HeaderMiniProgress({ value }: { value: number | null }) {
+  const safeValue = value == null ? 0 : clampPercent(value);
+  const color = getPressureColor(value) ?? "var(--df-primary)";
+
+  return (
+    <span
+      className="block h-1 overflow-hidden rounded-full"
+      style={{ backgroundColor: "color-mix(in_srgb,var(--df-text-dimmed)_24%,transparent)" }}
+    >
+      <span
+        className="block h-full rounded-full transition-all duration-700"
+        style={{
+          width: `${safeValue}%`,
+          backgroundColor: color,
+          opacity: value == null ? 0.35 : 0.9,
+        }}
+      />
+    </span>
+  );
+}
+
 interface HeaderProps {
   onNewSession: () => void;
   onToggleLeft?: () => void;
@@ -248,6 +557,8 @@ interface HeaderProps {
   savedConnections?: SavedConnection[];
   remoteStatsEnabled?: boolean;
   remoteStats?: RemoteStatsState;
+  gpuOverviewState?: RemoteGpuOverviewState;
+  npuOverviewState?: RemoteNpuOverviewState;
   onSmartSplit?: (mode: "auto" | "horizontal" | "vertical") => void;
   onUnsplit?: () => void;
   canUnsplit?: boolean;
@@ -257,9 +568,12 @@ interface HeaderProps {
   onOpenCommandPalette?: () => void;
   onClearTerminal?: () => void;
   onRefitTerminals?: () => void;
+  locked?: boolean;
+  onRequestQuit?: () => void;
 }
 
 interface MenuItem {
+  id?: string;
   label: string;
   action?: () => void;
   separator?: boolean;
@@ -268,6 +582,116 @@ interface MenuItem {
   disabled?: boolean;
   icon?: string;
   shortcut?: string;
+  accelerator?: string | null;
+}
+
+type MacosPredefinedRole =
+  | "undo"
+  | "redo"
+  | "cut"
+  | "copy"
+  | "paste"
+  | "selectAll"
+  | "services"
+  | "hide"
+  | "hideOthers"
+  | "showAll";
+
+type MacosMenuSpecItem =
+  | {
+      kind: "item";
+      id: string;
+      label: string;
+      enabled: boolean;
+      accelerator?: string | null;
+    }
+  | {
+      kind: "check";
+      id: string;
+      label: string;
+      enabled: boolean;
+      checked: boolean;
+      accelerator?: string | null;
+    }
+  | {
+      kind: "submenu";
+      id: string;
+      label: string;
+      enabled: boolean;
+      items: MacosMenuSpecItem[];
+    }
+  | { kind: "separator" }
+  | { kind: "predefined"; role: MacosPredefinedRole; label?: string };
+
+interface MacosMenuSpec {
+  menus: {
+    id: string;
+    label: string;
+    items: MacosMenuSpecItem[];
+  }[];
+}
+
+interface MacosMenuActionPayload {
+  actionId: string;
+  targetWindowLabel?: string | null;
+}
+
+const MACOS_ALLOWED_LOCKED_ACTIONS = new Set(["app.about", "app.quit"]);
+
+function getMacosAccelerator(shortcutId: string, keybindings: Record<string, string>) {
+  const keys = resolveShortcutKeys(shortcutId, keybindings);
+  const combo =
+    keys
+      .split(",")
+      .map((part) => part.trim())
+      .find((part) => part.toLowerCase().includes("meta")) ??
+    keys
+      .split(",")
+      .map((part) => part.trim())
+      .find(Boolean);
+
+  if (!combo) return null;
+
+  const pieces = combo
+    .split("+")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+  const key = pieces.find((part) => !["meta", "cmd", "command", "ctrl", "control", "shift", "alt", "option"].includes(part));
+  if (!key || key.includes("-")) return null;
+
+  const modifiers: string[] = [];
+  if (pieces.some((part) => part === "meta" || part === "cmd" || part === "command")) {
+    modifiers.push("Cmd");
+  } else if (pieces.some((part) => part === "ctrl" || part === "control")) {
+    modifiers.push("Ctrl");
+  }
+  if (pieces.includes("shift")) modifiers.push("Shift");
+  if (pieces.some((part) => part === "alt" || part === "option")) modifiers.push("Alt");
+
+  const normalizedKey =
+    key === "comma"
+      ? ","
+      : key === "period"
+        ? "."
+        : key === "space"
+          ? "Space"
+          : key.length === 1
+            ? key.toUpperCase()
+            : key;
+
+  return [...modifiers, normalizedKey].join("+");
+}
+
+function addNativeAccelerator(
+  item: Omit<MenuItem, "shortcut" | "accelerator">,
+  shortcutId: string,
+  keybindings: Record<string, string>,
+): MenuItem {
+  return {
+    ...item,
+    shortcut: resolveDisplayKeys(shortcutId, keybindings),
+    accelerator: getMacosAccelerator(shortcutId, keybindings),
+  };
 }
 
 /** Top bar with File/Edit/View/Terminal/Help menus, theme picker, and mobile toggles. */
@@ -284,6 +708,8 @@ export default function Header({
   savedConnections,
   remoteStatsEnabled = true,
   remoteStats,
+  gpuOverviewState,
+  npuOverviewState,
   onSmartSplit,
   onUnsplit,
   canUnsplit,
@@ -293,6 +719,8 @@ export default function Header({
   onOpenCommandPalette,
   onClearTerminal,
   onRefitTerminals,
+  locked = false,
+  onRequestQuit,
 }: HeaderProps) {
   const [appWindow] = useState(() => getCurrentWindow());
   const { themeName, setTheme, themeNames, terminalThemeName, setTerminalTheme } = useTheme();
@@ -302,8 +730,14 @@ export default function Header({
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showHeaderStatusHideConfirm, setShowHeaderStatusHideConfirm] = useState(false);
   const [currentMinute, setCurrentMinute] = useState(() => new Date());
+  const [hardwareCardLimit, setHardwareCardLimit] = useState(() =>
+    typeof window === "undefined" ? 2 : getHardwareCardLimit(window.innerWidth),
+  );
+  const [hardwarePage, setHardwarePage] = useState({ gpu: 0, npu: 0 });
   const { t, i18n } = useTranslation();
   const { handleExport, passwordAlert } = useConfigTransfer();
+  const lastMacosMenuSpecRef = useRef("");
+  const nativeMenuActionRef = useRef<(actionId: string) => void>(() => {});
 
   const activePane = activeTab ? getActivePane(activeTab) : null;
   const activeConnection = activePane?.connectionId
@@ -367,6 +801,19 @@ export default function Header({
     };
   }, [headerStatusMode, headerStatusVisible]);
 
+  useEffect(() => {
+    if (!headerStatusVisible || (headerStatusMode !== "gpu" && headerStatusMode !== "npu")) {
+      return;
+    }
+
+    const updateHardwareCardLimit = () => {
+      setHardwareCardLimit(getHardwareCardLimit(window.innerWidth));
+    };
+    updateHardwareCardLimit();
+    window.addEventListener("resize", updateHardwareCardLimit);
+    return () => window.removeEventListener("resize", updateHardwareCardLimit);
+  }, [headerStatusMode, headerStatusVisible]);
+
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
     updateUi({ language: lng });
@@ -415,26 +862,34 @@ export default function Header({
     { key: "help", label: t("menu.help") },
   ];
 
-  const dk = (id: string) => resolveDisplayKeys(id, appSettings.keybindings);
-
   const toggleUi = <K extends keyof typeof appSettings.ui>(key: K, value: boolean) => {
     updateUi({ [key]: value });
   };
 
   const monitorMenuItems: MenuItem[] = [
     {
+      id: "view.panels.notes",
+      label: t("settings.showNotesPanel"),
+      icon: "sticky_note",
+      checked: appSettings.ui.show_notes_panel ?? true,
+      action: () => toggleUi("show_notes_panel", !(appSettings.ui.show_notes_panel ?? true)),
+    },
+    {
+      id: "view.panels.remoteStats",
       label: t("settings.showRemoteStats"),
       icon: "monitor_heart",
       checked: appSettings.ui.show_remote_stats ?? true,
       action: () => toggleUi("show_remote_stats", !(appSettings.ui.show_remote_stats ?? true)),
     },
     {
+      id: "view.panels.gpuMonitor",
       label: t("settings.showGpuMonitor"),
       icon: "nvidia",
       checked: appSettings.ui.show_gpu_monitor ?? false,
       action: () => toggleUi("show_gpu_monitor", !(appSettings.ui.show_gpu_monitor ?? false)),
     },
     {
+      id: "view.panels.ascendNpuMonitor",
       label: t("settings.showAscendNpuMonitor"),
       icon: "ascend",
       checked: appSettings.ui.show_ascend_npu_monitor ?? false,
@@ -442,6 +897,7 @@ export default function Header({
         toggleUi("show_ascend_npu_monitor", !(appSettings.ui.show_ascend_npu_monitor ?? false)),
     },
     {
+      id: "view.panels.processManager",
       label: t("settings.showProcessManager"),
       icon: "list_alt",
       checked: appSettings.ui.show_process_manager ?? false,
@@ -449,6 +905,7 @@ export default function Header({
         toggleUi("show_process_manager", !(appSettings.ui.show_process_manager ?? false)),
     },
     {
+      id: "view.panels.dockerManager",
       label: t("settings.showDockerManager"),
       icon: "docker",
       checked: appSettings.ui.show_docker_manager ?? false,
@@ -458,19 +915,21 @@ export default function Header({
 
   const menus: Record<string, MenuItem[]> = {
     file: [
-      {
+      addNativeAccelerator({
+        id: "file.newSession",
         label: t("menu.newSession"),
         action: onNewSession,
         icon: "add",
-        shortcut: dk("tab.newSession"),
-      },
+      }, "tab.newSession", appSettings.keybindings),
       { label: "separator", separator: true },
       {
+        id: "file.importConfig",
         label: t("settings.importConfig"),
         action: () => setShowImportDialog(true),
         icon: "file_import",
       },
       {
+        id: "file.exportConfig",
         label: t("settings.exportConfig"),
         action: handleExport,
         icon: "file_export",
@@ -478,24 +937,29 @@ export default function Header({
     ],
     view: [
       {
+        id: "view.theme",
         label: t("menu.theme"),
         icon: "palette",
         submenu: themeNames.map((th) => ({
+          id: `view.theme.${th.id}`,
           label: th.name,
           checked: themeName === th.id,
           action: () => setTheme(th.id),
         })),
       },
       {
+        id: "view.terminalTheme",
         label: t("menu.terminalTheme"),
         icon: "terminal",
         submenu: [
           {
+            id: "view.terminalTheme.followUi",
             label: t("settings.followUiTheme"),
             checked: terminalThemeName === null,
             action: () => setTerminalTheme(null),
           },
           ...themeNames.map((th) => ({
+            id: `view.terminalTheme.${th.id}`,
             label: th.name,
             checked: terminalThemeName === th.id,
             action: () => setTerminalTheme(th.id),
@@ -503,9 +967,11 @@ export default function Header({
         ],
       },
       {
+        id: "view.language",
         label: t("menu.language"),
         icon: "translate",
         submenu: AVAILABLE_LANGUAGES.map((l) => ({
+          id: `view.language.${l.id}`,
           label: l.name,
           checked: i18n.language === l.id,
           action: () => changeLanguage(l.id),
@@ -513,15 +979,18 @@ export default function Header({
       },
       { label: "separator", separator: true },
       {
+        id: "view.headerStatus",
         label: t("menu.headerStatus"),
         icon: "info",
         submenu: [
           {
+            id: "view.headerStatus.hidden",
             label: t("headerStatus.hidden"),
             checked: !headerStatusVisible,
             action: () => setShowHeaderStatusHideConfirm(true),
           },
           ...HEADER_STATUS_MODES.map((mode) => ({
+            id: `view.headerStatus.${mode}`,
             label: t(`headerStatus.${mode}`),
             checked: headerStatusVisible && headerStatusMode === mode,
             action: () =>
@@ -533,10 +1002,12 @@ export default function Header({
         ],
       },
       {
+        id: "view.panels",
         label: t("menu.panels"),
         icon: "view_sidebar",
         submenu: [
           {
+            id: "view.panels.multiOpen",
             label: t("settings.panelMultiOpen"),
             icon: "view_sidebar",
             checked: appSettings.appearance.panel_multi_open,
@@ -548,41 +1019,43 @@ export default function Header({
         ],
       },
       { label: "separator", separator: true },
-      {
+      addNativeAccelerator({
+        id: "view.zoomIn",
         label: t("menu.zoomIn"),
         action: () => handleZoom(0.1),
         icon: "zoom_in",
-        shortcut: dk("view.zoomIn"),
         disabled: !terminalZoomEnabled,
-      },
-      {
+      }, "view.zoomIn", appSettings.keybindings),
+      addNativeAccelerator({
+        id: "view.zoomOut",
         label: t("menu.zoomOut"),
         action: () => handleZoom(-0.1),
         icon: "zoom_out",
-        shortcut: dk("view.zoomOut"),
         disabled: !terminalZoomEnabled,
-      },
-      {
+      }, "view.zoomOut", appSettings.keybindings),
+      addNativeAccelerator({
+        id: "view.resetZoom",
         label: t("menu.resetZoom"),
         action: handleResetZoom,
         icon: "restart_alt",
-        shortcut: dk("view.resetZoom"),
         disabled: !terminalZoomEnabled,
-      },
+      }, "view.resetZoom", appSettings.keybindings),
     ],
     terminal: [
-      {
+      addNativeAccelerator({
+        id: "terminal.commandPalette",
         label: t("menu.commandPalette"),
         icon: "search",
         action: () => onOpenCommandPalette?.(),
-        shortcut: dk("tab.quickSwitch"),
-      },
+      }, "tab.quickSwitch", appSettings.keybindings),
       { label: "separator", separator: true },
       {
+        id: "terminal.display",
         label: t("menu.terminalDisplay"),
         icon: "visibility",
         submenu: [
           {
+            id: "terminal.display.workspacePadding",
             label: t("settings.showWorkspacePadding"),
             checked: appSettings.terminal.show_workspace_padding ?? false,
             action: () =>
@@ -594,6 +1067,7 @@ export default function Header({
               }),
           },
           {
+            id: "terminal.display.lineNumbers",
             label: t("settings.showLineNumbers"),
             checked: appSettings.terminal.show_line_numbers,
             action: () =>
@@ -605,6 +1079,7 @@ export default function Header({
               }),
           },
           {
+            id: "terminal.display.timestamps",
             label: t("settings.showTimestamps"),
             checked: appSettings.terminal.show_timestamps,
             action: () =>
@@ -618,6 +1093,7 @@ export default function Header({
         ],
       },
       {
+        id: "terminal.actionLinks",
         label: t("settings.actionLinks"),
         checked: appSettings.terminal.action_links_enabled ?? false,
         action: () =>
@@ -629,6 +1105,7 @@ export default function Header({
           }),
       },
       {
+        id: "terminal.zoomEnabled",
         label: t("settings.terminalZoomEnabled"),
         checked: terminalZoomEnabled,
         action: () =>
@@ -641,20 +1118,24 @@ export default function Header({
       },
       { label: "separator", separator: true },
       {
+        id: "terminal.smartSplit",
         label: t("menu.smartSplit"),
         icon: "splitscreen",
         submenu: [
           {
+            id: "terminal.smartSplit.auto",
             label: t("menu.autoTile"),
             icon: "dashboard",
             action: () => onSmartSplit?.("auto"),
           },
           {
+            id: "terminal.smartSplit.horizontal",
             label: t("menu.tileHorizontally"),
             icon: "swap_horiz",
             action: () => onSmartSplit?.("horizontal"),
           },
           {
+            id: "terminal.smartSplit.vertical",
             label: t("menu.tileVertically"),
             icon: "swap_vert",
             action: () => onSmartSplit?.("vertical"),
@@ -662,6 +1143,7 @@ export default function Header({
         ],
       },
       {
+        id: "terminal.unsplit",
         label: t("menu.unsplit"),
         icon: "merge",
         action: () => onUnsplit?.(),
@@ -669,32 +1151,35 @@ export default function Header({
       },
       { label: "separator", separator: true },
       {
+        id: "terminal.syncInput",
         label: t("menu.syncInput"),
         icon: "sync",
         submenu: [
-          {
+          addNativeAccelerator({
+            id: "terminal.syncInput.manageGroups",
             label: t("menu.manageGroups"),
             icon: "settings",
             action: () => onManageSyncGroups?.(),
-            shortcut: dk("terminal.manageSyncGroups"),
-          },
+          }, "terminal.manageSyncGroups", appSettings.keybindings),
         ],
       },
       { label: "separator", separator: true },
       {
+        id: "terminal.broadcastToAll",
         label: t("menu.broadcastToAll"),
         icon: "cell_tower",
         action: () => onBroadcastToAll?.(),
         checked: broadcastToAll,
       },
       { label: "separator", separator: true },
-      {
+      addNativeAccelerator({
+        id: "terminal.clear",
         label: t("menu.clearTerminal"),
         icon: "delete_sweep",
         action: () => onClearTerminal?.(),
-        shortcut: dk("terminal.clear"),
-      },
+      }, "terminal.clear", appSettings.keybindings),
       {
+        id: "terminal.refit",
         label: t("menu.refitTerminals"),
         icon: "fit_screen",
         action: () => onRefitTerminals?.(),
@@ -702,16 +1187,19 @@ export default function Header({
     ],
     help: [
       {
+        id: "help.documentation",
         label: t("menu.documentation"),
         icon: "menu_book",
         action: () => openUrl(`${packageJson.docspage}`),
       },
       {
+        id: "help.checkUpdates",
         label: t("menu.checkForUpdates"),
         icon: hasUpdate ? "upgrade" : "update",
         action: onCheckForUpdates,
       },
       {
+        id: "help.viewLogs",
         label: t("menu.viewLogs"),
         icon: "article",
         action: async () => {
@@ -728,9 +1216,186 @@ export default function Header({
         },
       },
       { label: "separator", separator: true },
-      { label: t("menu.about"), action: onAbout, icon: "info" },
+      { id: "app.about", label: t("menu.about"), action: onAbout, icon: "info" },
     ],
   };
+
+  const isActionEnabledForNativeMenu = (item: MenuItem) =>
+    !item.disabled && (!locked || !item.id || MACOS_ALLOWED_LOCKED_ACTIONS.has(item.id));
+
+  const convertMenuItemsForMacos = (items: MenuItem[]): MacosMenuSpecItem[] =>
+    items.flatMap((item): MacosMenuSpecItem[] => {
+      if (item.separator) return [{ kind: "separator" }];
+      if (!item.id) return [];
+      if (item.submenu) {
+        return [
+          {
+            kind: "submenu",
+            id: item.id,
+            label: item.label,
+            enabled: !item.disabled,
+            items: convertMenuItemsForMacos(item.submenu),
+          },
+        ];
+      }
+      const enabled = isActionEnabledForNativeMenu(item);
+      if (typeof item.checked === "boolean") {
+        return [
+          {
+            kind: "check",
+            id: item.id,
+            label: item.label,
+            enabled,
+            checked: item.checked,
+            accelerator: item.accelerator,
+          },
+        ];
+      }
+      return [
+        {
+          kind: "item",
+          id: item.id,
+          label: item.label,
+          enabled,
+          accelerator: item.accelerator,
+        },
+      ];
+    });
+
+  const macosMenuSpec: MacosMenuSpec = {
+    menus: [
+      {
+        id: "app",
+        label: "NyaTerm",
+        items: [
+          {
+            kind: "item",
+            id: "app.about",
+            label: t("menu.about"),
+            enabled: true,
+            accelerator: null,
+          },
+          { kind: "separator" },
+          { kind: "predefined", role: "services" },
+          { kind: "separator" },
+          { kind: "predefined", role: "hide" },
+          { kind: "predefined", role: "hideOthers" },
+          { kind: "predefined", role: "showAll" },
+          { kind: "separator" },
+          {
+            kind: "item",
+            id: "app.quit",
+            label: t("menu.exit"),
+            enabled: true,
+            accelerator: "Cmd+Q",
+          },
+        ],
+      },
+      {
+        id: "file",
+        label: t("menu.file"),
+        items: convertMenuItemsForMacos(menus.file),
+      },
+      {
+        id: "edit",
+        label: t("menu.edit"),
+        items: [
+          { kind: "predefined", role: "undo", label: t("menu.undo") },
+          { kind: "predefined", role: "redo", label: t("menu.redo") },
+          { kind: "separator" },
+          { kind: "predefined", role: "cut", label: t("menu.cut") },
+          { kind: "predefined", role: "copy", label: t("menu.copy") },
+          { kind: "predefined", role: "paste", label: t("menu.paste") },
+          { kind: "predefined", role: "selectAll", label: t("menu.selectAll") },
+        ],
+      },
+      {
+        id: "view",
+        label: t("menu.view"),
+        items: convertMenuItemsForMacos(menus.view),
+      },
+      {
+        id: "terminal",
+        label: t("menu.terminal"),
+        items: convertMenuItemsForMacos(menus.terminal),
+      },
+      {
+        id: "help",
+        label: t("menu.help"),
+        items: convertMenuItemsForMacos(menus.help.filter((item) => item.id !== "app.about")),
+      },
+    ],
+  };
+
+  const runNativeMenuAction = (actionId: string) => {
+    if (locked && !MACOS_ALLOWED_LOCKED_ACTIONS.has(actionId)) return;
+    if (actionId === "app.quit") {
+      onRequestQuit?.();
+      return;
+    }
+
+    const visit = (items: MenuItem[]): MenuItem | null => {
+      for (const item of items) {
+        if (item.id === actionId) return item;
+        if (item.submenu) {
+          const found = visit(item.submenu);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    for (const menu of Object.values(menus)) {
+      const item = visit(menu);
+      if (item && isActionEnabledForNativeMenu(item)) {
+        item.action?.();
+        return;
+      }
+    }
+  };
+  nativeMenuActionRef.current = runNativeMenuAction;
+
+  useEffect(() => {
+    if (!isMacOS) return;
+
+    const specKey = JSON.stringify(macosMenuSpec);
+    if (lastMacosMenuSpecRef.current === specKey) return;
+    lastMacosMenuSpecRef.current = specKey;
+
+    invoke("set_macos_app_menu", { spec: macosMenuSpec }).catch((error) => {
+      logger.error({
+        domain: "ui.error",
+        event: "macos_menu.set_failed",
+        message: "Failed to update macOS app menu",
+        error,
+      });
+    });
+  });
+
+  useEffect(() => {
+    if (!isMacOS) return;
+
+    let disposed = false;
+    let dispose: (() => void) | undefined;
+
+    listen<MacosMenuActionPayload>("macos-menu-action", ({ payload }) => {
+      if (payload.targetWindowLabel && payload.targetWindowLabel !== appWindow.label) return;
+      nativeMenuActionRef.current(payload.actionId);
+    })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+        } else {
+          dispose = unlisten;
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      dispose?.();
+    };
+  }, [appWindow.label]);
 
   const renderMenuItem = (item: MenuItem, idx: number) => {
     if (item.separator) {
@@ -925,6 +1590,122 @@ export default function Header({
       };
     }
 
+    if (headerStatusMode === "gpu") {
+      const overview = gpuOverviewState?.overview;
+      const fallback = !hasActiveStatsSession
+        ? t("gpuMonitor.noSession")
+        : gpuOverviewState?.error && !overview
+          ? t("gpuMonitor.error")
+          : !overview
+            ? t("common.loading")
+            : !overview.available
+              ? t("gpuMonitor.unavailable")
+              : overview.gpus.length === 0
+                ? t("gpuMonitor.noGpus")
+                : null;
+
+      if (fallback || !overview || !overview.available || overview.gpus.length === 0) {
+        return {
+          icon: <SiNvidia />,
+          text: fallback ?? t("common.loading"),
+          title: fallback ?? t("common.loading"),
+        };
+      }
+
+      const cards = sortHardwareCardsByIndex(buildGpuHardwareCards(overview));
+      const pageCount = Math.max(1, Math.ceil(cards.length / hardwareCardLimit));
+      const currentPage = Math.min(hardwarePage.gpu, pageCount - 1);
+      const visibleCards = cards.slice(
+        currentPage * hardwareCardLimit,
+        currentPage * hardwareCardLimit + hardwareCardLimit,
+      );
+      const hiddenCount = cards.length - visibleCards.length;
+      const compact = getHardwareStatusCompact(visibleCards.length, hiddenCount, hardwareCardLimit);
+      const title = buildHardwareTitle("GPU", cards, "GPU");
+
+      return {
+        icon: null,
+        interactive: true,
+        text: (
+          <HeaderHardwareStatus
+            cards={visibleCards}
+            compact={compact}
+            hiddenCount={hiddenCount}
+            icon={<SiNvidia />}
+            label="GPU"
+            onNextPage={() =>
+              setHardwarePage((current) => ({ ...current, gpu: (currentPage + 1) % pageCount }))
+            }
+            onPreviousPage={() =>
+              setHardwarePage((current) => ({
+                ...current,
+                gpu: (currentPage - 1 + pageCount) % pageCount,
+              }))
+            }
+          />
+        ),
+        title,
+      };
+    }
+
+    if (headerStatusMode === "npu") {
+      const overview = npuOverviewState?.overview;
+      const fallback = !hasActiveStatsSession
+        ? t("ascendNpuMonitor.noSession")
+        : npuOverviewState?.error && !overview
+          ? t("ascendNpuMonitor.error")
+          : !overview
+            ? t("common.loading")
+            : !overview.available
+              ? t("ascendNpuMonitor.unavailable")
+              : overview.npus.length === 0
+                ? t("ascendNpuMonitor.noNpus")
+                : null;
+
+      if (fallback || !overview || !overview.available || overview.npus.length === 0) {
+        return {
+          icon: <AscendIcon />,
+          text: fallback ?? t("common.loading"),
+          title: fallback ?? t("common.loading"),
+        };
+      }
+
+      const cards = sortHardwareCardsByIndex(buildNpuHardwareCards(overview));
+      const pageCount = Math.max(1, Math.ceil(cards.length / hardwareCardLimit));
+      const currentPage = Math.min(hardwarePage.npu, pageCount - 1);
+      const visibleCards = cards.slice(
+        currentPage * hardwareCardLimit,
+        currentPage * hardwareCardLimit + hardwareCardLimit,
+      );
+      const hiddenCount = cards.length - visibleCards.length;
+      const compact = getHardwareStatusCompact(visibleCards.length, hiddenCount, hardwareCardLimit);
+      const title = buildHardwareTitle("NPU", cards, "AI Core");
+
+      return {
+        icon: null,
+        interactive: true,
+        text: (
+          <HeaderHardwareStatus
+            cards={visibleCards}
+            compact={compact}
+            hiddenCount={hiddenCount}
+            icon={<AscendIcon />}
+            label="NPU"
+            onNextPage={() =>
+              setHardwarePage((current) => ({ ...current, npu: (currentPage + 1) % pageCount }))
+            }
+            onPreviousPage={() =>
+              setHardwarePage((current) => ({
+                ...current,
+                npu: (currentPage - 1 + pageCount) % pageCount,
+              }))
+            }
+          />
+        ),
+        title,
+      };
+    }
+
     const stats = remoteStats?.stats;
     if (remoteStatusFallback || !stats) {
       return {
@@ -997,8 +1778,16 @@ export default function Header({
     };
   }, [
     currentMinute,
+    gpuOverviewState?.error,
+    gpuOverviewState?.overview,
+    hardwarePage.gpu,
+    hardwarePage.npu,
+    hardwareCardLimit,
     headerStatusMode,
+    hasActiveStatsSession,
     i18n.language,
+    npuOverviewState?.error,
+    npuOverviewState?.overview,
     remoteStats?.stats,
     remoteStatusFallback,
     sessionStatus,
@@ -1010,7 +1799,7 @@ export default function Header({
       className="h-10 border-b flex items-center gap-2 px-2 select-none shrink-0"
       style={{ backgroundColor: "var(--df-bg-panel)", borderColor: "var(--df-border)" }}
     >
-      <div className={`flex items-center gap-2 shrink-0${isMacOS ? " pl-[70px]" : ""}`}>
+      <div className={`flex items-center gap-2 shrink-0${isMacOS ? " pl-[84px]" : ""}`}>
         {!isMacOS && (
           <NyaTermLogo className="h-5 w-5 shrink-0" onDoubleClick={handleToggleMaximizeWindow} />
         )}
@@ -1027,27 +1816,29 @@ export default function Header({
           </Button>
         )}
 
-        <Menubar className="border-none bg-transparent h-auto p-0 gap-1 shadow-none">
-          {menuKeys.map(({ key, label }) => (
-            <MenubarMenu key={key}>
-              <MenubarTrigger
-                className="relative cursor-default px-2.5 py-1 text-xs font-medium rounded-md transition-colors text-[var(--df-text-muted)] data-[state=open]:text-[var(--df-primary)] data-[state=open]:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:text-[var(--df-text-muted)] data-[state=open]:focus:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] data-[state=open]:focus:text-[var(--df-primary)] outline-none"
-                {...(key === "help" && showUpdateDot ? { onClick: onHelpMenuOpen } : {})}
-              >
-                {label}
-                {key === "help" && showUpdateDot && (
-                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                  </span>
-                )}
-              </MenubarTrigger>
-              <MenubarContent align="start" className="min-w-[180px]">
-                {menus[key].map((item, idx) => renderMenuItem(item, idx))}
-              </MenubarContent>
-            </MenubarMenu>
-          ))}
-        </Menubar>
+        {!isMacOS && (
+          <Menubar className="border-none bg-transparent h-auto p-0 gap-1 shadow-none">
+            {menuKeys.map(({ key, label }) => (
+              <MenubarMenu key={key}>
+                <MenubarTrigger
+                  className="relative cursor-default px-2.5 py-1 text-xs font-medium rounded-md transition-colors text-[var(--df-text-muted)] data-[state=open]:text-[var(--df-primary)] data-[state=open]:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:text-[var(--df-text-muted)] data-[state=open]:focus:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] data-[state=open]:focus:text-[var(--df-primary)] outline-none"
+                  {...(key === "help" && showUpdateDot ? { onClick: onHelpMenuOpen } : {})}
+                >
+                  {label}
+                  {key === "help" && showUpdateDot && (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                    </span>
+                  )}
+                </MenubarTrigger>
+                <MenubarContent align="start" className="min-w-[180px]">
+                  {menus[key].map((item, idx) => renderMenuItem(item, idx))}
+                </MenubarContent>
+              </MenubarMenu>
+            ))}
+          </Menubar>
+        )}
       </div>
 
       <div className="flex-1 min-w-0 h-full flex items-center justify-center gap-2 px-2">
@@ -1067,7 +1858,9 @@ export default function Header({
                 {headerStatus.icon}
               </span>
               <span
-                className="pointer-events-none flex min-w-0 items-center overflow-hidden whitespace-nowrap"
+                className={`flex min-w-0 items-center overflow-hidden whitespace-nowrap ${
+                  headerStatus.interactive ? "" : "pointer-events-none"
+                }`}
                 data-tauri-drag-region
               >
                 {headerStatus.text}

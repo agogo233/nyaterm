@@ -4,9 +4,9 @@ import type {
   RestorablePaneNode,
   RestorableTab,
   SessionPane,
-  SessionType,
   SplitPane,
   Tab,
+  WorkspaceSessionType,
 } from "@/types/global";
 
 let workspaceIdCounter = 0;
@@ -24,23 +24,58 @@ export function isSessionPane(node: PaneNode): node is SessionPane {
   return node.kind === "leaf";
 }
 
+export function isTerminalPane(
+  node: PaneNode,
+): node is Extract<SessionPane, { paneKind: "terminal" }> {
+  return isSessionPane(node) && node.paneKind === "terminal";
+}
+
+export function isRemoteDesktopPane(
+  node: PaneNode,
+): node is Extract<SessionPane, { paneKind: "remote-desktop" }> {
+  return isSessionPane(node) && node.paneKind === "remote-desktop";
+}
+
+export function isRdpPane(node: PaneNode): node is Extract<SessionPane, { type: "RDP" }> {
+  return isRemoteDesktopPane(node) && node.type === "RDP";
+}
+
+function isRemoteDesktopSessionType(type: WorkspaceSessionType): type is "RDP" | "VNC" {
+  return type === "RDP" || type === "VNC";
+}
+
+const DEFAULT_REMOTE_DESKTOP_DISPLAY = {
+  remoteWidth: 1920,
+  remoteHeight: 1080,
+  scaleMode: "fit",
+} as const;
+
 export function createSessionPane(
   name: string,
-  type: SessionType,
+  type: WorkspaceSessionType,
   connectionId?: string,
   overrides?: Partial<SessionPane>,
 ): SessionPane {
+  const remoteDesktop = isRemoteDesktopSessionType(type);
+  const paneKind = remoteDesktop ? "remote-desktop" : "terminal";
   return {
     id: overrides?.id ?? createWorkspaceId("pane"),
     kind: "leaf",
+    paneKind,
     sessionId: overrides?.sessionId ?? createWorkspaceId("session"),
     name,
     type,
     connectionId,
+    display: remoteDesktop
+      ? ((overrides && "display" in overrides ? overrides.display : undefined) ?? {
+          ...DEFAULT_REMOTE_DESKTOP_DISPLAY,
+        })
+      : undefined,
     connecting: overrides?.connecting,
     createRequestId: overrides?.createRequestId,
     connectError: overrides?.connectError,
-  };
+    temporaryConfig: overrides?.temporaryConfig,
+  } as SessionPane;
 }
 
 export function createWorkspaceTab(
@@ -117,9 +152,27 @@ export function updateSessionPane(
     >
   >,
 ): PaneNode {
-  return updatePaneTree(root, paneId, (current) =>
-    isSessionPane(current) ? { ...current, ...updates } : current,
-  );
+  return updatePaneTree(root, paneId, (current) => {
+    if (!isSessionPane(current)) return current;
+    const type = updates.type ?? current.type;
+    const remoteDesktop = isRemoteDesktopSessionType(type);
+    const display = remoteDesktop
+      ? (("display" in current ? current.display : undefined) ?? {
+          ...DEFAULT_REMOTE_DESKTOP_DISPLAY,
+        })
+      : undefined;
+    const next = {
+      ...current,
+      ...updates,
+      type,
+      paneKind: remoteDesktop ? "remote-desktop" : "terminal",
+    };
+    if (remoteDesktop) {
+      return { ...next, display } as SessionPane;
+    }
+    const { display: _display, ...terminalPane } = next as typeof next & { display?: unknown };
+    return terminalPane as SessionPane;
+  });
 }
 
 export function splitSessionPane(
@@ -224,9 +277,11 @@ function serializePane(node: PaneNode): RestorablePaneNode {
     return {
       id: node.id,
       kind: "leaf",
+      pane_kind: node.paneKind,
       title: node.name,
       session_type: node.type,
       connection_id: node.connectionId,
+      display: isRemoteDesktopPane(node) ? node.display : undefined,
     };
   }
 
@@ -267,7 +322,7 @@ function createLegacyPaneNode(tab: RestorableTab): RestorablePaneNode | null {
   };
 }
 
-export function normalizeSessionType(value: string): SessionType | null {
+export function normalizeSessionType(value: string): WorkspaceSessionType | null {
   switch (value) {
     case "SSH":
       return "SSH";
@@ -278,6 +333,12 @@ export function normalizeSessionType(value: string): SessionType | null {
       return "Telnet";
     case "Serial":
       return "Serial";
+    case "RDP":
+    case "rdp":
+      return "RDP";
+    case "VNC":
+    case "vnc":
+      return "VNC";
     default:
       return null;
   }
@@ -287,16 +348,30 @@ function restorePane(node: RestorablePaneNode): PaneNode | null {
   if (node.kind === "leaf") {
     const type = normalizeSessionType(node.session_type);
     if (!type) return null;
+    const remoteDesktop = isRemoteDesktopSessionType(type);
+    const persistedPaneKind = node.pane_kind;
+    const paneKind =
+      persistedPaneKind === "rdp"
+        ? "remote-desktop"
+        : (persistedPaneKind ?? (remoteDesktop ? "remote-desktop" : "terminal"));
+    if ((paneKind === "remote-desktop") !== remoteDesktop) return null;
     return {
       id: node.id || createWorkspaceId("pane"),
       kind: "leaf",
+      paneKind,
       sessionId: createWorkspaceId("pending"),
       name: node.title,
       type,
       connectionId: node.connection_id,
+      display: remoteDesktop
+        ? {
+            ...DEFAULT_REMOTE_DESKTOP_DISPLAY,
+            ...node.display,
+          }
+        : undefined,
       connecting: true,
       createRequestId: crypto.randomUUID(),
-    };
+    } as SessionPane;
   }
 
   const first = restorePane(node.first);

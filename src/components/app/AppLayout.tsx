@@ -1,5 +1,11 @@
 import type { TFunction } from "i18next";
-import { type ComponentProps, type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type ComponentProps,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { MdClose, MdTerminal } from "react-icons/md";
 import PanelStack from "@/components/app/PanelStack";
 import AboutDialog from "@/components/dialog/app/AboutDialog";
@@ -10,8 +16,12 @@ import type { HostKeyVerifyRequest } from "@/components/dialog/connections/HostK
 import { HostKeyVerifyDialog } from "@/components/dialog/connections/HostKeyVerifyDialog";
 import type { OtpRequest } from "@/components/dialog/connections/OtpDialog";
 import { OtpDialog } from "@/components/dialog/connections/OtpDialog";
+import type { RdpCertificateVerifyRequest } from "@/components/dialog/connections/RdpCertificateVerifyDialog";
+import { RdpCertificateVerifyDialog } from "@/components/dialog/connections/RdpCertificateVerifyDialog";
 import type { SshAuthRequest } from "@/components/dialog/connections/SshAuthDialog";
 import { SshAuthDialog } from "@/components/dialog/connections/SshAuthDialog";
+import type { SshAgentAuthRequest } from "@/components/dialog/connections/SshAgentAuthDialog";
+import { SshAgentAuthDialog } from "@/components/dialog/connections/SshAgentAuthDialog";
 import DockerSudoPasswordDialog, {
   type DockerSudoPasswordRequest,
 } from "@/components/dialog/docker/DockerSudoPasswordDialog";
@@ -20,11 +30,9 @@ import SyncGroupDialog from "@/components/dialog/terminal/SyncGroupDialog";
 import ActivityBar from "@/components/layout/ActivityBar";
 import Header from "@/components/layout/Header";
 import ResizeHandle from "@/components/layout/ResizeHandle";
-import NyaTermLogo from "@/components/NyaTermLogo";
 import QuickCommands from "@/components/panel/QuickCommands";
 import SerialSendPanel from "@/components/panel/SendCommandPanel";
 import TabWindowsWorkspace from "@/components/terminal/TabWindowsWorkspace";
-import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { useTheme } from "@/context/ThemeContext";
 import {
   buildBackgroundImageLayerStyle,
@@ -36,7 +44,14 @@ import { isMacOS } from "@/lib/platform";
 import type { SendCommandPanelDraft } from "@/lib/sendCommandPanelEvents";
 import type { UpdateInfo } from "@/lib/updater";
 import { bounceTopModalWindow } from "@/lib/windowManager";
-import type { AppearanceSettings, SessionType, SyncGroup, UiConfig } from "@/types/global";
+import type {
+  AppearanceSettings,
+  SavedConnection,
+  SessionType,
+  SyncGroup,
+  UiConfig,
+} from "@/types/global";
+import StartWorkspace from "./start-workspace/StartWorkspace";
 
 type HeaderProps = ComponentProps<typeof Header>;
 type ActivityBarProps = ComponentProps<typeof ActivityBar>;
@@ -84,6 +99,8 @@ interface AppLayoutProps {
     onOpenChat: () => void;
     onShowCommands: () => void;
     onSwitchTerminal: () => void;
+    onConnectConnection: (connection: SavedConnection) => Promise<void> | void;
+    onEditConnection: (connection: SavedConnection) => void;
   };
   bottomPanel: {
     activePanel: "quickCmdBar" | "serialSend" | null;
@@ -93,7 +110,12 @@ interface AppLayoutProps {
     activeNonSerialSessionId: string | null;
     activeNonSerialSessionIds: string[];
     syncGroups: SyncGroup[];
-    sessionTargets: { id: string; name: string; tabName: string; type: SessionType }[];
+    sessionTargets: {
+      id: string;
+      name: string;
+      tabName: string;
+      type: SessionType;
+    }[];
     sendCommandDraft: SendCommandPanelDraft | null;
     onSendCommandDraftConsumed: () => void;
     onQuickCmdResize: (delta: number) => void;
@@ -116,10 +138,14 @@ interface AppLayoutProps {
     onOtpDone: (requestId: string) => void;
     sshAuthRequest: SshAuthRequest | null;
     onSshAuthDone: (requestId: string) => void;
+    sshAgentAuthRequest: SshAgentAuthRequest | null;
+    onSshAgentAuthDone: (requestId: string) => void;
     dockerSudoPasswordRequest: DockerSudoPasswordRequest | null;
     onDockerSudoPasswordDone: (requestId: string) => void;
     hostKeyVerifyRequest: HostKeyVerifyRequest | null;
-    onHostKeyVerifyDone: () => void;
+    onHostKeyVerifyDone: (requestId: string) => void;
+    rdpCertificateVerifyRequest: RdpCertificateVerifyRequest | null;
+    onRdpCertificateVerifyDone: (requestId: string) => void;
     modalChildWindowCount: number;
     locked: boolean;
     hasMasterPassword: boolean;
@@ -154,6 +180,7 @@ export default function AppLayout({
   const { theme } = useTheme();
   const backgroundImagePath = appearance.background_image_path?.trim() ?? "";
   const [backgroundDataUrl, setBackgroundDataUrl] = useState("");
+  const [serialSendRunning, setSerialSendRunning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,30 +209,40 @@ export default function AppLayout({
     [appearance, backgroundEnabled],
   );
   const backgroundLayerStyle = useMemo(
-    () => buildBackgroundImageLayerStyle(effectiveAppearance, backgroundDataUrl),
+    () =>
+      buildBackgroundImageLayerStyle(effectiveAppearance, backgroundDataUrl),
     [effectiveAppearance, backgroundDataUrl],
   );
-  const windowTransparencyEnabled = isWindowTransparencyEnabled(effectiveAppearance);
+  const windowTransparencyEnabled =
+    isWindowTransparencyEnabled(effectiveAppearance);
   const shellStyle = useMemo(
     () => ({
       ...buildSurfaceCssVariables(theme.colors, effectiveAppearance),
       // When native window transparency is on, the shell background must be
       // transparent so the native backdrop is visible through the webview.
-      backgroundColor: windowTransparencyEnabled ? "transparent" : theme.colors.bg,
+      backgroundColor: windowTransparencyEnabled
+        ? "transparent"
+        : theme.colors.bg,
       color: "var(--df-text)",
     }),
     [effectiveAppearance, theme.colors, windowTransparencyEnabled],
   );
   const hasLeftActivityItems =
-    leftActivityBar.items.length > 0 || (leftActivityBar.bottomItems?.length ?? 0) > 0;
+    leftActivityBar.items.length > 0 ||
+    (leftActivityBar.bottomItems?.length ?? 0) > 0;
   const hasRightActivityItems =
-    rightActivityBar.items.length > 0 || (rightActivityBar.bottomItems?.length ?? 0) > 0;
+    rightActivityBar.items.length > 0 ||
+    (rightActivityBar.bottomItems?.length ?? 0) > 0;
   const leftPanelOpen =
-    hasLeftActivityItems && (leftPanelIds.length > 0 || Boolean(leftOverlayPanelId));
+    hasLeftActivityItems &&
+    (leftPanelIds.length > 0 || Boolean(leftOverlayPanelId));
   const rightPanelOpen =
-    hasRightActivityItems && (rightPanelIds.length > 0 || Boolean(rightOverlayPanelId));
+    hasRightActivityItems &&
+    (rightPanelIds.length > 0 || Boolean(rightOverlayPanelId));
   const leftMobileOpen = hasLeftActivityItems && mobile.leftOpen;
   const rightMobileOpen = hasRightActivityItems && mobile.rightOpen;
+  const serialSendVisible = bottomPanel.activePanel === "serialSend";
+  const serialSendMounted = serialSendVisible || serialSendRunning;
 
   useEffect(() => {
     const roots = [document.documentElement, document.body];
@@ -246,7 +283,8 @@ export default function AppLayout({
       data-wallpaper-enabled={backgroundEnabled ? "true" : "false"}
       data-window-transparency={windowTransparencyEnabled ? "true" : "false"}
       data-window-transparency-blur={
-        windowTransparencyEnabled && effectiveAppearance.window_transparency_blur
+        windowTransparencyEnabled &&
+        effectiveAppearance.window_transparency_blur
           ? "true"
           : "false"
       }
@@ -292,7 +330,10 @@ export default function AppLayout({
           {leftPanelOpen && (
             <>
               <div
-                style={{ width: uiConfig.left_width, backgroundColor: "var(--df-bg-panel)" }}
+                style={{
+                  width: uiConfig.left_width,
+                  backgroundColor: "var(--df-bg-panel)",
+                }}
                 className={
                   isMacOS
                     ? "relative flex flex-col"
@@ -328,7 +369,13 @@ export default function AppLayout({
                     sizes={panelStackSizes}
                     renderPanel={panelContent}
                     onResizePair={(aboveId, belowId, delta, containerHeight) =>
-                      onPanelStackResize("left", aboveId, belowId, delta, containerHeight)
+                      onPanelStackResize(
+                        "left",
+                        aboveId,
+                        belowId,
+                        delta,
+                        containerHeight,
+                      )
                     }
                   />
                 </div>
@@ -344,12 +391,14 @@ export default function AppLayout({
           <section
             className="flex-1 flex flex-col relative min-w-0 origin-top-left"
             style={{
-              backgroundColor: backgroundEnabled ? "transparent" : "var(--df-bg-terminal)",
+              backgroundColor: backgroundEnabled
+                ? "transparent"
+                : "var(--df-bg-terminal)",
             }}
           >
             <div className="flex-1 relative overflow-hidden">
               {tabsCount === 0 ? (
-                <EmptyWorkspaceState
+                <StartWorkspace
                   t={t}
                   backgroundEnabled={backgroundEnabled}
                   temporarySshShortcut={emptyWorkspace.temporarySshShortcut}
@@ -360,6 +409,8 @@ export default function AppLayout({
                   onOpenChat={emptyWorkspace.onOpenChat}
                   onShowCommands={emptyWorkspace.onShowCommands}
                   onSwitchTerminal={emptyWorkspace.onSwitchTerminal}
+                  onConnectConnection={emptyWorkspace.onConnectConnection}
+                  onEditConnection={emptyWorkspace.onEditConnection}
                 />
               ) : workspace.layout ? (
                 <TabWindowsWorkspace {...workspace} />
@@ -375,7 +426,10 @@ export default function AppLayout({
 
             {bottomPanel.activePanel === "quickCmdBar" && (
               <>
-                <ResizeHandle direction="vertical" onResize={bottomPanel.onQuickCmdResize} />
+                <ResizeHandle
+                  direction="vertical"
+                  onResize={bottomPanel.onQuickCmdResize}
+                />
                 <div
                   style={{
                     height: bottomPanel.quickCmdHeight,
@@ -391,15 +445,25 @@ export default function AppLayout({
               </>
             )}
 
-            {bottomPanel.activePanel === "serialSend" && (
+            {serialSendVisible && (
+              <ResizeHandle
+                direction="vertical"
+                onResize={bottomPanel.onSerialSendResize}
+              />
+            )}
+
+            {serialSendMounted && (
               <>
-                <ResizeHandle direction="vertical" onResize={bottomPanel.onSerialSendResize} />
                 <div
                   style={{
-                    height: bottomPanel.serialSendHeight,
-                    backgroundColor: "var(--df-bg-panel)",
+                    ...(serialSendVisible
+                      ? {
+                          height: bottomPanel.serialSendHeight,
+                          backgroundColor: "var(--df-bg-panel)",
+                        }
+                      : {}),
                   }}
-                  className="shrink-0 overflow-hidden"
+                  className={serialSendVisible ? "shrink-0 overflow-hidden" : "hidden"}
                 >
                   <SerialSendPanel
                     serialSessionId={bottomPanel.activeSerialSessionId}
@@ -409,6 +473,7 @@ export default function AppLayout({
                     sessionTargets={bottomPanel.sessionTargets}
                     draft={bottomPanel.sendCommandDraft}
                     onDraftConsumed={bottomPanel.onSendCommandDraftConsumed}
+                    onSendingChange={setSerialSendRunning}
                   />
                 </div>
               </>
@@ -466,7 +531,13 @@ export default function AppLayout({
                     sizes={panelStackSizes}
                     renderPanel={panelContent}
                     onResizePair={(aboveId, belowId, delta, containerHeight) =>
-                      onPanelStackResize("right", aboveId, belowId, delta, containerHeight)
+                      onPanelStackResize(
+                        "right",
+                        aboveId,
+                        belowId,
+                        delta,
+                        containerHeight,
+                      )
                     }
                   />
                 </div>
@@ -483,7 +554,10 @@ export default function AppLayout({
           )}
         </main>
 
-        <AboutDialog open={dialogs.aboutOpen} onClose={() => dialogs.onAboutOpenChange(false)} />
+        <AboutDialog
+          open={dialogs.aboutOpen}
+          onClose={() => dialogs.onAboutOpenChange(false)}
+        />
 
         <SyncGroupDialog
           open={dialogs.syncGroupOpen}
@@ -503,7 +577,14 @@ export default function AppLayout({
         />
 
         <OtpDialog request={dialogs.otpRequest} onDone={dialogs.onOtpDone} />
-        <SshAuthDialog request={dialogs.sshAuthRequest} onDone={dialogs.onSshAuthDone} />
+        <SshAuthDialog
+          request={dialogs.sshAuthRequest}
+          onDone={dialogs.onSshAuthDone}
+        />
+        <SshAgentAuthDialog
+          request={dialogs.sshAgentAuthRequest}
+          onDone={dialogs.onSshAgentAuthDone}
+        />
         <DockerSudoPasswordDialog
           request={dialogs.dockerSudoPasswordRequest}
           onDone={dialogs.onDockerSudoPasswordDone}
@@ -511,6 +592,10 @@ export default function AppLayout({
         <HostKeyVerifyDialog
           request={dialogs.hostKeyVerifyRequest}
           onDone={dialogs.onHostKeyVerifyDone}
+        />
+        <RdpCertificateVerifyDialog
+          request={dialogs.rdpCertificateVerifyRequest}
+          onDone={dialogs.onRdpCertificateVerifyDone}
         />
         <TransferDuplicateDialog />
 
@@ -537,114 +622,5 @@ export default function AppLayout({
         )}
       </div>
     </div>
-  );
-}
-
-function EmptyWorkspaceState({
-  t,
-  backgroundEnabled,
-  temporarySshShortcut,
-  openChatShortcut,
-  showCommandsShortcut,
-  switchTerminalShortcut,
-  onTemporarySshLink,
-  onOpenChat,
-  onShowCommands,
-  onSwitchTerminal,
-}: {
-  t: TFunction;
-  backgroundEnabled: boolean;
-  temporarySshShortcut: string;
-  openChatShortcut: string;
-  showCommandsShortcut: string;
-  switchTerminalShortcut: string;
-  onTemporarySshLink: () => void;
-  onOpenChat: () => void;
-  onShowCommands: () => void;
-  onSwitchTerminal: () => void;
-}) {
-  const emptyWorkspaceActions = [
-    {
-      label: t("temporarySsh.title"),
-      shortcut: temporarySshShortcut,
-      onClick: onTemporarySshLink,
-    },
-    {
-      label: t("app.openChat"),
-      shortcut: openChatShortcut,
-      onClick: onOpenChat,
-    },
-    {
-      label: t("app.showAllCommands"),
-      shortcut: showCommandsShortcut,
-      onClick: onShowCommands,
-    },
-    {
-      label: t("app.switchTerminal"),
-      shortcut: switchTerminalShortcut,
-      onClick: onSwitchTerminal,
-    },
-  ];
-
-  return (
-    <div
-      className="flex h-full items-center justify-center px-6"
-      style={{
-        backgroundColor: backgroundEnabled ? "var(--df-bg-terminal)" : undefined,
-      }}
-    >
-      <div className="flex w-full max-w-[34rem] flex-col items-center">
-        <NyaTermLogo
-          aria-hidden="true"
-          className="mb-9 h-64 w-64 opacity-[0.13] grayscale"
-          style={{
-            color: "var(--df-text-dimmed)",
-            ["--grad-from" as string]: "currentColor",
-            ["--grad-to" as string]: "currentColor",
-          }}
-        />
-
-        <div className="grid w-fit max-w-[30rem] grid-cols-[max-content_auto] gap-x-4 gap-y-3 text-sm">
-          {emptyWorkspaceActions.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              className="contents text-left"
-              onClick={item.onClick}
-            >
-              <span
-                className="justify-self-start transition-colors hover:text-[var(--df-primary)]"
-                style={{ color: "var(--df-primary)" }}
-              >
-                {item.label}
-              </span>
-              <ShortcutKeys value={item.shortcut} />
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ShortcutKeys({ value }: { value: string }) {
-  const keys = value
-    .split("+")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  if (!keys.length) return null;
-
-  return (
-    <KbdGroup className="justify-self-end text-[0.8125rem]" aria-hidden="true">
-      {keys.map((key, index) => (
-        <span key={key} className="inline-flex items-center gap-1">
-          {index > 0 ? <span style={{ color: "var(--df-text-dimmed)" }}>+</span> : null}
-          <Kbd className="h-6 min-w-7 border border-[var(--df-border)] bg-[var(--df-bg-hover)] px-1.5 text-[0.8125rem] text-[var(--df-text)] shadow-sm">
-            {key}
-          </Kbd>
-        </span>
-      ))}
-    </KbdGroup>
   );
 }

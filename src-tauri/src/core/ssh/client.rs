@@ -1,4 +1,9 @@
-use crate::config::{SftpSettings, SshAlgorithmMode, SshAlgorithmPreferences};
+use super::agent::connect_agent_stream;
+use super::agent_broker::{AgentBrokerFactory, try_acquire_agent_channel_permit};
+use crate::config::{
+    SftpSettings, SshAgentEndpoint, SshAgentForwardingConfig, SshAlgorithmMode,
+    SshAlgorithmPreferences, SshProfile, SshTerminalType,
+};
 use crate::error::{AppError, AppResult};
 use russh::client;
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PublicKeyBase64};
@@ -7,9 +12,10 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::fmt;
 use std::process::Stdio;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
@@ -33,6 +39,10 @@ pub struct SshConfig {
     #[serde(default)]
     pub x11_display: String,
     #[serde(default)]
+    pub auth_agent_endpoint: Option<SshAgentEndpoint>,
+    #[serde(default)]
+    pub agent_forwarding_config: SshAgentForwardingConfig,
+    #[serde(default)]
     pub proxy: Option<crate::config::ProxySettings>,
     #[serde(default)]
     pub proxy_jump: Option<Box<SshConfig>>,
@@ -40,6 +50,10 @@ pub struct SshConfig {
     pub post_login: Option<SshPostLoginConfig>,
     #[serde(default)]
     pub ssh_algorithms: Option<SshAlgorithmPreferences>,
+    #[serde(default)]
+    pub ssh_profile: SshProfile,
+    #[serde(default)]
+    pub terminal_type: SshTerminalType,
     #[serde(default)]
     pub sftp: SftpSettings,
     /// Character encoding for terminal I/O (e.g. "UTF-8", "GBK").
@@ -96,7 +110,7 @@ pub struct SshStartupCommand {
     pub delay_ms: u64,
 }
 
-/// Authentication method: none, password, or key (with optional passphrase).
+/// Authentication method: none, password, private key, or SSH Agent.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum SshAuth {
@@ -104,6 +118,8 @@ pub enum SshAuth {
     None,
     #[serde(rename = "password")]
     Password { password: Option<String> },
+    #[serde(rename = "agent")]
+    Agent,
     #[serde(rename = "key")]
     Key {
         #[serde(default)]
@@ -228,6 +244,68 @@ struct HostKeyVerifyPayload {
     target_window_label: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SshDiagnosticStage {
+    Authenticating,
+    Authenticated,
+    OpeningInteractiveChannel,
+    RequestingPty,
+    RequestingShell,
+    DetectingShell,
+    PreparingIntegration,
+    IoRunning,
+}
+
+impl fmt::Display for SshDiagnosticStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Authenticating => f.write_str("Authenticating"),
+            Self::Authenticated => f.write_str("Authenticated"),
+            Self::OpeningInteractiveChannel => f.write_str("OpeningInteractiveChannel"),
+            Self::RequestingPty => f.write_str("RequestingPty"),
+            Self::RequestingShell => f.write_str("RequestingShell"),
+            Self::DetectingShell => f.write_str("DetectingShell"),
+            Self::PreparingIntegration => f.write_str("PreparingIntegration"),
+            Self::IoRunning => f.write_str("IoRunning"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SshDiagnosticContext {
+    state: Arc<StdMutex<SshDiagnosticState>>,
+}
+
+#[derive(Debug)]
+struct SshDiagnosticState {
+    session_id: Option<String>,
+    stage: SshDiagnosticStage,
+}
+
+impl SshDiagnosticContext {
+    pub fn new(session_id: Option<String>) -> Self {
+        Self {
+            state: Arc::new(StdMutex::new(SshDiagnosticState {
+                session_id,
+                stage: SshDiagnosticStage::Authenticating,
+            })),
+        }
+    }
+
+    pub fn set_stage(&self, stage: SshDiagnosticStage) {
+        if let Ok(mut state) = self.state.lock() {
+            state.stage = stage;
+        }
+    }
+
+    pub fn snapshot(&self) -> (Option<String>, SshDiagnosticStage) {
+        self.state
+            .lock()
+            .map(|state| (state.session_id.clone(), state.stage))
+            .unwrap_or((None, SshDiagnosticStage::Authenticating))
+    }
+}
+
 /// russh client handler; performs TOFU known_hosts verification.
 pub struct SshHandler {
     app: AppHandle,
@@ -237,6 +315,9 @@ pub struct SshHandler {
     x11_tx: Option<mpsc::UnboundedSender<super::x11_forwarding::X11ChannelOpen>>,
     disconnect_tx: Option<mpsc::UnboundedSender<String>>,
     remote_forward_tx: Option<mpsc::UnboundedSender<RemoteForwardOpen>>,
+    agent_forwarding_endpoint: Option<SshAgentEndpoint>,
+    agent_broker: Option<Arc<AgentBrokerFactory>>,
+    diagnostics: Option<SshDiagnosticContext>,
 }
 
 impl SshHandler {
@@ -254,6 +335,9 @@ impl SshHandler {
             x11_tx: None,
             disconnect_tx: None,
             remote_forward_tx: None,
+            agent_forwarding_endpoint: None,
+            agent_broker: None,
+            diagnostics: None,
         }
     }
 
@@ -275,6 +359,23 @@ impl SshHandler {
         remote_forward_tx: mpsc::UnboundedSender<RemoteForwardOpen>,
     ) -> Self {
         self.remote_forward_tx = Some(remote_forward_tx);
+        self
+    }
+
+    /// Attaches the Agent forwarding broker for the final target session.
+    pub fn with_agent_broker(mut self, broker: Arc<AgentBrokerFactory>) -> Self {
+        self.agent_broker = Some(broker);
+        self
+    }
+
+    /// Preserves raw protocol relay for external-Agent-only forwarding with the all policy.
+    pub fn with_agent_forwarding_endpoint(mut self, endpoint: SshAgentEndpoint) -> Self {
+        self.agent_forwarding_endpoint = Some(endpoint);
+        self
+    }
+
+    pub fn with_diagnostics(mut self, diagnostics: SshDiagnosticContext) -> Self {
+        self.diagnostics = Some(diagnostics);
         self
     }
 
@@ -740,6 +841,10 @@ impl client::Handler for SshHandler {
                             false
                         }
                     };
+                let _ = self.app.emit(
+                    "host-key-verify-resolved",
+                    serde_json::json!({ "requestId": request_id }),
+                );
 
                 if accepted {
                     tracing::info!(
@@ -798,9 +903,16 @@ impl client::Handler for SshHandler {
                 if let Some(tx) = &self.disconnect_tx {
                     let _ = tx.send(format!("SSH server disconnected: {}", info.message));
                 }
+                let (session_id, stage) = self
+                    .diagnostics
+                    .as_ref()
+                    .map(SshDiagnosticContext::snapshot)
+                    .unwrap_or((None, SshDiagnosticStage::Authenticating));
                 tracing::warn!(
                     host = %self.host,
                     port = self.port,
+                    session_id = session_id.as_deref().unwrap_or(""),
+                    stage = %stage,
                     reason_code = ?info.reason_code,
                     message = %info.message,
                     lang_tag = %info.lang_tag,
@@ -812,9 +924,16 @@ impl client::Handler for SshHandler {
                 if let Some(tx) = &self.disconnect_tx {
                     let _ = tx.send(format!("SSH connection error: {error}"));
                 }
+                let (session_id, stage) = self
+                    .diagnostics
+                    .as_ref()
+                    .map(SshDiagnosticContext::snapshot)
+                    .unwrap_or((None, SshDiagnosticStage::Authenticating));
                 tracing::error!(
                     host = %self.host,
                     port = self.port,
+                    session_id = session_id.as_deref().unwrap_or(""),
+                    stage = %stage,
                     error = ?error,
                     "SSH transport disconnected with error"
                 );
@@ -885,6 +1004,53 @@ impl client::Handler for SshHandler {
                 .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
                 .await;
         }
+        Ok(())
+    }
+
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        channel: russh::Channel<client::Msg>,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        if let Some(broker) = self.agent_broker.clone() {
+            // Run the broker outside the SSH event loop and apply policy after merging identities.
+            broker.spawn(channel, reply);
+            return Ok(());
+        }
+
+        let Some(endpoint) = self.agent_forwarding_endpoint.clone() else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+
+        // Keep the raw Agent protocol for external-Agent-only all mode to preserve unknown
+        // extensions. This relay intentionally has no broker idle timeout: its lifetime follows
+        // the SSH channel, while the global channel permit still bounds resource consumption.
+        let Some(permit) = try_acquire_agent_channel_permit() else {
+            reply
+                .reject(russh::ChannelOpenFailure::ResourceShortage)
+                .await;
+            let _ = channel.close().await;
+            return Ok(());
+        };
+        tokio::spawn(async move {
+            let _permit = permit;
+            let Ok(mut agent_stream) = connect_agent_stream(&endpoint).await else {
+                reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+                let _ = channel.close().await;
+                return;
+            };
+            reply.accept().await;
+            let mut channel_stream = channel.into_stream();
+            if let Err(error) =
+                tokio::io::copy_bidirectional(&mut agent_stream, &mut channel_stream).await
+            {
+                tracing::debug!(%error, "SSH Agent raw forwarding channel closed");
+            }
+        });
         Ok(())
     }
 }

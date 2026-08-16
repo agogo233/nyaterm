@@ -14,13 +14,17 @@ pub mod monitoring;
 mod output;
 pub mod portable_snapshot;
 mod quick_commands;
+pub mod rdp;
+pub(crate) mod rdp_keyboard_capture;
 mod recording;
+pub mod remote_desktop;
 pub mod remote_exec;
 mod session;
 pub mod sftp;
 pub mod ssh;
 pub(crate) mod terminal_session;
 pub mod translate;
+pub mod vnc;
 pub mod watcher;
 pub mod zmodem;
 
@@ -29,16 +33,21 @@ pub(crate) use output::{SessionOutputCoalescer, TerminalOutputPayload};
 pub use quick_commands::{
     QuickCommandsImportResult, QuickCommandsImportSource, QuickCommandsStore,
 };
+pub use rdp::RdpSessionManager;
 pub use recording::{
-    RecordingManager, TerminalHistorySearchRequest, TerminalHistorySearchResponse,
+    ExistingFileBehavior, InputOrigin, InputSensitivity, RecordingContext, RecordingManager,
+    RecordingMode, RecordingProfile, RecordingStatus, RotationPolicy, TerminalHistorySearchRequest,
+    TerminalHistorySearchResponse,
 };
-pub(crate) use session::update_cwd_if_changed;
 pub use session::{
-    SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
+    SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionReadyHook, SessionType,
+    SharedCwd,
 };
+pub(crate) use session::{now_session_started_at, update_cwd_if_changed};
 pub use terminal_session::local::{LocalSessionConfig, create_local_session};
 pub use terminal_session::serial::{SerialConfig, create_serial_session, list_serial_ports};
 pub use terminal_session::telnet::{
     TelnetAutoLoginConfig, TelnetEnterMode, TelnetSessionConfig, TelnetStartupCommand,
     create_telnet_session,
 };
+pub use vnc::VncSessionManager;

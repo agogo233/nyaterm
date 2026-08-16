@@ -35,12 +35,18 @@ pub struct QuickCommand {
     pub created_at: Option<u64>,
     #[serde(default)]
     pub use_count: Option<u32>,
+    #[serde(default)]
+    pub sort_order: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuickCommandCategory {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub sort_order: i32,
 }
 
 /// List of quick commands persisted in local app storage.

@@ -1,4 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   type ComponentType,
@@ -57,6 +56,9 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppContext, useApp } from "@/context/AppContext";
 import { SettingsDraftContext } from "@/context/SettingsDraftContext";
+import { useChildWindowCommand } from "@/hooks/useChildWindowCommand";
+import { useSettingsDraftState } from "@/hooks/useSettingsDraftState";
+import { CHILD_WINDOW_COMMANDS } from "@/lib/childWindowProtocol";
 import { type CloudSyncValidationCode, getCloudSyncValidationErrors } from "@/lib/cloudSync";
 import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
@@ -69,6 +71,21 @@ type SettingsTabConfig = {
   icon: string;
   Component?: ComponentType;
 };
+
+const SETTINGS_GROUP_DEFAULT_TABS: Record<string, string> = {
+  ai: "ai-general",
+  ai_group: "ai-general",
+  security_group: "security",
+  syncBackup_group: "syncBackup",
+  terminal: "terminal-general",
+  terminal_session: "terminal-general",
+  transfer_group: "transfer",
+  workspace: "general",
+};
+
+function normalizeSettingsTab(tab: string) {
+  return SETTINGS_GROUP_DEFAULT_TABS[tab] ?? tab;
+}
 
 function getCloudSyncValidationMessage(
   code: CloudSyncValidationCode,
@@ -100,9 +117,10 @@ export default function SettingsPage() {
   const params = new URLSearchParams(window.location.search);
   const requestedInitialTab = params.get("tab") || "general";
   const ownerWindowLabel = params.get("owner") || "main";
-  const initialTab = requestedInitialTab === "ai" ? "ai-general" : requestedInitialTab;
+  const initialTab = normalizeSettingsTab(requestedInitialTab);
   const [activeTab, setActiveTab] = useState(initialTab);
-  const [draftSettings, setDraftSettings] = useState<AppSettings>(committedSettings);
+  const { draftSettings, isDirty, updateDraftSettings, acceptSavedSettings, discardDraftSettings } =
+    useSettingsDraftState<AppSettings>(committedSettings);
   const [isSaving, setIsSaving] = useState(false);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
 
@@ -116,19 +134,13 @@ export default function SettingsPage() {
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    const unlisten = listen<{ tab: string; targetWindowLabel?: string | null }>(
-      "settings-open-tab",
-      ({ payload }) => {
-        if (payload.targetWindowLabel && payload.targetWindowLabel !== ownerWindowLabel) return;
-        setActiveTab(payload.tab === "ai" ? "ai-general" : payload.tab);
-      },
-    );
-
-    return () => {
-      unlisten.then((dispose) => dispose());
-    };
-  }, [ownerWindowLabel]);
+  useChildWindowCommand<{ tab: string; targetWindowLabel?: string | null }>(
+    CHILD_WINDOW_COMMANDS.settingsOpenTab,
+    (payload) => {
+      if (payload.targetWindowLabel && payload.targetWindowLabel !== ownerWindowLabel) return;
+      setActiveTab(normalizeSettingsTab(payload.tab));
+    },
+  );
 
   type SettingsCategory = {
     id: string;
@@ -187,26 +199,6 @@ export default function SettingsPage() {
   const toggleGroup = useCallback((groupId: string) => {
     setExpandedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
   }, []);
-
-  const committedSerialized = useMemo(() => JSON.stringify(committedSettings), [committedSettings]);
-  const draftSerialized = useMemo(() => JSON.stringify(draftSettings), [draftSettings]);
-  const isDirty = committedSerialized !== draftSerialized;
-
-  useEffect(() => {
-    if (!isDirty) {
-      setDraftSettings(committedSettings);
-    }
-  }, [committedSettings, isDirty]);
-
-  const updateDraftSettings = useCallback(
-    (updates: Partial<AppSettings> | ((prev: AppSettings) => Partial<AppSettings>)) => {
-      setDraftSettings((prev) => {
-        const nextUpdates = typeof updates === "function" ? updates(prev) : updates;
-        return { ...prev, ...nextUpdates };
-      });
-    },
-    [],
-  );
 
   const updateDraftUi = useCallback(
     (updates: Partial<UiConfig> | ((prev: UiConfig) => Partial<UiConfig>)) => {
@@ -382,7 +374,7 @@ export default function SettingsPage() {
         });
         const nextSettings = await invoke<AppSettings>("get_app_settings");
         app.replaceAppSettings(nextSettings);
-        setDraftSettings(nextSettings);
+        acceptSavedSettings(nextSettings);
 
         if (closeAfterSave) {
           setIsSaving(false);
@@ -397,13 +389,13 @@ export default function SettingsPage() {
         setIsSaving(false);
       }
     },
-    [app, closeSettingsWindow, draftSettings, getDraftSaveBlockState, t],
+    [acceptSavedSettings, app, closeSettingsWindow, draftSettings, getDraftSaveBlockState, t],
   );
 
   const handleCancel = useCallback(async () => {
-    setDraftSettings(committedSettings);
+    discardDraftSettings();
     await closeSettingsWindow();
-  }, [closeSettingsWindow, committedSettings]);
+  }, [closeSettingsWindow, discardDraftSettings]);
 
   const requestClose = useCallback(() => {
     if (isDirty) {
@@ -460,6 +452,7 @@ export default function SettingsPage() {
       <ChildWindowHeader
         title={t("settings.title")}
         icon={<MdSettings className="text-base" />}
+        macOSDragOnly
         onClose={requestClose}
       />
 

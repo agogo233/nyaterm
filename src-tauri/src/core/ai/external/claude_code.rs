@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::AppHandle;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{Mutex, oneshot};
 use tokio::time::timeout;
@@ -213,45 +213,17 @@ async fn run_claude_code_stream_inner(
         save_user_message(&app, &session_id, request)?;
     }
 
-    let prompt = build_prompt(request, &settings);
+    let invocation = build_claude_invocation(request, &settings, build_prompt(request, &settings));
     let mut child = Command::new(&executable);
     hide_window(&mut child);
-    child
-        .arg("-p")
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--include-partial-messages")
-        .arg("--permission-mode")
-        .arg(claude_permission_mode(&request.permission_mode))
-        .arg("--append-system-prompt")
-        .arg(claude_system_context(request))
-        .arg(prompt);
-
-    if let Some(model) = request
-        .model_name
-        .as_deref()
-        .or(settings.claude_code.default_model.as_deref())
-        .filter(|value| !value.trim().is_empty())
-    {
-        child.arg("--model").arg(model);
+    for arg in &invocation.args {
+        child.arg(arg);
     }
-    if let Some(session_id) = request
-        .existing_external_session_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        child.arg("--resume").arg(session_id);
-    }
-    if let Some(config_dir) = settings
-        .claude_code
-        .config_directory
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        child.env("CLAUDE_CONFIG_DIR", config_dir);
+    for (key, value) in &invocation.env {
+        child.env(key, value);
     }
 
-    child.stdin(Stdio::null());
+    child.stdin(Stdio::piped());
     child.stdout(Stdio::piped());
     child.stderr(Stdio::piped());
     child.kill_on_drop(true);
@@ -259,6 +231,19 @@ async fn run_claude_code_stream_inner(
     let mut child = child
         .spawn()
         .map_err(|error| AppError::Config(format!("Failed to start Claude Code: {error}")))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| AppError::Channel("Claude Code stdin unavailable".to_string()))?;
+    stdin
+        .write_all(invocation.prompt_stdin.as_bytes())
+        .await
+        .map_err(|error| {
+            AppError::Channel(format!("Failed to write Claude Code prompt: {error}"))
+        })?;
+    stdin.shutdown().await.map_err(|error| {
+        AppError::Channel(format!("Failed to close Claude Code stdin: {error}"))
+    })?;
     let stdout = child
         .stdout
         .take()
@@ -401,6 +386,64 @@ fn claude_system_context(request: &AiChatRequest) -> String {
     format!(
         "You are running inside NyaTerm. Use NyaTerm MCP tools for terminal sessions when available. Do not read SSH passwords, private keys, OAuth tokens, or internal app credentials. Do not create separate SSH connections to bypass NyaTerm SessionManager. Default terminal session: {default_target}."
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClaudeInvocation {
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    prompt_stdin: String,
+}
+
+fn build_claude_invocation(
+    request: &AiChatRequest,
+    settings: &AiSettings,
+    prompt_stdin: String,
+) -> ClaudeInvocation {
+    let mut args = vec![
+        "-p".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--include-partial-messages".to_string(),
+        "--permission-mode".to_string(),
+        claude_permission_mode(&request.permission_mode).to_string(),
+        "--append-system-prompt".to_string(),
+        claude_system_context(request),
+    ];
+
+    if let Some(model) = request
+        .model_name
+        .as_deref()
+        .or(settings.claude_code.default_model.as_deref())
+        .filter(|value| !value.trim().is_empty())
+    {
+        args.push("--model".to_string());
+        args.push(model.to_string());
+    }
+    if let Some(session_id) = request
+        .existing_external_session_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        args.push("--resume".to_string());
+        args.push(session_id.to_string());
+    }
+
+    let mut env = Vec::new();
+    if let Some(config_dir) = settings
+        .claude_code
+        .config_directory
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        env.push(("CLAUDE_CONFIG_DIR".to_string(), config_dir.to_string()));
+    }
+
+    ClaudeInvocation {
+        args,
+        env,
+        prompt_stdin,
+    }
 }
 
 fn extract_session_id(value: &Value) -> Option<String> {
@@ -691,6 +734,99 @@ fn sanitize_claude_log_line(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_request() -> AiChatRequest {
+        AiChatRequest {
+            stream_id: None,
+            session_id: None,
+            connection_id: None,
+            terminal_session_id: Some("term-1".to_string()),
+            owner_scope: Default::default(),
+            targets: vec![],
+            target_contexts: vec![],
+            mode: crate::config::AiMode::Agent,
+            agent_kind: AiAgentKind::ClaudeCode,
+            permission_mode: AiPermissionMode::Confirm,
+            model_id: None,
+            model_name: Some("claude-request-model".to_string()),
+            default_target_session_id: Some("term-1".to_string()),
+            existing_external_session_id: Some("claude-session-1".to_string()),
+            attachments: vec![],
+            action: crate::core::ai::types::AiAction::GenerateCommand,
+            user_input: "inspect".to_string(),
+            context: Default::default(),
+            options: Default::default(),
+        }
+    }
+
+    fn arg_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+        args.windows(2)
+            .find(|pair| pair[0] == name)
+            .map(|pair| pair[1].as_str())
+    }
+
+    #[test]
+    fn builds_claude_invocation_with_prompt_on_stdin_not_argv() {
+        let request = test_request();
+        let mut settings = AiSettings::default();
+        settings.claude_code.default_model = Some("claude-default-model".to_string());
+        settings.claude_code.config_directory = Some("C:\\Users\\test\\.claude".to_string());
+        let prompt = "你好\nline1\nline2\n\"quoted\"\n'quoted'\n&\n|\n<\n>\n%\n^\n(\n)".to_string();
+
+        let invocation = build_claude_invocation(&request, &settings, prompt.clone());
+
+        assert_eq!(invocation.prompt_stdin, prompt);
+        assert!(!invocation.args.iter().any(|arg| arg == &prompt));
+        for required in [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--append-system-prompt",
+        ] {
+            assert!(invocation.args.iter().any(|arg| arg == required));
+        }
+        assert!(
+            invocation
+                .args
+                .iter()
+                .any(|arg| arg.contains("Default terminal session: term-1"))
+        );
+        assert_eq!(
+            arg_value(&invocation.args, "--permission-mode"),
+            Some("manual")
+        );
+        assert_eq!(
+            arg_value(&invocation.args, "--model"),
+            Some("claude-request-model")
+        );
+        assert_eq!(
+            arg_value(&invocation.args, "--resume"),
+            Some("claude-session-1")
+        );
+        assert_eq!(
+            invocation.env,
+            vec![(
+                "CLAUDE_CONFIG_DIR".to_string(),
+                "C:\\Users\\test\\.claude".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn builds_claude_invocation_with_default_model_when_request_model_is_empty() {
+        let mut request = test_request();
+        request.model_name = Some("  ".to_string());
+        let mut settings = AiSettings::default();
+        settings.claude_code.default_model = Some("claude-default-model".to_string());
+
+        let invocation = build_claude_invocation(&request, &settings, "prompt".to_string());
+
+        assert_eq!(
+            arg_value(&invocation.args, "--model"),
+            Some("claude-default-model")
+        );
+    }
 
     #[test]
     fn extracts_delta_from_partial_message() {

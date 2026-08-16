@@ -12,6 +12,8 @@ import {
   MdSearch,
   MdSort,
   MdSortByAlpha,
+  MdUnfoldLess,
+  MdUnfoldMore,
 } from "react-icons/md";
 import { TiFlashOutline } from "react-icons/ti";
 import { toast } from "sonner";
@@ -92,6 +94,14 @@ function shouldUsePointerSavedConnectionsDrag() {
   return /Mac/.test(navigator.platform) && /AppleWebKit/.test(navigator.userAgent);
 }
 
+function areStringSetsEqual(left: Set<string>, right: Set<string>) {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
+}
+
 function HeaderActionButton({ tooltip, children, ...props }: HeaderActionButtonProps) {
   return (
     <Tooltip>
@@ -127,7 +137,6 @@ export default function SavedConnections({
   const searchExpandedBaseRef = useRef<Set<string> | null>(null);
   const searchAutoExpandedGroupIdsRef = useRef<Set<string>>(new Set());
   const previousKeywordRef = useRef("");
-  const restoredLastOpenedConnectionIdRef = useRef<string | null>(null);
   const lastSelectedConnectionIdRef = useRef<string | null>(null);
   const connectionElementRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const sortMode = (appSettings.ui.saved_connections_sort_mode || "default") as SortMode;
@@ -231,53 +240,13 @@ export default function SavedConnections({
   }, [savedConnections, savedGroups, keyword, sortMode]);
 
   useEffect(() => {
-    const connectionId = appSettings.ui.saved_connections_last_opened_connection_id;
-    if (!connectionId || restoredLastOpenedConnectionIdRef.current === connectionId) return;
-
-    const connection = savedConnections.find((item) => item.id === connectionId);
-    if (!connection) {
-      if (savedConnections.length > 0) {
-        restoredLastOpenedConnectionIdRef.current = connectionId;
-      }
-      return;
-    }
-
-    const initialGroupId = connection.group_id;
-    if (!initialGroupId) {
-      restoredLastOpenedConnectionIdRef.current = connectionId;
-      return;
-    }
-
-    if (savedGroups.length === 0) return;
-
-    const groupsById = new Map(savedGroups.map((group) => [group.id, group]));
-    const groupIdsToOpen: string[] = [];
-    const visitedGroupIds = new Set<string>();
-    let currentGroupId: string | undefined = initialGroupId;
-
-    while (currentGroupId && !visitedGroupIds.has(currentGroupId)) {
-      visitedGroupIds.add(currentGroupId);
-      const group = groupsById.get(currentGroupId);
-      if (!group) break;
-      groupIdsToOpen.push(group.id);
-      currentGroupId = group.parent_id;
-    }
-
-    restoredLastOpenedConnectionIdRef.current = connectionId;
-    if (groupIdsToOpen.length === 0) return;
-
+    const persistedExpandedGroups = new Set(
+      appSettings.ui.saved_connections_expanded_group_ids ?? [],
+    );
     setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      let changed = false;
-      groupIdsToOpen.forEach((groupId) => {
-        if (!next.has(groupId)) {
-          next.add(groupId);
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
+      return areStringSetsEqual(prev, persistedExpandedGroups) ? prev : persistedExpandedGroups;
     });
-  }, [appSettings.ui.saved_connections_last_opened_connection_id, savedConnections, savedGroups]);
+  }, [appSettings.ui.saved_connections_expanded_group_ids]);
 
   useEffect(() => {
     const previousKeyword = previousKeywordRef.current;
@@ -503,13 +472,34 @@ export default function SavedConnections({
   }, [savedConnections]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
+  const persistExpandedGroups = useCallback(
+    (next: Set<string>) => {
+      setExpandedGroups(next);
+      updateUi({ saved_connections_expanded_group_ids: Array.from(next) });
+    },
+    [updateUi],
+  );
+
   const toggleGroup = (groupId: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) next.delete(groupId);
-      else next.add(groupId);
-      return next;
-    });
+    const next = new Set(expandedGroups);
+    if (next.has(groupId)) next.delete(groupId);
+    else next.add(groupId);
+    persistExpandedGroups(next);
+  };
+
+  const allGroupIds = useMemo(() => new Set(savedGroups.map((group) => group.id)), [savedGroups]);
+
+  const allGroupsExpanded = useMemo(() => {
+    if (savedGroups.length === 0) return false;
+    return savedGroups.every((group) => expandedGroups.has(group.id));
+  }, [expandedGroups, savedGroups]);
+
+  const expandAllGroups = () => {
+    persistExpandedGroups(allGroupIds);
+  };
+
+  const collapseAllGroups = () => {
+    persistExpandedGroups(new Set());
   };
 
   const getConnectionRangeSelection = (
@@ -1488,7 +1478,25 @@ export default function SavedConnections({
                   <MdMoreVert className="text-[1.125rem]" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="text-xs w-40">
+              <DropdownMenuContent align="end" className="text-xs w-48">
+                {savedGroups.length > 0 && (
+                  <>
+                    <DropdownMenuItem
+                      onClick={allGroupsExpanded ? collapseAllGroups : expandAllGroups}
+                      className="cursor-pointer gap-2 py-1.5 focus:bg-[var(--df-bg-hover)]"
+                    >
+                      {allGroupsExpanded ? (
+                        <MdUnfoldLess className="text-sm text-[var(--df-text-muted)]" />
+                      ) : (
+                        <MdUnfoldMore className="text-sm text-[var(--df-text-muted)]" />
+                      )}
+                      {allGroupsExpanded
+                        ? t("savedConnections.collapseAllFolders")
+                        : t("savedConnections.expandAllFolders")}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 <DropdownMenuItem
                   onClick={handleExport}
                   className="cursor-pointer gap-2 py-1.5 focus:bg-[var(--df-bg-hover)]"

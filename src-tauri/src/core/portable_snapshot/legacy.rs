@@ -19,11 +19,12 @@ struct V2SnapshotHashInput<'a> {
 fn decode_v2_snapshot(
     read: &redb::ReadTransaction,
     meta: PortableSnapshotMeta,
-) -> AppResult<PortableSnapshot> {
+) -> AppResult<DecodedPortableSnapshot> {
     let json_docs = read_string_table(read, SNAPSHOT_V2_JSON_DOCS_TABLE)?;
     let text_docs = read_string_table(read, SNAPSHOT_V2_TEXT_DOCS_TABLE)?;
+    let source_payload_hash = meta.payload_hash.clone();
     let expected = calculate_v2_payload_hash(&json_docs, &text_docs)?;
-    if expected != meta.payload_hash {
+    if expected != source_payload_hash {
         return Err(AppError::Crypto(
             "Portable snapshot payload hash mismatch".to_string(),
         ));
@@ -80,9 +81,14 @@ fn decode_v2_snapshot(
         history,
         master_key_token: text_docs.get("master.key").cloned(),
         known_hosts: text_docs.get("known_hosts").cloned().unwrap_or_default(),
+        notes: config::NotesSnapshot::default(),
     };
     snapshot.payload_hash = calculate_payload_hash(&snapshot)?;
-    Ok(snapshot)
+    log_snapshot_hash_normalized(&snapshot, &source_payload_hash);
+    Ok(DecodedPortableSnapshot {
+        snapshot,
+        source_payload_hash,
+    })
 }
 
 fn parse_v2_json_doc<T>(docs: &BTreeMap<String, String>, key: &str) -> AppResult<T>

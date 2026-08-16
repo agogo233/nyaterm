@@ -4,6 +4,147 @@ All notable changes to this project will be documented in this file.
 
 This changelog is inferred from release bump commits in git history (for example `chore: bump version to vX.Y.Z`) and grouped by Conventional Commit type.
 
+## [1.2.3] - 2026-08-13
+
+### Added
+
+- **vnc:** Add VNC sessions with saved-connection support, workspace integration, authentication handling, clipboard support, input forwarding, and framebuffer rendering.
+- **remote-desktop:** Add shared remote desktop frame, viewport, renderer, and surface utilities used by VNC and RDP panes.
+- **terminal:** Add session recording and transcript management flows.
+- **asset-management:** Add connection time tracking, display formatting, asset sorting, and persisted sort state.
+- **cloud-sync:** Add a cloud snapshot decoding helper and integrate it into the main sync flow.
+
+### Changed
+
+- **rdp:** Enhance RDP behavior through shared remote desktop rendering and viewport handling.
+- **settings:** Normalize settings tab handling and update terminal context menu behavior.
+- **process-manager:** Optimize process display settings and remove unused process-management code.
+- **ui:** Remove unnecessary transparent background styling from the wallpaper surface.
+- **tuning:** Change release panic behavior from unwind to abort.
+- **i18n:** Add and update localization strings for VNC, recording, and connection time across supported languages.
+
+### Fixed
+
+- **cloud-sync:** Validate source hashes while decoding snapshots to improve sync data integrity.
+- **temporary-session:** Complete temporary session recreation flows and fix context-menu actions for temporary SSH links.
+
+### Documentation
+
+- **readme:** Update README content for RDP and VNC support.
+- **docs-site:** Update session type documentation with RDP and VNC support.
+
+## [1.2.2] - 2026-08-12
+
+### Added
+
+- **build:** Add Windows MSI packaging support to the release workflow.
+- **quick-commands:** Add drag-and-drop sorting for quick command categories.
+- **rdp:** Enhance RDP resizing and dynamic display behavior.
+- **header:** Add predefined macOS edit menu items.
+
+### Changed
+
+- **terminal-gutter:** Improve gutter layout constants for better readability.
+- **i18n:** Add quick command labels for category creation and custom sorting.
+
+### Fixed
+
+- **rdp:** Improve physical key capture, lock-key routing, right Shift handling, and UPN username preservation during authentication.
+- **terminal:** Reset timestamps to terminal startup time when Clear All is used.
+- **release:** Prevent release crashes when remote metadata is corrupt.
+
+### Documentation
+
+- **readme:** Update Discord and WeChat group links.
+
+## [1.2.1] - 2026-08-11
+
+### Added
+
+- **rdp:** Add RDP sessions with workspace integration, certificate verification, text clipboard support, fit-window/fixed display modes, bounded reconnects, and improved keyboard/IME handling.
+- **ssh:** Add SSH Agent authentication and forwarding, including platform-aware endpoint selection, hardware-key approval prompts, retry handling, and device-local sync behavior.
+- **ssh:** Add SSH connection profiles and terminal type selection so network devices can disable Linux-shell-only helpers without changing saved SFTP preferences.
+- **cloud-sync:** Add current-remote-snapshot metadata, automatic pull of remote-only changes, conflict recovery actions, snapshot management, migration, and garbage collection for legacy snapshot objects.
+- **terminal:** Add a high-volume terminal output drain, gutter refresh support, timestamp restoration, command suggestion shortcuts, new tab/view commands, and session quick switcher scrolling.
+- **recording:** Add per-connection recording settings and expand recording capture, formatting, search, and test support.
+- **quick-commands:** Add category management improvements, category movement and sorting, export support, and merge behavior that preserves imported categories.
+- **saved-connections:** Add expand/collapse-all folder actions with persisted expansion state.
+- **file-explorer:** Add footer statistics for selected and total file sizes.
+- **macos-menu:** Add native macOS menu handling and window-management commands.
+- **serial-send:** Enhance the serial send panel with dedicated state management.
+- **about:** Add support information and community entry points.
+
+### Changed
+
+- **settings:** Introduce shared draft-state handling for settings pages so manual sync actions and unsaved changes are coordinated more consistently.
+- **layout:** Improve resize handle styling/interactions and align ActivityBar background styling.
+- **claude:** Refactor Claude Code invocation handling for agent execution flows.
+- **saved-connections:** Simplify saved-connection expansion state handling and remove stale last-opened connection state.
+- **quick-commands:** Optimize command suffix stripping and category validation behavior.
+- **i18n:** Add and refresh localization strings for RDP, SSH Agent/profile settings, cloud-sync recovery, recording, terminal suggestions, file selection totals, macOS menu actions, and quick-command export.
+
+### Fixed
+
+- **rdp:** Improve cursor handling, viewport resizing, and keyboard input behavior.
+- **ssh:** Increase command injection timeout to improve reliability on slower shells.
+- **app-context:** Restrict screen locking to the primary main window.
+- **about:** Improve support information handling and display.
+
+### Performance
+
+- **terminal:** Improve responsiveness during large output bursts by batching and draining terminal output more efficiently.
+
+### Documentation
+
+- **readme:** Add Discord and WeChat group badges for community engagement.
+
+## [1.2.0] - 2026-08-04
+
+### Added
+
+- **gpu-npu-monitor:** Add remote GPU and NPU overviews to the application header/status area, with shared overview hooks and compact hardware cards for active SSH sessions.
+- **ui:** Add a Notes panel toggle to settings and include Notes in the default workspace configuration.
+- **file-explorer:** Support selecting multiple directories for uploads.
+- **terminal:** Show the saved-connection group path in TabBar tooltips.
+
+### Changed
+
+- **monitoring:** Integrate remote GPU/NPU overview data with the existing GPU and Ascend NPU monitor panels.
+- **i18n:** Add localization strings for GPU/NPU overviews, Notes, and saved-connection group labels across supported languages.
+
+## [1.1.19] - 2026-08-04
+
+### Added
+
+- **notes:** Add a Notes panel and note editor with autosave, toolbar/status UI, tree navigation, context menus, persistent storage, migrations, and sync/backup snapshot support.
+- **asset-monitoring:** Add an asset monitoring workspace with grouped connection views, breadcrumb navigation, table/card layouts, formatters, and resource/GPU monitor integration.
+- **sftp:** Enhance directory downloads and transfer handling, including improved pipeline behavior and SCP original-property handling.
+- **zmodem:** Add local path tracking for Zmodem transfers and reveal-in-file-manager support.
+- **quick-commands:** Add import preservation options for merging quick commands.
+- **ai:** Add native tool-call mode with error handling for agent workflows.
+- **import:** Improve WindTerm session import, including master-password prompts and merge handling.
+- **external-open:** Enhance SSH URL parsing and external connection handling.
+- **capabilities:** Allow hidden files in the temporary directory capability.
+
+### Changed
+
+- **monitoring:** Improve system information collection in the remote stats script.
+- **ui:** Simplify the Asset toolbar by removing unused title/count display.
+- **i18n:** Add and update localization for notes, asset monitoring, WindTerm master-password prompts, CPU sampling, and external inline-password guidance.
+
+### Fixed
+
+- **monitoring:** Handle `null` values in CPU usage and percentage formatting.
+- **terminal:** Refocus the search input when Find is triggered while the search bar is already open.
+
+### Performance
+
+- **notes:** Refactor the Notes panel and tree components for better performance and usability.
+
+### Documentation
+
+- **ssh:** Clarify SSH connection guidance around inline password usage.
+
 ## [1.1.18] - 2026-07-29
 
 ### Added

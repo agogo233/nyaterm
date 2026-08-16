@@ -14,12 +14,12 @@ import {
   DEFAULT_TAB_MIDDLE_CLICK_ACTION,
   DEFAULT_TAB_RIGHT_CLICK_ACTION,
 } from "@/lib/interactionSettings";
+import { normalizeQuickCommandAppSettings } from "@/lib/quickCommandSettings";
 import type { AppRuntimeInfo, AppSettings, Group, SavedConnection, UiConfig } from "@/types/global";
 import i18n from "../i18n";
 import { invoke } from "../lib/invoke";
 import { logger, setLoggerLevel } from "../lib/logger";
 import { DEFAULT_TERMINAL_FONT_SIZE } from "../lib/terminalFontSize";
-import { signalChildWindowReady } from "../lib/windowManager";
 import { AppContext } from "./AppContext";
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -111,6 +111,20 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     tab_middle_click_action: DEFAULT_TAB_MIDDLE_CLICK_ACTION,
     tab_right_click_action: DEFAULT_TAB_RIGHT_CLICK_ACTION,
   },
+  recording: {
+    auto_start: false,
+    default_mode: "transcript",
+    base_path: "",
+    path_template:
+      "{group}/{session}/{yyyy}-{MM}-{dd}/{HH}-{mm}-{ss}-{SSS}-{session_short_id}.log",
+    include_timestamps: true,
+    include_io_labels: true,
+    include_session_metadata: true,
+    rotation: { type: "session" },
+    existing_file_behavior: "unique",
+    memory_limit_bytes: 5 * 1024 * 1024,
+    include_binary_transfer_payloads: false,
+  },
   transfer: {
     editor_type: "external",
     download_threads: 3,
@@ -141,9 +155,11 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   ui: {
     open_tabs: [],
     terminal_window_layout: null,
+    start_workspace_mode: "workbench",
     left_width: 256,
     right_width: 288,
     quick_cmd_height: 180,
+    quick_cmd_category_width: 176,
     quick_cmd_view_mode: "tile",
     quick_cmd_sort_mode: "created",
     quick_cmd_selected_category: "all",
@@ -161,6 +177,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     language: "en",
     header_status_mode: "session",
     header_status_visible: true,
+    show_notes_panel: true,
     show_remote_stats: true,
     remote_stats_interval: 3,
     show_gpu_monitor: false,
@@ -172,14 +189,18 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     show_docker_manager: false,
     docker_manager_interval: 10,
     saved_connections_sort_mode: "default",
-    saved_connections_last_opened_connection_id: null,
+    saved_connections_expanded_group_ids: [],
+    asset_sort_key: null,
+    asset_sort_direction: null,
     recent_connection_ids: [],
     transfer_height: 180,
     file_explorer_show_hidden_files: true,
     file_explorer_auto_sync_cwd_connection_ids: [],
     file_explorer_favorite_dirs_by_connection_id: {},
+    notes_expanded_folder_ids: [],
+    notes_last_selected_node_id: null,
     activity_bar_layout: {
-      left_top: ["fileExplorer", "network", "securityAuth"],
+      left_top: ["fileExplorer", "notes", "network", "securityAuth"],
       left_bottom: ["syncBackupHistory", "settings"],
       right_top: [
         "savedConnections",
@@ -225,12 +246,13 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
   const loadAppSettings = useCallback(() => {
     invoke<AppSettings>("get_app_settings")
       .then((cfg) => {
-        setAppSettings(cfg);
-        setLoggerLevel(cfg.diagnostics.level);
+        const normalized = normalizeQuickCommandAppSettings(cfg);
+        setAppSettings(normalized);
+        setLoggerLevel(normalized.diagnostics.level);
         loaded.current = true;
         setSettingsLoaded(true);
-        if (cfg.ui?.language && cfg.ui.language !== i18n.language) {
-          i18n.changeLanguage(cfg.ui.language);
+        if (normalized.ui?.language && normalized.ui.language !== i18n.language) {
+          i18n.changeLanguage(normalized.ui.language);
         }
       })
       .catch(() => {
@@ -286,16 +308,6 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
     }
   }, [appSettings.ui?.language]);
 
-  useEffect(() => {
-    if (!settingsLoaded || !lockStateLoaded || !isLocked) return;
-
-    const timeoutId = window.setTimeout(() => {
-      void signalChildWindowReady();
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [isLocked, lockStateLoaded, settingsLoaded]);
-
   useIdleLock(
     appSettings.security.enable_screen_lock ? appSettings.security.idle_lock_minutes : 0,
     isLocked,
@@ -306,7 +318,10 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
     (updates: Partial<AppSettings> | ((prev: AppSettings) => Partial<AppSettings>)) => {
       setAppSettings((prev) => {
         const nextUpdates = typeof updates === "function" ? updates(prev) : updates;
-        const next = { ...prev, ...nextUpdates };
+        const next = normalizeQuickCommandAppSettings({
+          ...prev,
+          ...nextUpdates,
+        });
         setLoggerLevel(next.diagnostics.level);
         if (loaded.current) {
           if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -332,8 +347,9 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    setLoggerLevel(next.diagnostics.level);
-    setAppSettings(next);
+    const normalized = normalizeQuickCommandAppSettings(next);
+    setLoggerLevel(normalized.diagnostics.level);
+    setAppSettings(normalized);
   }, []);
 
   const updateUi = useCallback(
@@ -433,6 +449,15 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={contextValue}>
+      {!appStateReady ? (
+        <div
+          className="flex h-screen w-full items-center justify-center bg-background"
+          aria-busy="true"
+          style={{ backgroundColor: "var(--df-bg, #0d1117)" }}
+        >
+          <span className="size-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      ) : null}
       {showContent ? children : null}
       {appStateReady && isLocked ? (
         <LockScreen

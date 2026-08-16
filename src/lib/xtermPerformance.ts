@@ -24,26 +24,28 @@ export const XTERM_PERFORMANCE_CONFIG = {
     strainedBacklogBytes: 128 * 1024,
     /** Backlog threshold for using microtask low-latency writes on normal shell output. */
     lowLatencyFlushBacklogBytes: 64 * 1024,
+    /** Main-thread time budget for one continuous foreground drain turn. */
+    maxForegroundDrainTurnMs: 10,
     /** Max UTF-8 bytes to write into xterm in a single call. */
     writeChunkBytes: 32 * 1024,
+    /** Max UTF-8 bytes to write into xterm during one hidden background drain. */
+    backgroundWriteChunkBytes: 16 * 1024,
+    /** Delay between hidden background drain cycles. */
+    backgroundDrainIntervalMs: 160,
     /** Lower per-frame write budget for repaint-heavy alternate-screen TUIs. */
     alternateScreenWriteChunkBytes: 16 * 1024,
     /** Max write rate while an alternate-screen TUI has queued repaint backlog. */
     alternateScreenMaxWriteFps: 20,
-    /** Backlog threshold before alternate-screen repaint output is sampled. */
+    /** Backlog threshold before alternate-screen foreground writes are throttled. */
     alternateScreenThrottleBacklogBytes: 32 * 1024,
-    /** Queue cap while the terminal is visible. */
-    visibleBacklogCapBytes: 1_000_000,
-    /** Queue cap while an alternate-screen TUI is repainting; older frames are stale. */
-    alternateScreenBacklogCapBytes: 128 * 1024,
-    /** Queue cap while the terminal is hidden; backend flow control normally stops at 1 MiB. */
-    hiddenBacklogCapBytes: 2_000_000,
     /** Recovery threshold after overload while visible. */
     visibleRecoveryThresholdBytes: 200_000,
     /** Recovery threshold after overload while hidden. */
     hiddenRecoveryThresholdBytes: 50_000,
     /** How long to keep the recovery notice visible. */
     recoveryNoticeMs: 3_000,
+    /** Max time to wait for frontend writes before allowing deep hibernate. */
+    hibernateDrainTimeoutMs: 2_500,
   },
   webgl: {
     /** Release WebGL resources after a terminal has been hidden for this long. */

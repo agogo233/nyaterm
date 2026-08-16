@@ -34,11 +34,12 @@ In the **New Session** window, switch to the **SSH** tab and fill in these field
 
 ### Authentication methods
 
-NyaTerm supports three SSH authentication methods:
+NyaTerm supports four SSH authentication methods:
 
 - **Password**
 - **Private key**
 - **No authentication (none)**
+- **SSH Agent**
 
 You can select saved passwords or saved keys instead of re-entering them every time.
 
@@ -62,6 +63,14 @@ Useful for:
 
 Both passwords and keys can be managed centrally in **Security/Auth**.
 
+#### SSH Agent authentication
+
+SSH Agent mode only uses signing provided by the local Agent; private keys and hardware-key material are never imported into NyaTerm. The authentication section selects one Agent endpoint. Endpoint options are filtered for the current device: macOS/Linux provide automatic discovery, an environment variable, and a Unix domain socket, while Windows provides automatic discovery, Pageant, and the Windows OpenSSH Agent. `Auto` uses the platform default Agent. Connections fail with a clear error when the Agent is unavailable or has no usable identity.
+
+The Agent endpoint and forwarding switch are device-local connection settings. Cross-device sync does not overwrite these values on the destination device, so a macOS Unix socket path is never applied to Windows.
+
+When the Agent is waiting for a hardware touch, PIN, or desktop approval, NyaTerm shows a confirmation dialog. If the Agent times out or authentication fails, **Retry** discards the current attempt and rebuilds the complete SSH/jump-host chain. **Cancel** terminates the connection attempt.
+
 ### Interactive authentication requests
 
 When a server asks for additional keyboard-interactive input, OTP, or a restarted authentication step, NyaTerm collects the information through a dedicated SSH authentication request window instead of mixing every prompt into terminal output. This makes it easier to distinguish:
@@ -72,6 +81,16 @@ When a server asks for additional keyboard-interactive input, OTP, or a restarte
 - Authentication flows that need to restart
 
 If an authentication request comes from an unexpected host or session, verify the connection details before entering sensitive information.
+
+### SSH profile and terminal type
+
+The SSH form includes **Profile** and **Terminal Type** settings.
+
+**Standard server** is for regular Linux / Unix shells. It keeps SFTP browsing, directory tracking, shell detection, shell integration, remote stats, and automatic icon detection available.
+
+**Network device** is for switches, routers, and other device CLIs that are not Linux shells. At runtime, NyaTerm disables SFTP browsing, directory tracking, shell detection, shell integration, remote stats, and automatic icon detection so the device CLI is not probed like a full shell. This does not rewrite your saved SFTP choices.
+
+Terminal Type controls the `$TERM` value declared to the remote SSH session. You can choose `xterm-256color`, `xterm`, `vt100`, `vt220`, `ansi`, or `linux`. If an older device renders strangely, try a more conservative terminal type.
 
 ## Advanced configuration
 
@@ -94,6 +113,20 @@ A proxy record can store:
 - Host
 - Port
 - Username / password
+
+### SSH Agent forwarding
+
+The **SSH Agent** tab in advanced configuration controls forwarding independently. When it is disabled, NyaTerm does not create a local Agent connection for forwarding and does not send an agent-forwarding request to the server. An SSH Agent authentication connection, when selected as the authentication method, still uses the Agent for authentication. When forwarding is enabled, only interactive terminal sessions request it; SFTP, tunnels, and jump-host transport connections do not implicitly enable local Agent forwarding.
+
+Forwarding endpoints are independent from the login authentication endpoint. You can add multiple external SSH Agent endpoints in order, for example a primary SSH Agent and a gpg-agent SSH-compatible socket. The login authentication endpoint is never added to forwarding automatically. Forwarding sources are controlled only by the external SSH Agent list and the NyaTerm stored-key switch, and both source types use the same fingerprint allowlist or AllowAll policy.
+
+The default policy is a fingerprint allowlist; an empty allowlist exposes no identities. Switching to AllowAll requires an explicit risk confirmation and exposes current and future identities from the enabled sources. If one endpoint is unavailable, the identity picker reports a local endpoint error while preserving successful results from other endpoints. Identities are merged in endpoint order and bounded by the SSH Agent protocol response limits of 1,024 identities and 256 KiB; when a limit is reached, the picker explicitly reports that only the deterministic prefix is shown and forwarded.
+
+Established stored-key forwarding channels are invalidated after a saved key is successfully added, replaced, or deleted; a new channel reads the current key set. Broker and legacy raw-relay channels share a bounded local channel quota, and Broker channels have first-frame and idle timeouts. When a Backup is restored across operating systems, unsupported device-specific Agent endpoints are removed while malformed values still fail validation.
+
+:::warning
+Agent forwarding allows remote processes to use the signing capability of selected external Agents or NyaTerm stored keys through SSH. Enable it only for trusted servers and keep it disabled when it is not needed. The Agent endpoint and forwarding policy are device-local connection settings; external hardware keys are never imported, while NyaTerm stored-key synchronization continues to follow the application's existing encrypted snapshot/sync policy.
+:::
 
 ### Jump host
 
@@ -205,6 +238,31 @@ Conventions and limits:
 
 A temporary session never becomes a saved connection: NyaTerm strips the connection ID, proxy, jump host, post-login command, X11, and algorithm preferences, so it stays a one-off session.
 
+## External and protocol invocation
+
+NyaTerm can also open connection links from browsers, scripts, launchers, or other tools. External invocation sends the link to the current NyaTerm main window; if the app is not running yet, links passed as startup arguments are handled after the main window is ready.
+
+Supported entry points:
+
+- Program invocation: pass a link as a NyaTerm startup argument, for example `NyaTerm.exe ssh://root@example.com:22`
+- Protocol invocation: open an `ssh://`, `telnet://`, or `nyaterm://` link through the operating system URL scheme handler
+
+Supported link formats:
+
+- `ssh://user@host:port`
+- `ssh://user:password@host:port`; the password is used only for this temporary SSH session and is not saved
+- `telnet://host:port`
+- `nyaterm://connect/ssh?host=host&port=22&username=user`
+- `nyaterm://connect/telnet?host=host&port=23`
+
+Handling rules:
+
+- SSH defaults to username `root` and port `22`; Telnet defaults to port `23`
+- NyaTerm first looks for saved connections with the same protocol, host, and port; when an SSH link includes a username, the username must match exactly
+- If multiple saved connections match, NyaTerm shows a chooser; if none match, it opens a temporary connection
+- `ssh://` links with one-time passwords always open as temporary connections, so an externally supplied password is not attached to a saved connection
+- `nyaterm://` links do not accept `password`, post-login command, proxy, jump host, port forwarding, or private-key parameters; save a connection first if you need those capabilities
+
 ## Session input synchronization
 
 When you need to run the same operation on several hosts at once, use **session input sync groups** to broadcast what you type in one terminal to multiple sessions.
@@ -256,15 +314,17 @@ Supported session types:
 - `local_terminal`
 - `telnet`
 - `serial`
+- `rdp`
 
 Supported SSH authentication forms:
 
 - Direct password: `"auth": { "mode": "password", "password": "replace-me" }`
 - Saved password: `"auth": { "mode": "password", "password_ref": "prod-root-password" }`
 - Saved key: `"auth": { "mode": "key", "key_ref": "ops-ed25519" }`
+- SSH Agent: `"auth": { "mode": "agent" }`
 - No authentication: `"auth": { "mode": "none" }`
 
-Use either `password` or `password_ref`, but not both. `key` mode must provide `key_ref`. A `ref` is only valid inside the current JSON file; after import, NyaTerm generates real local IDs.
+Use either `password` or `password_ref`, but not both. `key` mode must provide `key_ref`. `agent` mode does not import private keys; it uses the current device's available SSH Agent when connecting. A `ref` is only valid inside the current JSON file; after import, NyaTerm generates real local IDs.
 
 :::warning
 Passwords and private keys in the JSON file are plaintext. Delete the file after importing, or at least treat it as a sensitive file.

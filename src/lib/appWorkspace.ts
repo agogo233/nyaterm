@@ -1,6 +1,12 @@
 import type { TerminalWindowNode } from "@/lib/tabWindows";
 import { collectSessionPanes } from "@/lib/workspaceTabs";
-import type { ActivityBarLayout, SessionPane, SessionType, Tab, UiConfig } from "@/types/global";
+import type {
+  ActivityBarLayout,
+  SessionPane,
+  Tab,
+  UiConfig,
+  WorkspaceSessionType,
+} from "@/types/global";
 
 export const NON_PANEL_IDS = new Set(["settings", "lock", "quickCmdBar", "serialSend"]);
 
@@ -8,6 +14,7 @@ export const NON_PANEL_IDS = new Set(["settings", "lock", "quickCmdBar", "serial
 export const EXCLUSIVE_PANEL_IDS = new Set(["aiAssistant"]);
 
 const MONITOR_PANEL_VISIBILITY: Record<string, (ui: UiConfig) => boolean> = {
+  notes: (ui) => ui.show_notes_panel ?? true,
   resourceMonitor: (ui) => ui.show_remote_stats ?? true,
   gpuMonitor: (ui) => ui.show_gpu_monitor ?? false,
   ascendNpuMonitor: (ui) => ui.show_ascend_npu_monitor ?? false,
@@ -29,9 +36,34 @@ export type TrayAction =
   | { type: "request_quit"; targetWindowLabel?: string | null };
 
 export function canCreateSessionFromPane(
-  pane: Pick<SessionPane, "type" | "connectionId"> | null | undefined,
-): pane is Pick<SessionPane, "type" | "connectionId"> {
-  return !!pane && (pane.type === "Local" || !!pane.connectionId);
+  pane: Pick<SessionPane, "type" | "connectionId" | "temporaryConfig"> | null | undefined,
+): pane is Pick<SessionPane, "type" | "connectionId" | "temporaryConfig"> {
+  return (
+    !!pane && (pane.type === "Local" || !!pane.connectionId || hasMatchingTemporaryConfig(pane))
+  );
+}
+
+export function hasMatchingTemporaryConfig(
+  pane: Pick<SessionPane, "type" | "temporaryConfig"> | null | undefined,
+) {
+  if (!pane?.temporaryConfig) return false;
+  switch (pane.type) {
+    case "SSH":
+      return pane.temporaryConfig.protocol === "ssh";
+    case "Telnet":
+      return pane.temporaryConfig.protocol === "telnet";
+    case "Serial":
+      return pane.temporaryConfig.protocol === "serial";
+    default:
+      return false;
+  }
+}
+
+export function assertMatchingTemporaryConfig<
+  T extends Pick<SessionPane, "type" | "temporaryConfig">,
+>(pane: T) {
+  if (!pane.temporaryConfig || hasMatchingTemporaryConfig(pane)) return;
+  throw new Error("Temporary session config protocol mismatch");
 }
 
 export function hasLiveSession<T extends Pick<SessionPane, "connecting" | "connectError">>(
@@ -40,7 +72,7 @@ export function hasLiveSession<T extends Pick<SessionPane, "connecting" | "conne
   return !!pane && !pane.connecting && !pane.connectError;
 }
 
-export function isNonSerialSessionType(type: SessionType): boolean {
+export function isNonSerialSessionType(type: WorkspaceSessionType): boolean {
   return type === "SSH" || type === "Local" || type === "Telnet";
 }
 

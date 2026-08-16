@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import CloseAllSessionsDialog from "@/components/dialog/terminal/CloseAllSessionsDialog";
 import TabRenameDialog from "@/components/dialog/terminal/TabRenameDialog";
 import TabStartupCommandDialog from "@/components/dialog/terminal/TabStartupCommandDialog";
+import { hasMatchingTemporaryConfig } from "@/lib/appWorkspace";
 import type { TabMouseAction } from "@/lib/interactionSettings";
 import { normalizeTabMouseAction } from "@/lib/interactionSettings";
 import { getActiveGroupForSession, isSessionPausedInGroup } from "@/lib/syncInputGroups";
@@ -159,7 +160,11 @@ function compareSortOrder(left: { sort_order?: number }, right: { sort_order?: n
 
 function canSpawnSessionFromTab(tab: Tab): boolean {
   const pane = getActivePane(tab);
-  return !!pane && (pane.type === "Local" || !!pane.connectionId);
+  return (
+    !!pane &&
+    pane.paneKind === "terminal" &&
+    (pane.type === "Local" || !!pane.connectionId || hasMatchingTemporaryConfig(pane))
+  );
 }
 
 function getTabConnection(tab: Tab, savedConnections: SavedConnection[]) {
@@ -171,12 +176,16 @@ function getTabConnection(tab: Tab, savedConnections: SavedConnection[]) {
 
 function isSshTab(tab: Tab, savedConnections: SavedConnection[]): boolean {
   const pane = getActivePane(tab);
+  if (pane?.type !== "SSH") return false;
+  if (pane.temporaryConfig?.protocol === "ssh") return true;
   const connection = getTabConnection(tab, savedConnections);
-  return pane?.type === "SSH" && connection?.type === "ssh";
+  return connection?.type === "ssh";
 }
 
 function getTabServerIp(tab: Tab, savedConnections: SavedConnection[]): string | null {
-  if (!isSshTab(tab, savedConnections)) return null;
+  const pane = getActivePane(tab);
+  if (pane?.type !== "SSH") return null;
+  if (pane.temporaryConfig?.protocol === "ssh") return pane.temporaryConfig.host;
   return getTabConnection(tab, savedConnections)?.host || null;
 }
 
@@ -193,7 +202,11 @@ function canMultiplexTab(tab: Tab, savedConnections: SavedConnection[]): boolean
 
 function canReconnectTab(tab: Tab): boolean {
   const pane = getActivePane(tab);
-  return !!pane && !pane.connecting && canSpawnSessionFromTab(tab);
+  return (
+    !!pane &&
+    !pane.connecting &&
+    (pane.type === "Local" || !!pane.connectionId || hasMatchingTemporaryConfig(pane))
+  );
 }
 
 function canDisconnectTab(tab: Tab): boolean {
@@ -987,6 +1000,8 @@ function TabBar({
         return "telnet";
       case "serial":
         return "serial";
+      case "rdp":
+        return "rdp";
       default:
         return "ssh";
     }
@@ -1027,6 +1042,7 @@ function TabBar({
     const conn = getTabConnection(tab, savedConnections);
     const canCopyIp = !!getTabServerIp(tab, savedConnections);
     const host = canCopyIp ? conn?.host : undefined;
+    const groupPath = buildGroupPath(conn?.group_id);
     const doubleClickAction = normalizeTabMouseAction(
       appSettings.interaction.tab_double_click_action,
     );
@@ -1062,7 +1078,7 @@ function TabBar({
     );
 
     const tooltipContent =
-      tab.locked || host || sshAddress || isDisconnected || showUnreadIndicator ? (
+      tab.locked || host || sshAddress || groupPath || isDisconnected || showUnreadIndicator ? (
         <div className="flex max-w-[260px] min-w-0 flex-col gap-1">
           {isDisconnected && (
             <div className="flex min-w-0 items-center gap-2 text-[var(--df-danger)]">
@@ -1080,6 +1096,14 @@ function TabBar({
             <div className="flex min-w-0 items-center gap-2 text-[var(--df-text-muted)]">
               <MdLock className="text-[12px] shrink-0" />
               <span className="min-w-0 truncate">{t("tabCtx.locked")}</span>
+            </div>
+          )}
+          {groupPath && (
+            <div className="flex min-w-0 items-center gap-2 text-[var(--df-text-muted)]">
+              <MdFolder className="text-[12px] shrink-0 text-amber-500/80" />
+              <span className="min-w-0 truncate">
+                {t("tabCtx.group")}: {groupPath}
+              </span>
             </div>
           )}
           {host && renderTooltipCopyRow(host, t("tabCtx.copyIp"), t("tabCtx.ipCopied"))}

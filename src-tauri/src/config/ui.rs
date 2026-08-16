@@ -14,6 +14,21 @@ fn default_split_ratio() -> f64 {
     0.5
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopDisplayMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_only: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipboard_enabled: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum RestorablePaneNode {
@@ -21,9 +36,13 @@ pub enum RestorablePaneNode {
     Leaf {
         #[serde(default = "default_leaf_id")]
         id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane_kind: Option<String>,
         title: String,
         session_type: String,
         connection_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display: Option<RemoteDesktopDisplayMetadata>,
     },
     #[serde(rename = "split")]
     Split {
@@ -91,6 +110,7 @@ impl RestorableTab {
             let leaf_id = default_leaf_id();
             self.root = Some(RestorablePaneNode::Leaf {
                 id: leaf_id.clone(),
+                pane_kind: None,
                 title: if self.title.is_empty() {
                     "Session".to_string()
                 } else {
@@ -98,6 +118,7 @@ impl RestorableTab {
                 },
                 session_type: self.session_type.clone(),
                 connection_id: self.connection_id.clone(),
+                display: None,
             });
             if self.active_pane_id.is_none() {
                 self.active_pane_id = Some(leaf_id);
@@ -180,6 +201,7 @@ impl Default for ActivityBarLayout {
 fn default_left_top() -> Vec<String> {
     vec![
         "fileExplorer".to_string(),
+        "notes".to_string(),
         "network".to_string(),
         "securityAuth".to_string(),
     ]
@@ -219,12 +241,16 @@ pub struct UiConfig {
     pub open_tabs: Vec<RestorableTab>,
     #[serde(default)]
     pub terminal_window_layout: Option<RestorableTerminalWindowNode>,
+    #[serde(default = "default_start_workspace_mode")]
+    pub start_workspace_mode: String,
     #[serde(default = "default_left_width")]
     pub left_width: f64,
     #[serde(default = "default_right_width")]
     pub right_width: f64,
     #[serde(default = "default_quick_cmd_height")]
     pub quick_cmd_height: f64,
+    #[serde(default = "default_quick_cmd_category_width")]
+    pub quick_cmd_category_width: f64,
     #[serde(default = "default_quick_cmd_view_mode")]
     pub quick_cmd_view_mode: String,
     #[serde(default = "default_quick_cmd_sort_mode")]
@@ -260,6 +286,8 @@ pub struct UiConfig {
     #[serde(default = "default_true_fn")]
     pub header_status_visible: bool,
     #[serde(default = "default_true_fn")]
+    pub show_notes_panel: bool,
+    #[serde(default = "default_true_fn")]
     pub show_remote_stats: bool,
     #[serde(default = "default_remote_stats_interval")]
     pub remote_stats_interval: u32,
@@ -282,7 +310,11 @@ pub struct UiConfig {
     #[serde(default = "default_sort_mode")]
     pub saved_connections_sort_mode: String,
     #[serde(default)]
-    pub saved_connections_last_opened_connection_id: Option<String>,
+    pub saved_connections_expanded_group_ids: Vec<String>,
+    #[serde(default)]
+    pub asset_sort_key: Option<String>,
+    #[serde(default)]
+    pub asset_sort_direction: Option<String>,
     #[serde(default)]
     pub recent_connection_ids: Vec<String>,
     #[serde(default = "default_transfer_height")]
@@ -294,7 +326,25 @@ pub struct UiConfig {
     #[serde(default)]
     pub file_explorer_favorite_dirs_by_connection_id: HashMap<String, Vec<String>>,
     #[serde(default)]
+    pub notes_expanded_folder_ids: Vec<String>,
+    #[serde(default)]
+    pub notes_last_selected_node_id: Option<String>,
+    #[serde(default)]
     pub activity_bar_layout: ActivityBarLayout,
+}
+
+impl UiConfig {
+    pub fn normalize_quick_command_sort_mode(&mut self) -> bool {
+        if matches!(
+            self.quick_cmd_sort_mode.as_str(),
+            "created" | "name" | "useCount" | "custom"
+        ) {
+            return false;
+        }
+
+        self.quick_cmd_sort_mode = default_quick_cmd_sort_mode();
+        true
+    }
 }
 
 fn default_left_width() -> f64 {
@@ -309,6 +359,10 @@ fn default_quick_cmd_height() -> f64 {
     180.0
 }
 
+fn default_quick_cmd_category_width() -> f64 {
+    176.0
+}
+
 fn default_quick_cmd_view_mode() -> String {
     "tile".to_string()
 }
@@ -319,6 +373,10 @@ fn default_quick_cmd_sort_mode() -> String {
 
 fn default_quick_cmd_selected_category() -> String {
     "all".to_string()
+}
+
+fn default_start_workspace_mode() -> String {
+    "workbench".to_string()
 }
 
 fn default_active_left_panel() -> Option<String> {
@@ -390,9 +448,11 @@ impl Default for UiConfig {
         Self {
             open_tabs: vec![],
             terminal_window_layout: None,
+            start_workspace_mode: default_start_workspace_mode(),
             left_width: default_left_width(),
             right_width: default_right_width(),
             quick_cmd_height: default_quick_cmd_height(),
+            quick_cmd_category_width: default_quick_cmd_category_width(),
             quick_cmd_view_mode: default_quick_cmd_view_mode(),
             quick_cmd_sort_mode: default_quick_cmd_sort_mode(),
             quick_cmd_selected_category: default_quick_cmd_selected_category(),
@@ -410,6 +470,7 @@ impl Default for UiConfig {
             language: default_language(),
             header_status_mode: default_header_status_mode(),
             header_status_visible: true,
+            show_notes_panel: true,
             show_remote_stats: true,
             remote_stats_interval: default_remote_stats_interval(),
             show_gpu_monitor: false,
@@ -421,13 +482,108 @@ impl Default for UiConfig {
             show_docker_manager: false,
             docker_manager_interval: default_docker_manager_interval(),
             saved_connections_sort_mode: default_sort_mode(),
-            saved_connections_last_opened_connection_id: None,
+            saved_connections_expanded_group_ids: vec![],
+            asset_sort_key: None,
+            asset_sort_direction: None,
             recent_connection_ids: vec![],
             transfer_height: default_transfer_height(),
             file_explorer_show_hidden_files: true,
             file_explorer_auto_sync_cwd_connection_ids: vec![],
             file_explorer_favorite_dirs_by_connection_id: HashMap::new(),
+            notes_expanded_folder_ids: vec![],
+            notes_last_selected_node_id: None,
             activity_bar_layout: ActivityBarLayout::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RestorablePaneNode, RestorableTab};
+    use serde_json::json;
+
+    #[test]
+    fn current_leaf_schema_round_trips_terminal_fields() {
+        let raw = json!({
+            "kind": "leaf",
+            "id": "pane-ssh",
+            "title": "Linux",
+            "session_type": "SSH",
+            "connection_id": "ssh-1"
+        });
+
+        let pane: RestorablePaneNode = serde_json::from_value(raw.clone()).expect("terminal leaf");
+        let encoded = serde_json::to_value(pane).expect("serialized terminal leaf");
+
+        assert_eq!(encoded, raw);
+    }
+
+    #[test]
+    fn current_leaf_schema_preserves_remote_desktop_metadata() {
+        let raw = json!({
+            "kind": "leaf",
+            "id": "pane-rdp",
+            "pane_kind": "remote-desktop",
+            "title": "Windows",
+            "session_type": "RDP",
+            "connection_id": "rdp-1",
+            "display": {
+                "remoteWidth": 1600,
+                "remoteHeight": 900,
+                "scaleMode": "actual",
+                "viewOnly": true,
+                "clipboardEnabled": false
+            }
+        });
+        let pane: RestorablePaneNode =
+            serde_json::from_value(raw.clone()).expect("remote desktop leaf");
+        let encoded = serde_json::to_value(pane).expect("serialized remote desktop leaf");
+
+        assert_eq!(encoded, raw);
+    }
+
+    #[test]
+    fn mixed_tab_round_trip_preserves_each_pane_kind() {
+        let raw = json!({
+            "active_pane_id": "pane-rdp",
+            "root": {
+                "kind": "split",
+                "id": "split-1",
+                "direction": "vertical",
+                "ratio": 0.4,
+                "first": {
+                    "kind": "leaf",
+                    "id": "pane-ssh",
+                    "pane_kind": "terminal",
+                    "title": "Linux",
+                    "session_type": "SSH",
+                    "connection_id": "ssh-1"
+                },
+                "second": {
+                    "kind": "leaf",
+                    "id": "pane-rdp",
+                    "pane_kind": "remote-desktop",
+                    "title": "Windows",
+                    "session_type": "RDP",
+                    "connection_id": "rdp-1"
+                }
+            },
+            "title": "Windows",
+            "session_type": "RDP",
+            "connection_id": "rdp-1",
+            "custom_name": null,
+            "tab_color": null,
+            "locked": false
+        });
+
+        let tab: RestorableTab = serde_json::from_value(raw).expect("mixed tab");
+        let encoded = serde_json::to_value(tab).expect("serialized mixed tab");
+
+        assert_eq!(encoded["active_pane_id"], "pane-rdp");
+        assert_eq!(encoded["root"]["direction"], "vertical");
+        assert_eq!(encoded["root"]["first"]["session_type"], "SSH");
+        assert_eq!(encoded["root"]["second"]["session_type"], "RDP");
+        assert_eq!(encoded["root"]["first"]["pane_kind"], "terminal");
+        assert_eq!(encoded["root"]["second"]["pane_kind"], "remote-desktop");
     }
 }

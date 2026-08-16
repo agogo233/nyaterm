@@ -27,6 +27,8 @@ export type ZmodemEventPayload =
       bytes_transferred?: number;
       totalSize?: number;
       total_size?: number;
+      localPath?: string;
+      local_path?: string;
       direction: ZmodemWireDirection;
     }
   | { type: "complete"; direction: ZmodemWireDirection; fileCount?: number; file_count?: number }
@@ -47,10 +49,13 @@ export interface ZmodemTransferProgressSink {
     direction: ZmodemDirection;
     bytesTransferred: number;
     totalSize: number;
+    localPath?: string;
   }) => void;
   complete: (id: string) => void;
   fail: (id: string, reason: string) => void;
 }
+
+type TerminalStatusWriter = (data: string) => void;
 
 interface CurrentZmodemTransferFile {
   id: string;
@@ -88,6 +93,7 @@ export function createZmodemEventHandler(
   getT: () => Translate,
   getDuplicateStrategy: () => string = () => "ask",
   progressSink?: ZmodemTransferProgressSink,
+  writeTerminalStatus: TerminalStatusWriter = (data) => terminal.write(data),
 ): ZmodemEventHandler {
   let pendingProgress: Extract<ZmodemEventPayload, { type: "progress" }> | null = null;
   let progressRaf: number | null = null;
@@ -97,6 +103,7 @@ export function createZmodemEventHandler(
   let uploadFileName = "";
   let uploadToastId: string | number | null = null;
   let currentTransferFile: CurrentZmodemTransferFile | null = null;
+  let lastDownloadLocalPath = "";
   let transferFileSequence = 0;
   let disposed = false;
 
@@ -142,7 +149,7 @@ export function createZmodemEventHandler(
     const totalSize = payload.totalSize ?? payload.total_size ?? 0;
     const percent = totalSize > 0 ? Math.round((bytesTransferred / totalSize) * 100) : 0;
     const t = getT();
-    terminal.write(`\r\x1b[36m[ZMODEM] ${t("zmodem.downloading", { fileName, percent })}\x1b[K`);
+    writeTerminalStatus(`\r\x1b[36m[ZMODEM] ${t("zmodem.downloading", { fileName, percent })}\x1b[K`);
   };
 
   const scheduleProgressRender = () => {
@@ -186,6 +193,25 @@ export function createZmodemEventHandler(
     return `zmodem-${sessionId}-${direction}-${transferFileSequence}-${encodeURIComponent(fileName)}`;
   };
 
+  const revealDownloadedFile = async (localPath: string) => {
+    try {
+      const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+      await revealItemInDir(localPath);
+    } catch {
+      try {
+        const [{ openPath }, { dirname }] = await Promise.all([
+          import("@tauri-apps/plugin-opener"),
+          import("@tauri-apps/api/path"),
+        ]);
+        const parentPath = await dirname(localPath);
+        if (!parentPath) return;
+        await openPath(parentPath);
+      } catch {
+        // Best-effort convenience only; the transfer itself has already completed.
+      }
+    }
+  };
+
   const syncTransferProgress = (
     payload: Extract<NormalizedZmodemPayload, { type: "progress" }>,
   ) => {
@@ -195,6 +221,10 @@ export function createZmodemEventHandler(
     const fileName = payloadFileName || uploadFileName || "zmodem_file";
     const bytesTransferred = payload.bytesTransferred ?? payload.bytes_transferred ?? 0;
     const totalSize = payload.totalSize ?? payload.total_size ?? 0;
+    const localPath = payload.localPath ?? payload.local_path;
+    if (payload.direction === "download" && localPath) {
+      lastDownloadLocalPath = localPath;
+    }
     const changedFile =
       !currentTransferFile ||
       currentTransferFile.fileName !== fileName ||
@@ -221,6 +251,7 @@ export function createZmodemEventHandler(
       direction: payload.direction,
       bytesTransferred,
       totalSize,
+      localPath,
     });
   };
 
@@ -244,7 +275,7 @@ export function createZmodemEventHandler(
     if (disposed) return;
 
     if (payload.direction === "download") {
-      terminal.write(`\r\n\x1b[36m[ZMODEM] ${t("zmodem.selectSaveDir")}\x1b[0m\r\n`);
+      writeTerminalStatus(`\r\n\x1b[36m[ZMODEM] ${t("zmodem.selectSaveDir")}\x1b[0m\r\n`);
       const dir = await openDialog({ directory: true, multiple: false });
       if (disposed) return;
       if (dir) {
@@ -254,7 +285,7 @@ export function createZmodemEventHandler(
         });
       } else {
         await invoke("zmodem_cancel", { sessionId });
-        terminal.write(`\r\n\x1b[33m[ZMODEM] ${t("zmodem.cancelled")}\x1b[0m\r\n`);
+        writeTerminalStatus(`\r\n\x1b[33m[ZMODEM] ${t("zmodem.cancelled")}\x1b[0m\r\n`);
       }
       return;
     }
@@ -296,7 +327,7 @@ export function createZmodemEventHandler(
 
       if (resolvedPaths.length === 0) {
         await invoke("zmodem_cancel", { sessionId });
-        terminal.write(`\r\n\x1b[33m[ZMODEM] ${t("zmodem.cancelled")}\x1b[0m\r\n`);
+        writeTerminalStatus(`\r\n\x1b[33m[ZMODEM] ${t("zmodem.cancelled")}\x1b[0m\r\n`);
         return;
       }
 
@@ -312,7 +343,7 @@ export function createZmodemEventHandler(
       });
     } else {
       await invoke("zmodem_cancel", { sessionId });
-      terminal.write(`\r\n\x1b[33m[ZMODEM] ${t("zmodem.cancelled")}\x1b[0m\r\n`);
+      writeTerminalStatus(`\r\n\x1b[33m[ZMODEM] ${t("zmodem.cancelled")}\x1b[0m\r\n`);
     }
   };
 
@@ -347,11 +378,15 @@ export function createZmodemEventHandler(
             showUploadCompletedToast();
             completePendingZmodemUpload(sessionId);
           } else {
-            terminal.write(`\r\n\x1b[32m[ZMODEM] ${getT()("zmodem.complete")}\x1b[0m\r\n`);
+            writeTerminalStatus(`\r\n\x1b[32m[ZMODEM] ${getT()("zmodem.complete")}\x1b[0m\r\n`);
+            if (lastDownloadLocalPath) {
+              void revealDownloadedFile(lastDownloadLocalPath);
+            }
           }
           uploadStarted = false;
           uploadFileName = "";
           uploadToastId = null;
+          lastDownloadLocalPath = "";
           break;
         }
         case "failed": {
@@ -372,7 +407,7 @@ export function createZmodemEventHandler(
             }
             failPendingZmodemUpload(sessionId, normalizedPayload.reason);
           } else {
-            terminal.write(
+            writeTerminalStatus(
               `\r\n\x1b[31m[ZMODEM] ${getT()("zmodem.failed", {
                 reason: normalizedPayload.reason,
               })}\x1b[0m\r\n`,
@@ -381,6 +416,7 @@ export function createZmodemEventHandler(
           uploadStarted = false;
           uploadFileName = "";
           uploadToastId = null;
+          lastDownloadLocalPath = "";
           break;
         }
       }
@@ -392,6 +428,7 @@ export function createZmodemEventHandler(
       uploadFileName = "";
       uploadToastId = null;
       currentTransferFile = null;
+      lastDownloadLocalPath = "";
       clearProgressRaf();
       clearProgressTimer();
     },
