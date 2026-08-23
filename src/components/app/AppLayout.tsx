@@ -106,20 +106,24 @@ interface AppLayoutProps {
     activePanel: "quickCmdBar" | "serialSend" | null;
     quickCmdHeight: number;
     serialSendHeight: number;
+    clearAfterSend: boolean;
     activeSerialSessionId: string | null;
     activeNonSerialSessionId: string | null;
     activeNonSerialSessionIds: string[];
     syncGroups: SyncGroup[];
+    currentWindowLabel: string;
     sessionTargets: {
       id: string;
       name: string;
       tabName: string;
       type: SessionType;
+      ownerWindowLabel?: string | null;
     }[];
     sendCommandDraft: SendCommandPanelDraft | null;
     onSendCommandDraftConsumed: () => void;
     onQuickCmdResize: (delta: number) => void;
     onSerialSendResize: (delta: number) => void;
+    onClearAfterSendChange: (enabled: boolean) => void;
     onCommandSend: (command: string, execute?: boolean) => void;
     onSendToAllSessions: (command: string, execute?: boolean) => void;
   };
@@ -470,10 +474,13 @@ export default function AppLayout({
                     currentShellSessionId={bottomPanel.activeNonSerialSessionId}
                     shellSessionIds={bottomPanel.activeNonSerialSessionIds}
                     syncGroups={bottomPanel.syncGroups}
+                    currentWindowLabel={bottomPanel.currentWindowLabel}
                     sessionTargets={bottomPanel.sessionTargets}
+                    clearAfterSend={bottomPanel.clearAfterSend}
                     draft={bottomPanel.sendCommandDraft}
                     onDraftConsumed={bottomPanel.onSendCommandDraftConsumed}
                     onSendingChange={setSerialSendRunning}
+                    onClearAfterSendChange={bottomPanel.onClearAfterSendChange}
                   />
                 </div>
               </>

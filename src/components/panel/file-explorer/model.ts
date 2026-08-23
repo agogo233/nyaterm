@@ -10,13 +10,20 @@ export interface RemoteTextFile {
   content: string;
   size: number;
   mtime?: number;
+  mtimeNanos?: string;
+  contentHash: string;
 }
+
+export type TextFileOpenResult =
+  | { status: "text"; file: RemoteTextFile }
+  | { status: "unsupported"; reason: "binary" | "unsupported_encoding" };
 
 export interface RemoteBinaryFile {
   path: string;
   contentBytes: number[] | Uint8Array | ArrayBuffer;
   size: number;
   mtime?: number;
+  mtimeNanos?: string;
 }
 
 export type FileExplorerSessionCache = {
@@ -32,6 +39,7 @@ export type LoadDirectoryOptions = {
   history?: "push" | "preserve";
   selectEntryName?: string;
   rawPathToken?: string;
+  silent?: boolean;
 };
 
 export type FileExplorerBackendKind = "remote" | "local";
@@ -66,14 +74,49 @@ export type InlineRenameState = {
   isSubmitting: boolean;
 };
 
-export const fileExplorerSessionCacheStore = new Map<string, FileExplorerSessionCache>();
+export type MoveDialogItem = {
+  oldPath: string;
+  oldRawPathToken?: string;
+  name: string;
+  isDirectory: boolean;
+};
+
+export type MoveOperation = {
+  oldPath: string;
+  oldRawPathToken?: string;
+  newPath: string;
+  name: string;
+  isDirectory: boolean;
+};
+
+export type MoveOperationData = {
+  backend: FileExplorerBackendKind;
+  items: MoveDialogItem[];
+};
+
+export type MoveSuccessRefreshPlan = {
+  sourceDirectory: string;
+  targetDirectory: string;
+  shouldClearSelection: true;
+};
+
+export const fileExplorerSessionCacheStore = new Map<
+  string,
+  FileExplorerSessionCache
+>();
 export const MAX_VISITED_HISTORY = 30;
 export const FILE_LIST_ITEM_HEIGHT = 30;
 export const FILE_LIST_HEADER_HEIGHT = 28;
 export const FILE_LIST_OVERSCAN = 8;
 export const PARENT_DIRECTORY_ENTRY_NAME = "..";
 
-export type FileSortColumn = "name" | "mtime" | "size" | "permissions" | "owner" | "group";
+export type FileSortColumn =
+  | "name"
+  | "mtime"
+  | "size"
+  | "permissions"
+  | "owner"
+  | "group";
 export type FileSortDirection = "asc" | "desc";
 export type FileSortMode = {
   column: FileSortColumn;
@@ -113,7 +156,10 @@ export const MIN_FILE_LIST_COLUMN_WIDTHS: FileListColumnWidths = {
   group: 76,
 };
 
-export const DEFAULT_FILE_SORT_DIRECTIONS: Record<FileSortColumn, FileSortDirection> = {
+export const DEFAULT_FILE_SORT_DIRECTIONS: Record<
+  FileSortColumn,
+  FileSortDirection
+> = {
   name: "asc",
   mtime: "desc",
   size: "desc",
@@ -314,7 +360,9 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
 };
 
 export const TEXT_EXTENSIONS = new Set([
-  ...Object.keys(LANGUAGE_BY_EXTENSION).map((extension) => extension.toLocaleLowerCase()),
+  ...Object.keys(LANGUAGE_BY_EXTENSION).map((extension) =>
+    extension.toLocaleLowerCase(),
+  ),
   "asc",
   "csv",
   "env",
@@ -374,7 +422,10 @@ export function getLocalPathName(path: string, fallback: string) {
 
 export function getFileExtension(name: string) {
   const normalized = name.trim().toLocaleLowerCase();
-  const lastSlash = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
+  const lastSlash = Math.max(
+    normalized.lastIndexOf("/"),
+    normalized.lastIndexOf("\\"),
+  );
   const baseName = normalized.slice(lastSlash + 1);
   const index = baseName.lastIndexOf(".");
   return index > 0 ? baseName.slice(index + 1) : "";
@@ -389,7 +440,14 @@ export type FilePreviewKind =
   | "pdf"
   | "unsupported";
 
-export const IMAGE_PREVIEW_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
+export const IMAGE_PREVIEW_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+]);
 export const MARKDOWN_PREVIEW_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
 export const CSV_PREVIEW_EXTENSIONS = new Set(["csv", "tsv"]);
 export const JSON_PREVIEW_EXTENSIONS = new Set(["json", "jsonc", "json5"]);
@@ -429,7 +487,9 @@ export function isKnownBinaryFile(name: string) {
 }
 
 function getNormalizedBaseName(name: string) {
-  return name.split(/[\\/]/).pop()?.toLocaleLowerCase() || name.toLocaleLowerCase();
+  return (
+    name.split(/[\\/]/).pop()?.toLocaleLowerCase() || name.toLocaleLowerCase()
+  );
 }
 
 export function isKnownTextFile(name: string) {
@@ -447,7 +507,9 @@ export function isKnownTextFile(name: string) {
   );
 }
 
-export function getRemoteFileTextKind(name: string): "text" | "binary" | "unknown" {
+export function getRemoteFileTextKind(
+  name: string,
+): "text" | "binary" | "unknown" {
   if (isKnownTextFile(name)) return "text";
   if (isKnownBinaryFile(name)) return "binary";
   return "unknown";
@@ -466,12 +528,19 @@ export function languageFromFilename(name: string) {
   }
 
   if (baseName === "cmakelists.txt") return "cmake";
-  if (baseName === "dockerfile" || baseName.endsWith(".dockerfile")) return "dockerfile";
-  if (baseName === "makefile" || baseName === "gnumakefile" || baseName === "justfile") {
+  if (baseName === "dockerfile" || baseName.endsWith(".dockerfile"))
+    return "dockerfile";
+  if (
+    baseName === "makefile" ||
+    baseName === "gnumakefile" ||
+    baseName === "justfile"
+  ) {
     return "makefile";
   }
-  if (baseName === "nginx.conf" || baseName.endsWith(".nginx.conf")) return "nginx";
-  if (baseName === "docker-compose.yml" || baseName === "docker-compose.yaml") return "yaml";
+  if (baseName === "nginx.conf" || baseName.endsWith(".nginx.conf"))
+    return "nginx";
+  if (baseName === "docker-compose.yml" || baseName === "docker-compose.yaml")
+    return "yaml";
   return LANGUAGE_BY_EXTENSION[getFileExtension(name)] || "plaintext";
 }
 
@@ -501,10 +570,17 @@ function isUncRoot(path: string) {
 }
 
 function getLocalSeparator(path: string) {
-  return path.includes("\\") || isWindowsDriveRoot(path) || path.startsWith("\\\\") ? "\\" : "/";
+  return path.includes("\\") ||
+    isWindowsDriveRoot(path) ||
+    path.startsWith("\\\\")
+    ? "\\"
+    : "/";
 }
 
-export function normalizeExplorerPath(path: string, backend: FileExplorerBackendKind) {
+export function normalizeExplorerPath(
+  path: string,
+  backend: FileExplorerBackendKind,
+) {
   if (backend === "remote") return normalizeDirectoryPath(path);
   const trimmed = path.trim();
   if (!trimmed) return "";
@@ -522,23 +598,39 @@ export function getRemoteParentDirectory(path: string) {
   return index <= 0 ? "/" : normalized.slice(0, index);
 }
 
-export function getExplorerParentDirectory(path: string, backend: FileExplorerBackendKind) {
+export function getExplorerParentDirectory(
+  path: string,
+  backend: FileExplorerBackendKind,
+) {
   if (backend === "remote") return getRemoteParentDirectory(path);
 
   const normalized = normalizeExplorerPath(path, backend);
-  if (!normalized || normalized === "/" || normalized === "\\" || isWindowsDriveRoot(normalized)) {
+  if (
+    !normalized ||
+    normalized === "/" ||
+    normalized === "\\" ||
+    isWindowsDriveRoot(normalized)
+  ) {
     return normalized;
   }
   if (isUncRoot(normalized)) return normalized;
 
-  const lastSlash = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
+  const lastSlash = Math.max(
+    normalized.lastIndexOf("/"),
+    normalized.lastIndexOf("\\"),
+  );
   if (lastSlash < 0) return normalized;
   if (lastSlash === 0) return normalized.slice(0, 1);
-  if (lastSlash === 2 && /^[a-zA-Z]:/.test(normalized)) return `${normalized.slice(0, 2)}\\`;
+  if (lastSlash === 2 && /^[a-zA-Z]:/.test(normalized))
+    return `${normalized.slice(0, 2)}\\`;
   return normalized.slice(0, lastSlash);
 }
 
-export function joinExplorerPath(basePath: string, name: string, backend: FileExplorerBackendKind) {
+export function joinExplorerPath(
+  basePath: string,
+  name: string,
+  backend: FileExplorerBackendKind,
+) {
   if (backend === "remote") {
     return basePath === "/" ? `/${name}` : `${basePath}/${name}`;
   }
@@ -549,6 +641,77 @@ export function joinExplorerPath(basePath: string, name: string, backend: FileEx
     return `${normalizedBase}${name}`;
   }
   return `${normalizedBase}${separator}${name}`;
+}
+
+function isLocalWindowsStylePath(path: string) {
+  return (
+    /^[a-zA-Z]:[\\/]/.test(path) ||
+    path.startsWith("\\\\") ||
+    path.includes("\\")
+  );
+}
+
+export function buildMoveTargetPath(
+  targetDirectory: string,
+  entryName: string,
+  backend: FileExplorerBackendKind,
+) {
+  const normalizedTargetDirectory = normalizeExplorerPath(
+    targetDirectory,
+    backend,
+  );
+  return joinExplorerPath(normalizedTargetDirectory, entryName, backend);
+}
+
+export function buildMoveOperations(
+  data: MoveOperationData,
+  targetDirectory: string,
+): MoveOperation[] {
+  return data.items.map((item) => ({
+    ...item,
+    newPath: buildMoveTargetPath(targetDirectory, item.name, data.backend),
+  }));
+}
+
+export function isMoveToSameDirectory(
+  sourceDirectory: string,
+  targetDirectory: string,
+  backend: FileExplorerBackendKind,
+) {
+  const normalizedSourceDirectory = normalizeExplorerPath(
+    sourceDirectory,
+    backend,
+  );
+  const normalizedTargetDirectory = normalizeExplorerPath(
+    targetDirectory,
+    backend,
+  );
+  if (!normalizedSourceDirectory || !normalizedTargetDirectory) return false;
+  if (backend === "remote") {
+    return normalizedSourceDirectory === normalizedTargetDirectory;
+  }
+  return isLocalWindowsStylePath(normalizedSourceDirectory) ||
+    isLocalWindowsStylePath(normalizedTargetDirectory)
+    ? normalizedSourceDirectory.toLocaleLowerCase() ===
+        normalizedTargetDirectory.toLocaleLowerCase()
+    : normalizedSourceDirectory === normalizedTargetDirectory;
+}
+
+export function buildMoveSuccessRefreshPlan(
+  sourceDirectory: string,
+  targetDirectory: string,
+  backend: FileExplorerBackendKind,
+): MoveSuccessRefreshPlan | null {
+  const normalizedSourceDirectory = normalizeExplorerPath(
+    sourceDirectory,
+    backend,
+  );
+  if (!normalizedSourceDirectory) return null;
+  return {
+    sourceDirectory: normalizedSourceDirectory,
+    targetDirectory: normalizeExplorerPath(targetDirectory, backend),
+    shouldClearSelection: true,
+  };
 }
 
 export function pathStartsWithDirectory(
@@ -587,7 +750,11 @@ export function buildBreadcrumbSegments(
   const normalizedPath = normalizeExplorerPath(currentPath || homeDir, backend);
   if (!normalizedPath) return [];
 
-  const makeSegment = (label: string, path: string, isRoot: boolean): BreadcrumbSegment => {
+  const makeSegment = (
+    label: string,
+    path: string,
+    isRoot: boolean,
+  ): BreadcrumbSegment => {
     const normalizedSegmentPath = normalizeExplorerPath(path, backend);
     return {
       id: normalizedSegmentPath || path || label,
@@ -601,7 +768,8 @@ export function buildBreadcrumbSegments(
   if (backend === "remote") {
     const rootPath = "/";
     const segments = [makeSegment("/", rootPath, true)];
-    const suffix = normalizedPath === rootPath ? "" : normalizedPath.slice(rootPath.length);
+    const suffix =
+      normalizedPath === rootPath ? "" : normalizedPath.slice(rootPath.length);
     const parts = suffix.split("/").filter(Boolean);
     let accumulated = rootPath;
     for (const part of parts) {
@@ -656,13 +824,53 @@ export function buildBreadcrumbSegments(
   const parts = normalizedPath.split(/[\\/]/).filter(Boolean);
   let accumulated = "";
   return parts.map((part, index) => {
-    accumulated = accumulated ? joinExplorerPath(accumulated, part, backend) : part;
+    accumulated = accumulated
+      ? joinExplorerPath(accumulated, part, backend)
+      : part;
     return makeSegment(part, accumulated, index === 0);
   });
 }
 
 export function isParentDirectoryEntry(entry: FileEntry) {
   return entry.name === PARENT_DIRECTORY_ENTRY_NAME;
+}
+
+export interface SyncExplorerDirectoryToTerminalCwdOptions {
+  enabled: boolean;
+  canBrowseFiles: boolean;
+  sessionId: string | null;
+  backend: FileExplorerBackendKind;
+  currentPath: string;
+  readTerminalCwd: (sessionId: string) => Promise<string | null>;
+  loadDirectory: (
+    path: string,
+    options?: LoadDirectoryOptions,
+  ) => Promise<boolean>;
+}
+
+export async function syncExplorerDirectoryToTerminalCwd({
+  enabled,
+  canBrowseFiles,
+  sessionId,
+  backend,
+  currentPath,
+  readTerminalCwd,
+  loadDirectory,
+}: SyncExplorerDirectoryToTerminalCwdOptions) {
+  if (!enabled || !canBrowseFiles || !sessionId) return false;
+
+  try {
+    const cwd = normalizeExplorerPath(
+      (await readTerminalCwd(sessionId)) ?? "",
+      backend,
+    );
+    if (!cwd || cwd === normalizeExplorerPath(currentPath, backend)) {
+      return false;
+    }
+    return loadDirectory(cwd, { silent: true });
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -686,10 +894,17 @@ export function pushVisitedHistory(
 }
 
 function naturalCompare(left: string, right: string) {
-  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+  return left.localeCompare(right, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
 }
 
-export function compareFileEntries(left: FileEntry, right: FileEntry, sortMode: FileSortMode) {
+export function compareFileEntries(
+  left: FileEntry,
+  right: FileEntry,
+  sortMode: FileSortMode,
+) {
   if (left.is_dir !== right.is_dir) return left.is_dir ? -1 : 1;
 
   let result = 0;
@@ -746,8 +961,12 @@ export function buildSessionCacheSnapshot(
     return null;
   }
 
-  const nextHistory = normalizedHistory.length > 0 ? normalizedHistory : [normalizedCurrentPath];
-  const nextHistoryIndex = Math.min(Math.max(historyIndex, 0), nextHistory.length - 1);
+  const nextHistory =
+    normalizedHistory.length > 0 ? normalizedHistory : [normalizedCurrentPath];
+  const nextHistoryIndex = Math.min(
+    Math.max(historyIndex, 0),
+    nextHistory.length - 1,
+  );
 
   const normalizedVisited = visitedHistory
     .map((entry) => normalizeExplorerPath(entry, backend))

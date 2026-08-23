@@ -19,15 +19,18 @@ import {
 } from "@/lib/quickCommandSettings";
 import {
   collectSessionPanes,
+  createFileDocumentPane,
   createSessionPane,
   createWorkspaceTab,
   ensureActivePane,
+  findOpenFileDocument,
   findSessionPaneById,
   getFirstSessionPane,
   getNextPersistOrder,
   insertTabAfter,
   moveTab,
   removeSessionPane,
+  replaceSessionReferences as replacePaneSessionReferences,
   restoreTabFromPersistence,
   serializeTabsForPersistence,
   splitSessionPane,
@@ -37,10 +40,13 @@ import {
 import type {
   AppRuntimeInfo,
   AppSettings,
+  FileDocumentBackend,
+  FileDocumentSnapshot,
   Group,
   PaneSplitDirection,
   SavedConnection,
   SessionPane,
+  SessionType,
   SyncGroup,
   Tab,
   UiConfig,
@@ -222,6 +228,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     show_quick_cmd_bar: true,
     show_serial_send_panel: false,
     serial_send_height: 180,
+    serial_send_clear_after_send: false,
     zoom_level: 1.0,
     language: "en",
     header_status_mode: "session",
@@ -751,6 +758,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [commitTabs],
   );
 
+  const replaceSessionReferences = useCallback(
+    (oldSessionId: string, newSessionId: string) => {
+      const nextTabs = tabsRef.current.map((tab) => ({
+        ...tab,
+        root: replacePaneSessionReferences(tab.root, oldSessionId, newSessionId),
+      }));
+      void commitTabs(nextTabs);
+    },
+    [commitTabs],
+  );
+
   const markPaneConnectionFailed = useCallback(
     (tabId: string, paneId: string, error: string) => {
       const nextTabs = tabsRef.current.map((tab) =>
@@ -837,6 +855,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return pane.id;
     },
     [commitTabs, setActiveTabId],
+  );
+
+  const openFileDocument = useCallback(
+    (input: {
+      sessionId: string;
+      name: string;
+      type: SessionType;
+      connectionId?: string;
+      backend: FileDocumentBackend;
+      path: string;
+      file: FileDocumentSnapshot;
+    }) => {
+      const existing = findOpenFileDocument(tabsRef.current, input);
+      if (existing) {
+        setActivePane(existing.tabId, existing.paneId);
+        return { ...existing, created: false };
+      }
+
+      const pane = createFileDocumentPane(input);
+      const tab = createWorkspaceTab(pane, getNextPersistOrder(tabsRef.current));
+      void commitTabs([...tabsRef.current, tab]);
+      setActiveTabId(tab.id);
+      return { tabId: tab.id, paneId: pane.id, created: true };
+    },
+    [commitTabs, setActivePane, setActiveTabId],
   );
 
   const updateSplitRatio = useCallback(
@@ -1184,6 +1227,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateTabSession,
       markTabConnectionFailed,
       updatePaneSession,
+      replaceSessionReferences,
       markPaneConnectionFailed,
       markPaneConnecting,
       hasTab,
@@ -1191,6 +1235,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setActivePane,
       updateSplitRatio,
       splitPane,
+      openFileDocument,
       closePane,
       reorderTabs,
       updateTab,
@@ -1231,6 +1276,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateTabSession,
       markTabConnectionFailed,
       updatePaneSession,
+      replaceSessionReferences,
       markPaneConnectionFailed,
       markPaneConnecting,
       hasTab,
@@ -1238,6 +1284,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setActivePane,
       updateSplitRatio,
       splitPane,
+      openFileDocument,
       closePane,
       reorderTabs,
       updateTab,
