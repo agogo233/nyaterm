@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import AppLayout from "./components/app/AppLayout";
-import AppOverlayDialogs from "./components/app/AppOverlayDialogs";
 import AppPanelContent from "./components/app/AppPanelContent";
+import ActivityBarResetDialog from "./components/dialog/app/ActivityBarResetDialog";
+import { McpApprovalHost } from "./components/dialog/app/McpApprovalHost";
+import AppOverlayDialogs from "./components/dialog/app/AppOverlayDialogs";
 import type { HostKeyVerifyRequest } from "./components/dialog/connections/HostKeyVerifyDialog";
 import type { OtpRequest } from "./components/dialog/connections/OtpDialog";
 import type { RdpCertificateVerifyRequest } from "./components/dialog/connections/RdpCertificateVerifyDialog";
@@ -25,6 +27,7 @@ import { useModalChildWindows } from "./hooks/useModalChildWindows";
 import { useRemoteGpuOverview } from "./hooks/useRemoteGpuOverview";
 import { useRemoteNpuOverview } from "./hooks/useRemoteNpuOverview";
 import { useRemoteStats } from "./hooks/useRemoteStats";
+import { useSecurityPromptQueue } from "./hooks/useSecurityPromptQueue";
 import { useSessionRuntimeState } from "./hooks/useSessionRuntimeState";
 import { resolveDisplayKeys } from "./hooks/useShortcutMap";
 import { useTerminalZoom } from "./hooks/useTerminalZoom";
@@ -40,6 +43,7 @@ import {
   buildStartupCommandPayload,
   capturePaneReconnectContent,
   closeStaleCreatedSession,
+  createExternalLocalSession,
   createSessionForConnection,
   createSessionForPane,
   createTemporarySession,
@@ -48,21 +52,29 @@ import {
   getRemoteDesktopPaneDisplay,
   getTemporaryLinkSessionType,
   isSessionCreationCancelled,
-  sendStartupCommandToSession,
   type StartupCommandRequest,
+  sendStartupCommandToSession,
 } from "./lib/appSessionFactory";
 import {
   buildPanelOpenUpdate,
+  canUseFloatingPanel,
   canCreateSessionFromPane,
+  clearUnavailableFloatingPanels,
   collectActiveNonSerialSessionIds,
   EXCLUSIVE_PANEL_IDS,
+  type FloatingPanelsState,
   getSideOpenPanels,
   getSideOverlayPanel,
+  getItemSide,
   getVisibleActivityIds,
   hasLiveSession,
-  isActivityItemVisible,
+  isActivityItemAvailable,
   isNonSerialSessionType,
+  moveFloatingPanelSide,
   NON_PANEL_IDS,
+  normalizePanelOpenMode,
+  type PanelOpenMode,
+  reduceFloatingPanelSelect,
   type TrayAction,
 } from "./lib/appWorkspace";
 import { collectFileDocumentPaneIds, removePaneFromTabs } from "./lib/appWorkspaceClose";
@@ -144,23 +156,10 @@ import type {
   SessionInfo,
   SessionPane,
   SessionType,
+  SshRuntimeMode,
   Tab,
   WorkspaceSessionType,
 } from "./types/global";
-
-type SecurityPrompt =
-  | { kind: "host-key"; request: HostKeyVerifyRequest }
-  | { kind: "ssh-agent"; request: SshAgentAuthRequest }
-  | { kind: "otp"; request: OtpRequest }
-  | { kind: "ssh-auth"; request: SshAuthRequest };
-
-function upsertSecurityPrompt(current: SecurityPrompt[], prompt: SecurityPrompt): SecurityPrompt[] {
-  const index = current.findIndex((item) => item.request.requestId === prompt.request.requestId);
-  if (index < 0) return [...current, prompt];
-  const next = [...current];
-  next[index] = prompt;
-  return next;
-}
 
 function safeRecordingName(name: string) {
   return name.normalize("NFC").replace(/[^\p{L}\p{M}\p{N}._-]+/gu, "_") || "session";
@@ -229,6 +228,7 @@ function App() {
     [remoteStatsEnabled],
   );
   const multiPanelOpen = appSettings.appearance.panel_multi_open;
+  const panelOpenMode = normalizePanelOpenMode(uiConfig.panel_open_mode);
   const { t, i18n } = useTranslation();
 
   useEffect(() => {
@@ -253,6 +253,12 @@ function App() {
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
   const [showSyncGroupDialog, setShowSyncGroupDialog] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+  const [showActivityBarResetConfirm, setShowActivityBarResetConfirm] = useState(false);
+  const [floatingPanels, setFloatingPanels] = useState<FloatingPanelsState>({
+    left: null,
+    right: null,
+  });
+  const [lastFloatingSide, setLastFloatingSide] = useState<"left" | "right" | null>(null);
   const {
     pendingFileDocumentClose,
     savingFileDocuments,
@@ -293,7 +299,14 @@ function App() {
   const assetMonitoringCacheRef = useRef<Map<string, AssetMonitoringCacheEntry>>(new Map());
   const assetMonitoringFlushesRef = useRef<Set<string>>(new Set());
 
-  const [securityPromptQueue, setSecurityPromptQueue] = useState<SecurityPrompt[]>([]);
+  const {
+    activeHostKeyRequest,
+    activeSshAgentRequest,
+    activeOtpRequest,
+    activeSshAuthRequest,
+    queueSecurityPrompt,
+    removeSecurityPrompt,
+  } = useSecurityPromptQueue();
   const [dockerSudoPasswordRequest, setDockerSudoPasswordRequest] =
     useState<DockerSudoPasswordRequest | null>(null);
   const [rdpCertificateRequests, setRdpCertificateRequests] = useState<
@@ -304,7 +317,7 @@ function App() {
 
   // Idle auto-lock
   useIdleLock(
-    appSettings.security.enable_screen_lock ? appSettings.security.idle_lock_minutes : 0,
+    appSettings.security.enable_idle_lock ? appSettings.security.idle_lock_minutes : 0,
     isLocked,
     () => setIsLocked(true),
   );
@@ -326,12 +339,103 @@ function App() {
     return () => clearTimeout(timer);
   }, [portable, runtimeInfoLoaded]);
 
+  const closeFloatingPanel = useCallback(
+    (side: "left" | "right") => {
+      if (!floatingPanels[side]) return;
+      const next = { ...floatingPanels, [side]: null };
+      setFloatingPanels(next);
+      if (lastFloatingSide !== side) return;
+      setLastFloatingSide(
+        side === "left" ? (next.right ? "right" : null) : next.left ? "left" : null,
+      );
+    },
+    [floatingPanels, lastFloatingSide],
+  );
+
+  const handleFloatingPanelSelect = useCallback(
+    (panelId: string, side: "left" | "right") => {
+      const next = reduceFloatingPanelSelect(floatingPanels, panelId, side);
+      const otherSide = side === "left" ? "right" : "left";
+      setFloatingPanels(next);
+      setLastFloatingSide(next[side] ? side : next[otherSide] ? otherSide : null);
+    },
+    [floatingPanels],
+  );
+
+  const handleFloatingPanelMove = useCallback(
+    (panelId: string, targetSide: "left" | "right") => {
+      const next = moveFloatingPanelSide(floatingPanels, panelId, targetSide);
+      if (next === floatingPanels) return;
+      setFloatingPanels(next);
+      setLastFloatingSide(targetSide);
+    },
+    [floatingPanels],
+  );
+
+  const handlePanelOpenModeChange = useCallback(
+    (mode: PanelOpenMode) => {
+      const nextMode = normalizePanelOpenMode(mode);
+      setFloatingPanels({ left: null, right: null });
+      setLastFloatingSide(null);
+      updateUi(
+        nextMode === "floating"
+          ? {
+              active_left_panel: null,
+              active_right_panel: null,
+              left_open_panels: [],
+              right_open_panels: [],
+              panel_open_mode: "floating",
+            }
+          : { panel_open_mode: "docked" },
+      );
+    },
+    [updateUi],
+  );
+
+  const openPanel = useCallback(
+    (panelId: string, fallbackSide: "left" | "right" = "left") => {
+      const side = getItemSide(panelId, uiConfig.activity_bar_layout) ?? fallbackSide;
+      if (panelOpenMode === "floating" && canUseFloatingPanel(panelId)) {
+        handleFloatingPanelSelect(panelId, side);
+        return;
+      }
+      updateUi((prev) => buildPanelOpenUpdate(prev, panelId, multiPanelOpen, fallbackSide));
+    },
+    [
+      handleFloatingPanelSelect,
+      multiPanelOpen,
+      panelOpenMode,
+      uiConfig.activity_bar_layout,
+      updateUi,
+    ],
+  );
+
   const handleOpenPanel = useCallback(
     (panelId: "activeSessions" | "syncBackupHistory") => {
-      updateUi((prev) => buildPanelOpenUpdate(prev, panelId, multiPanelOpen));
+      openPanel(panelId);
     },
-    [multiPanelOpen, updateUi],
+    [openPanel],
   );
+
+  useEffect(() => {
+    if (!settingsLoaded || panelOpenMode !== "floating") return;
+    updateUi((prev) => {
+      if (
+        !prev.active_left_panel &&
+        !prev.active_right_panel &&
+        (prev.left_open_panels?.length ?? 0) === 0 &&
+        (prev.right_open_panels?.length ?? 0) === 0
+      ) {
+        return {};
+      }
+      return {
+        active_left_panel: null,
+        active_right_panel: null,
+        left_open_panels: [],
+        right_open_panels: [],
+      };
+    });
+  }, [panelOpenMode, settingsLoaded, updateUi]);
 
   // Cross-window event listeners
   useEffect(() => {
@@ -388,68 +492,54 @@ function App() {
     unsubs.push(
       listen<OtpRequest>("otp-request", (event) => {
         if (!eventTargetsCurrentWindow(event.payload.targetWindowLabel)) return;
-        setSecurityPromptQueue((current) =>
-          upsertSecurityPrompt(current, {
-            kind: "otp",
-            request: event.payload,
-          }),
-        );
+        queueSecurityPrompt({
+          kind: "otp",
+          request: event.payload,
+        });
       }),
     );
 
     unsubs.push(
       listen<SshAuthRequest>("ssh-auth-request", (event) => {
         if (!eventTargetsCurrentWindow(event.payload.targetWindowLabel)) return;
-        setSecurityPromptQueue((current) =>
-          upsertSecurityPrompt(current, {
-            kind: "ssh-auth",
-            request: event.payload,
-          }),
-        );
+        queueSecurityPrompt({
+          kind: "ssh-auth",
+          request: event.payload,
+        });
       }),
     );
 
     unsubs.push(
       listen<SshAgentAuthRequest>("ssh-agent-auth-pending", (event) => {
         if (!eventTargetsCurrentWindow(event.payload.targetWindowLabel)) return;
-        setSecurityPromptQueue((current) =>
-          upsertSecurityPrompt(current, {
-            kind: "ssh-agent",
-            request: event.payload,
-          }),
-        );
+        queueSecurityPrompt({
+          kind: "ssh-agent",
+          request: event.payload,
+        });
       }),
     );
     unsubs.push(
       listen<SshAgentAuthRequest>("ssh-agent-auth-failed", (event) => {
         if (!eventTargetsCurrentWindow(event.payload.targetWindowLabel)) return;
-        setSecurityPromptQueue((current) =>
-          upsertSecurityPrompt(current, {
-            kind: "ssh-agent",
-            request: event.payload,
-          }),
-        );
+        queueSecurityPrompt({
+          kind: "ssh-agent",
+          request: event.payload,
+        });
       }),
     );
     unsubs.push(
       listen<{ requestId: string }>("ssh-agent-auth-resolved", (event) => {
-        setSecurityPromptQueue((current) =>
-          current.filter((item) => item.request.requestId !== event.payload.requestId),
-        );
+        removeSecurityPrompt(event.payload.requestId);
       }),
     );
     unsubs.push(
       listen<{ requestId: string }>("host-key-verify-resolved", (event) => {
-        setSecurityPromptQueue((current) =>
-          current.filter((item) => item.request.requestId !== event.payload.requestId),
-        );
+        removeSecurityPrompt(event.payload.requestId);
       }),
     );
     unsubs.push(
       listen<{ requestId: string }>("security-prompt-resolved", (event) => {
-        setSecurityPromptQueue((current) =>
-          current.filter((item) => item.request.requestId !== event.payload.requestId),
-        );
+        removeSecurityPrompt(event.payload.requestId);
       }),
     );
 
@@ -463,12 +553,10 @@ function App() {
     unsubs.push(
       listen<HostKeyVerifyRequest>("host-key-verify", (event) => {
         if (!eventTargetsCurrentWindow(event.payload.targetWindowLabel)) return;
-        setSecurityPromptQueue((current) =>
-          upsertSecurityPrompt(current, {
-            kind: "host-key",
-            request: event.payload,
-          }),
-        );
+        queueSecurityPrompt({
+          kind: "host-key",
+          request: event.payload,
+        });
       }),
     );
 
@@ -657,7 +745,9 @@ function App() {
     markPaneConnecting,
     markPaneConnectionFailed,
     markTabConnectionFailed,
+    queueSecurityPrompt,
     recordRecentConnection,
+    removeSecurityPrompt,
     setActivePane,
     setActiveTabId,
     updateAutoIconForSessionStart,
@@ -731,11 +821,18 @@ function App() {
   }, [savedConnections, tabs]);
 
   const handleAssetMonitoringPatch = useCallback(
-    (sessionId: string, patch: AssetMetadata) => {
-      const connectionId = savedSshConnectionIdBySessionId.get(sessionId);
+    (sourceSessionId: string, targetSessionId: string, patch: AssetMetadata) => {
+      if (sourceSessionId !== targetSessionId) return;
+
+      const connectionId = savedSshConnectionIdBySessionId.get(targetSessionId);
       if (!connectionId) return;
 
-      recordAssetMonitoringPatch(assetMonitoringCacheRef.current, sessionId, connectionId, patch);
+      recordAssetMonitoringPatch(assetMonitoringCacheRef.current, {
+        sourceSessionId,
+        targetSessionId,
+        connectionId,
+        patch,
+      });
     },
     [savedSshConnectionIdBySessionId],
   );
@@ -743,6 +840,17 @@ function App() {
   const flushAssetMonitoringCache = useCallback(async (sessionId: string) => {
     const entry = assetMonitoringCacheRef.current.get(sessionId);
     if (!entry || assetMonitoringFlushesRef.current.has(sessionId)) return;
+    if (entry.sessionId !== sessionId) {
+      assetMonitoringCacheRef.current.delete(sessionId);
+      logger.warn({
+        domain: "session.lifecycle",
+        event: "asset.owner_mismatch",
+        message: "Discarded monitored asset snapshot with a mismatched session owner",
+        ids: { connection_id: entry.connectionId, session_id: sessionId },
+        data: { source_session_id: entry.sessionId },
+      });
+      return;
+    }
 
     assetMonitoringFlushesRef.current.add(sessionId);
     try {
@@ -842,7 +950,13 @@ function App() {
   );
 
   const connectSavedConnection = useCallback(
-    async (connection: SavedConnection, options?: { failureContext?: string }) => {
+    async (
+      connection: SavedConnection,
+      options?: {
+        failureContext?: string;
+        runtimeModeOverride?: SshRuntimeMode;
+      },
+    ) => {
       const pending = addPendingTab(
         connection.name,
         getConnectionSessionType(connection),
@@ -854,7 +968,12 @@ function App() {
       const { tabId, createRequestId } = pending;
 
       try {
-        const sessionId = await createSessionForConnection(connection, createRequestId);
+        const sessionId = await createSessionForConnection(
+          connection,
+          createRequestId,
+          undefined,
+          options?.runtimeModeOverride,
+        );
         if (!hasTab(tabId)) {
           await closeStaleCreatedSession(sessionId);
           return;
@@ -932,12 +1051,51 @@ function App() {
     [addPendingTab, hasTab, markTabConnectionFailed, t, updateTabSession],
   );
 
+  const connectExternalLocalSession = useCallback(
+    async (workingDir: string | null) => {
+      const pending = addPendingTab(
+        t("menu.newLocalTerminal"),
+        "Local",
+        undefined,
+      );
+      const { tabId, createRequestId } = pending;
+
+      try {
+        const sessionId = await createExternalLocalSession(
+          workingDir,
+          createRequestId,
+        );
+        if (!hasTab(tabId)) {
+          await closeStaleCreatedSession(sessionId);
+          return;
+        }
+        updateTabSession(tabId, sessionId);
+        focusTerminalSession(sessionId);
+      } catch (error) {
+        if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
+          return;
+        }
+        const errorMessage = getErrorMessage(error);
+        logger.error({
+          domain: "session.lifecycle",
+          event: "external_local.open_failed",
+          message: "External local terminal failed",
+          error,
+        });
+        markTabConnectionFailed(tabId, errorMessage);
+        toast.error(t("savedConnections.connectionFailed", { error: errorMessage }));
+      }
+    },
+    [addPendingTab, hasTab, markTabConnectionFailed, t, updateTabSession],
+  );
+
   const chooseExternalConnection = useCallback(
     (resolution: Extract<ExternalConnectionResolution, { kind: "ambiguous" }>) =>
       new Promise<ExternalConnectionChoice>((resolve) => {
         setExternalMatchDialog({
           connections: resolution.connections,
           temporary: resolution.temporary,
+          runtimeModeOverride: resolution.runtimeModeOverride,
           resolve,
         });
       }),
@@ -984,6 +1142,23 @@ function App() {
         return;
       }
 
+      if (parsed.intent.protocol === "local") {
+        logger.info({
+          domain: "app.lifecycle",
+          event: "external_open.local_terminal_created",
+          message: "External open will create a local terminal",
+          ids: { request_id: request.id },
+          data: {
+            scheme: parsed.intent.protocol,
+            source: request.source,
+            target_window_label: request.targetWindowLabel,
+            has_working_dir: parsed.intent.workingDir !== null,
+          },
+        });
+        await connectExternalLocalSession(parsed.intent.workingDir);
+        return;
+      }
+
       const latestConnections = await invoke<SavedConnection[]>("get_saved_connections");
       const resolution = findExternalConnectionMatches(latestConnections, parsed.intent);
 
@@ -1003,6 +1178,7 @@ function App() {
         if (await confirmExternalPostLogin(resolution.connection)) {
           await connectSavedConnection(resolution.connection, {
             failureContext: "External open saved connection failed",
+            runtimeModeOverride: resolution.runtimeModeOverride,
           });
         }
         return;
@@ -1026,6 +1202,7 @@ function App() {
           if (await confirmExternalPostLogin(choice.connection)) {
             await connectSavedConnection(choice.connection, {
               failureContext: "External open saved connection failed",
+              runtimeModeOverride: choice.runtimeModeOverride,
             });
           }
         } else if (choice.kind === "temporary") {
@@ -1053,6 +1230,7 @@ function App() {
     [
       chooseExternalConnection,
       confirmExternalPostLogin,
+      connectExternalLocalSession,
       connectSavedConnection,
       connectTemporaryConnection,
       t,
@@ -1153,11 +1331,11 @@ function App() {
       const detail = (event as CustomEvent<AIOpenIntent>).detail;
       if (!detail) return;
       setAiIntent(detail);
-      updateUi((prev) => buildPanelOpenUpdate(prev, "aiAssistant", multiPanelOpen, "right"));
+      openPanel("aiAssistant", "right");
     };
     window.addEventListener(AI_OPEN_EVENT, handler);
     return () => window.removeEventListener(AI_OPEN_EVENT, handler);
-  }, [multiPanelOpen, updateUi]);
+  }, [openPanel]);
 
   const { unreadTabIds, disconnectedTabIds } = useTabStatusIndicators(tabs, activeTabId);
 
@@ -1679,6 +1857,18 @@ function App() {
   );
 
   const handleToggleLeftSidebar = useCallback(() => {
+    if (panelOpenMode === "floating") {
+      if (floatingPanels.left) {
+        closeFloatingPanel("left");
+        return;
+      }
+      const first = getVisibleActivityIds(
+        [...uiConfig.activity_bar_layout.left_top, ...uiConfig.activity_bar_layout.left_bottom],
+        uiConfig,
+      ).find(canUseFloatingPanel);
+      if (first) handleFloatingPanelSelect(first, "left");
+      return;
+    }
     updateUi((prev) => {
       if (multiPanelOpen) {
         if ((prev.left_open_panels?.length ?? 0) > 0 || prev.active_left_panel) {
@@ -1700,9 +1890,29 @@ function App() {
       ).find((id) => !NON_PANEL_IDS.has(id));
       return { active_left_panel: first ?? null };
     });
-  }, [multiPanelOpen, updateUi]);
+  }, [
+    closeFloatingPanel,
+    floatingPanels.left,
+    handleFloatingPanelSelect,
+    multiPanelOpen,
+    panelOpenMode,
+    uiConfig,
+    updateUi,
+  ]);
 
   const handleToggleRightSidebar = useCallback(() => {
+    if (panelOpenMode === "floating") {
+      if (floatingPanels.right) {
+        closeFloatingPanel("right");
+        return;
+      }
+      const first = getVisibleActivityIds(
+        [...uiConfig.activity_bar_layout.right_top, ...uiConfig.activity_bar_layout.right_bottom],
+        uiConfig,
+      ).find(canUseFloatingPanel);
+      if (first) handleFloatingPanelSelect(first, "right");
+      return;
+    }
     updateUi((prev) => {
       if (multiPanelOpen) {
         if ((prev.right_open_panels?.length ?? 0) > 0 || prev.active_right_panel) {
@@ -1724,7 +1934,15 @@ function App() {
       ).find((id) => !NON_PANEL_IDS.has(id));
       return { active_right_panel: first ?? null };
     });
-  }, [multiPanelOpen, updateUi]);
+  }, [
+    closeFloatingPanel,
+    floatingPanels.right,
+    handleFloatingPanelSelect,
+    multiPanelOpen,
+    panelOpenMode,
+    uiConfig,
+    updateUi,
+  ]);
 
   const { handleZoomIn, handleZoomOut, handleResetZoom } = useTerminalZoom(
     updateAppSettings,
@@ -1737,10 +1955,14 @@ function App() {
   }, []);
 
   const handleLockScreen = useCallback(() => {
-    if (appSettings.security.enable_screen_lock) {
+    if (appSettings.security.enable_startup_lock || appSettings.security.enable_idle_lock) {
       setIsLocked(true);
     }
-  }, [appSettings.security.enable_screen_lock, setIsLocked]);
+  }, [
+    appSettings.security.enable_idle_lock,
+    appSettings.security.enable_startup_lock,
+    setIsLocked,
+  ]);
 
   const persistWorkspaceLayoutNow = useCallback(async () => {
     if (!settingsLoaded || !startupRestoreComplete || !terminalWindowsRestoredRef.current) {
@@ -2589,9 +2811,9 @@ function App() {
 
   const handleOpenChat = useCallback(() => {
     if (!isLocked) {
-      updateUi((prev) => buildPanelOpenUpdate(prev, "aiAssistant", multiPanelOpen, "right"));
+      openPanel("aiAssistant", "right");
     }
-  }, [isLocked, multiPanelOpen, updateUi]);
+  }, [isLocked, openPanel]);
 
   const handleShowAllCommands = useCallback(() => {
     if (!isLocked) {
@@ -2815,16 +3037,25 @@ function App() {
     leftBottomItems,
     rightTopItems,
     rightBottomItems,
+    leftHiddenItems,
+    rightHiddenItems,
     showLabels,
     toggleActiveIds,
     handleItemSelect,
     handleReorder,
     handleMoveItem,
     handleToggleLabel,
+    handleHideItem,
+    handleShowItem,
+    handleToggleItemVisibility,
+    handleResetActivityBarLayout,
   } = useActivityBarController({
     uiConfig,
     recordingSessions,
     multiPanelOpen,
+    panelOpenMode,
+    onFloatingPanelSelect: handleFloatingPanelSelect,
+    onFloatingPanelMove: handleFloatingPanelMove,
     updateUi,
     setIsLocked,
     t,
@@ -2855,12 +3086,14 @@ function App() {
     ? liveSessionsById?.get(activeLiveSshSessionId)
     : null;
   const activeStatsSessionId =
-    activeLiveSshSessionId && (activeLiveSshSessionInfo?.remote_stats_enabled ?? true)
+    activeLiveSshSessionId &&
+    (activeLiveSshSessionInfo?.remote_stats_enabled ?? true) &&
+    activeConnection?.ssh_profile !== "network_device"
       ? activeLiveSshSessionId
       : null;
   const activeRemoteStatsEnabled = remoteStatsEnabled && Boolean(activeStatsSessionId);
   const remoteStats = useRemoteStats(
-    activeLiveSshSessionId,
+    activeStatsSessionId,
     activeRemoteStatsEnabled,
     uiConfig.remote_stats_interval ?? 3,
   );
@@ -2872,40 +3105,68 @@ function App() {
     (uiConfig.show_ascend_npu_monitor ?? false) ||
     (headerStatusVisible && headerStatusMode === "npu");
   const gpuOverviewState = useRemoteGpuOverview(
-    activeLiveSshSessionId,
+    activeStatsSessionId,
     gpuOverviewEnabled && Boolean(activeStatsSessionId),
     uiConfig.gpu_monitor_interval ?? 3,
   );
   const npuOverviewState = useRemoteNpuOverview(
-    activeLiveSshSessionId,
+    activeStatsSessionId,
     npuOverviewEnabled && Boolean(activeStatsSessionId),
     uiConfig.ascend_npu_monitor_interval ?? 3,
   );
 
   useEffect(() => {
-    if (!activeStatsSessionId || !remoteStats.stats) return;
+    if (
+      !activeStatsSessionId ||
+      !remoteStats.stats ||
+      remoteStats.sessionId !== activeStatsSessionId
+    ) {
+      return;
+    }
 
     const patch = buildAssetPatchFromRemoteStats(remoteStats.stats);
     if (patch) {
-      handleAssetMonitoringPatch(activeStatsSessionId, patch);
+      handleAssetMonitoringPatch(remoteStats.sessionId, activeStatsSessionId, patch);
     }
-  }, [activeStatsSessionId, handleAssetMonitoringPatch, remoteStats.stats]);
+  }, [activeStatsSessionId, handleAssetMonitoringPatch, remoteStats.sessionId, remoteStats.stats]);
   useEffect(() => {
-    if (!activeStatsSessionId || !gpuOverviewState.overview) return;
+    if (
+      !activeStatsSessionId ||
+      !gpuOverviewState.overview ||
+      gpuOverviewState.sessionId !== activeStatsSessionId
+    ) {
+      return;
+    }
 
     const patch = buildAssetPatchFromGpuOverview(gpuOverviewState.overview);
     if (patch) {
-      handleAssetMonitoringPatch(activeStatsSessionId, patch);
+      handleAssetMonitoringPatch(gpuOverviewState.sessionId, activeStatsSessionId, patch);
     }
-  }, [activeStatsSessionId, gpuOverviewState.overview, handleAssetMonitoringPatch]);
+  }, [
+    activeStatsSessionId,
+    gpuOverviewState.overview,
+    gpuOverviewState.sessionId,
+    handleAssetMonitoringPatch,
+  ]);
   useEffect(() => {
-    if (!activeStatsSessionId || !npuOverviewState.overview) return;
+    if (
+      !activeStatsSessionId ||
+      !npuOverviewState.overview ||
+      npuOverviewState.sessionId !== activeStatsSessionId
+    ) {
+      return;
+    }
 
     const patch = buildAssetPatchFromNpuOverview(npuOverviewState.overview);
     if (patch) {
-      handleAssetMonitoringPatch(activeStatsSessionId, patch);
+      handleAssetMonitoringPatch(npuOverviewState.sessionId, activeStatsSessionId, patch);
     }
-  }, [activeStatsSessionId, handleAssetMonitoringPatch, npuOverviewState.overview]);
+  }, [
+    activeStatsSessionId,
+    handleAssetMonitoringPatch,
+    npuOverviewState.overview,
+    npuOverviewState.sessionId,
+  ]);
 
   const activeSerialSessionId =
     activePane &&
@@ -3080,25 +3341,116 @@ function App() {
     () => (multiPanelOpen ? new Set(rightPanelIds) : undefined),
     [multiPanelOpen, rightPanelIds],
   );
+  const dockedLeftPanelIds = panelOpenMode === "floating" ? [] : leftPanelIds;
+  const dockedRightPanelIds = panelOpenMode === "floating" ? [] : rightPanelIds;
+  const dockedLeftOverlayPanelId = panelOpenMode === "floating" ? null : leftOverlayPanelId;
+  const dockedRightOverlayPanelId = panelOpenMode === "floating" ? null : rightOverlayPanelId;
+  const visibleFloatingPanels =
+    panelOpenMode === "floating" ? floatingPanels : { left: null, right: null };
+  const leftActivityActiveIds = useMemo(() => {
+    if (panelOpenMode !== "floating") return leftActiveIds;
+    return floatingPanels.left ? new Set([floatingPanels.left]) : undefined;
+  }, [floatingPanels.left, leftActiveIds, panelOpenMode]);
+  const rightActivityActiveIds = useMemo(() => {
+    if (panelOpenMode !== "floating") return rightActiveIds;
+    return floatingPanels.right ? new Set([floatingPanels.right]) : undefined;
+  }, [floatingPanels.right, panelOpenMode, rightActiveIds]);
+
+  useEffect(() => {
+    if (panelOpenMode !== "floating") return;
+    const next = clearUnavailableFloatingPanels(floatingPanels, uiConfig);
+    if (next === floatingPanels) return;
+    setFloatingPanels(next);
+    setLastFloatingSide((current) => {
+      if (current && next[current]) return current;
+      return next.right ? "right" : next.left ? "left" : null;
+    });
+  }, [floatingPanels, panelOpenMode, uiConfig]);
+
+  useEffect(() => {
+    if (panelOpenMode !== "floating") return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (isLocked || modalChildWindowCount > 0) return;
+      if (
+        showAbout ||
+        showUpdateDialog ||
+        showSyncGroupDialog ||
+        showQuitConfirm ||
+        showActivityBarResetConfirm ||
+        showSessionQuickSwitcher ||
+        showTemporarySshLink ||
+        Boolean(externalMatchDialog) ||
+        Boolean(postLoginConfirm) ||
+        Boolean(pendingFileDocumentClose) ||
+        Boolean(activeHostKeyRequest) ||
+        Boolean(activeSshAgentRequest) ||
+        Boolean(activeOtpRequest) ||
+        Boolean(activeSshAuthRequest) ||
+        Boolean(dockerSudoPasswordRequest) ||
+        rdpCertificateRequests.length > 0
+      ) {
+        return;
+      }
+
+      const sideToClose =
+        lastFloatingSide && floatingPanels[lastFloatingSide]
+          ? lastFloatingSide
+          : floatingPanels.right
+            ? "right"
+            : floatingPanels.left
+              ? "left"
+              : null;
+      if (!sideToClose) return;
+      event.preventDefault();
+      closeFloatingPanel(sideToClose);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    activeHostKeyRequest,
+    activeOtpRequest,
+    activeSshAgentRequest,
+    activeSshAuthRequest,
+    closeFloatingPanel,
+    dockerSudoPasswordRequest,
+    externalMatchDialog,
+    floatingPanels,
+    isLocked,
+    lastFloatingSide,
+    modalChildWindowCount,
+    panelOpenMode,
+    pendingFileDocumentClose,
+    postLoginConfirm,
+    rdpCertificateRequests.length,
+    showAbout,
+    showActivityBarResetConfirm,
+    showQuitConfirm,
+    showSessionQuickSwitcher,
+    showSyncGroupDialog,
+    showTemporarySshLink,
+    showUpdateDialog,
+  ]);
 
   // When multi-open mode is first enabled, seed the stacks from the active panels.
   useEffect(() => {
-    if (!settingsLoaded || !multiPanelOpen) return;
+    if (!settingsLoaded || !multiPanelOpen || panelOpenMode === "floating") return;
     updateUi((prev) => ({
       ...((prev.left_open_panels?.length ?? 0) === 0 &&
       prev.active_left_panel &&
-      isActivityItemVisible(prev.active_left_panel, prev) &&
+      isActivityItemAvailable(prev.active_left_panel, prev) &&
       !EXCLUSIVE_PANEL_IDS.has(prev.active_left_panel)
         ? { left_open_panels: [prev.active_left_panel] }
         : {}),
       ...((prev.right_open_panels?.length ?? 0) === 0 &&
       prev.active_right_panel &&
-      isActivityItemVisible(prev.active_right_panel, prev) &&
+      isActivityItemAvailable(prev.active_right_panel, prev) &&
       !EXCLUSIVE_PANEL_IDS.has(prev.active_right_panel)
         ? { right_open_panels: [prev.active_right_panel] }
         : {}),
     }));
-  }, [multiPanelOpen, settingsLoaded, updateUi]);
+  }, [multiPanelOpen, panelOpenMode, settingsLoaded, updateUi]);
 
   const handlePanelStackResize = useCallback(
     (
@@ -3134,6 +3486,22 @@ function App() {
     [updateUi],
   );
 
+  const getPanelTitle = useCallback(
+    (panelId: string) => {
+      switch (panelId) {
+        case "securityAuth":
+          return t("securityAuth.title");
+        case "aiAssistant":
+          return t("ai.title");
+        case "recording":
+          return t("recording.panelTitle");
+        default:
+          return t(`panel.${panelId}`);
+      }
+    },
+    [t],
+  );
+
   const renderPanelContent = useCallback(
     (panelId: string | null) => (
       <AppPanelContent
@@ -3141,7 +3509,7 @@ function App() {
         activePane={activePane}
         activeConnection={activeConnection}
         activeSessionId={activeSessionId}
-        activeSshSessionId={activeLiveSshSessionId}
+        activeStatsSessionId={activeStatsSessionId}
         remoteStatsEnabled={activeRemoteStatsEnabled}
         remoteStats={remoteStats}
         gpuMonitorEnabled={uiConfig.show_gpu_monitor ?? false}
@@ -3167,7 +3535,7 @@ function App() {
     ),
     [
       activeConnection,
-      activeLiveSshSessionId,
+      activeStatsSessionId,
       activePane,
       activeSessionId,
       aiIntent,
@@ -3204,7 +3572,11 @@ function App() {
 
   const handleExternalMatchConnection = useCallback((connection: SavedConnection) => {
     setExternalMatchDialog((current) => {
-      current?.resolve({ kind: "saved", connection });
+      current?.resolve({
+        kind: "saved",
+        connection,
+        runtimeModeOverride: current.runtimeModeOverride,
+      });
       return null;
     });
   }, []);
@@ -3230,21 +3602,6 @@ function App() {
       return null;
     });
   }, []);
-
-  const activeSecurityPrompt = securityPromptQueue[0] ?? null;
-  const activeHostKeyRequest =
-    activeSecurityPrompt?.kind === "host-key" ? activeSecurityPrompt.request : null;
-  const activeSshAgentRequest =
-    activeSecurityPrompt?.kind === "ssh-agent" ? activeSecurityPrompt.request : null;
-  const activeOtpRequest =
-    activeSecurityPrompt?.kind === "otp" ? activeSecurityPrompt.request : null;
-  const activeSshAuthRequest =
-    activeSecurityPrompt?.kind === "ssh-auth" ? activeSecurityPrompt.request : null;
-  const removeSecurityPrompt = (requestId: string) => {
-    setSecurityPromptQueue((current) =>
-      current.filter((item) => item.request.requestId !== requestId),
-    );
-  };
 
   return (
     <TransferProvider>
@@ -3277,6 +3634,9 @@ function App() {
             window.dispatchEvent(new CustomEvent("nyaterm:refresh-terminals")),
           locked: isLocked,
           onRequestQuit: handleRequestQuit,
+          onToggleActivityBarItemVisibility: handleToggleItemVisibility,
+          onRequestActivityBarReset: () => setShowActivityBarResetConfirm(true),
+          onPanelOpenModeChange: handlePanelOpenModeChange,
         }}
         mobile={{
           leftOpen: mobileLeftOpen,
@@ -3287,34 +3647,49 @@ function App() {
         leftActivityBar={{
           items: leftTopItems,
           bottomItems: leftBottomItems,
-          activeId: uiConfig.active_left_panel,
-          activeIds: leftActiveIds,
+          hiddenItems: leftHiddenItems,
+          activeId: panelOpenMode === "floating" ? null : uiConfig.active_left_panel,
+          activeIds: leftActivityActiveIds,
           activeBottomIds: toggleActiveIds,
           onSelect: handleItemSelect,
           onReorder: (zoneKey, ids) => handleReorder("left", zoneKey, ids),
           onMoveItem: handleMoveItem,
+          onHideItem: handleHideItem,
+          onShowItem: handleShowItem,
           onToggleLabel: handleToggleLabel,
+          onRequestResetLayout: () => setShowActivityBarResetConfirm(true),
+          panelOpenMode,
+          onPanelOpenModeChange: handlePanelOpenModeChange,
           showLabels,
         }}
         rightActivityBar={{
           items: rightTopItems,
           bottomItems: rightBottomItems,
-          activeId: uiConfig.active_right_panel,
-          activeIds: rightActiveIds,
+          hiddenItems: rightHiddenItems,
+          activeId: panelOpenMode === "floating" ? null : uiConfig.active_right_panel,
+          activeIds: rightActivityActiveIds,
           activeBottomIds: toggleActiveIds,
           onSelect: handleItemSelect,
           onReorder: (zoneKey, ids) => handleReorder("right", zoneKey, ids),
           onMoveItem: handleMoveItem,
+          onHideItem: handleHideItem,
+          onShowItem: handleShowItem,
           onToggleLabel: handleToggleLabel,
+          onRequestResetLayout: () => setShowActivityBarResetConfirm(true),
+          panelOpenMode,
+          onPanelOpenModeChange: handlePanelOpenModeChange,
           showLabels,
         }}
         onLeftResize={handleLeftResize}
         onRightResize={handleRightResize}
         panelContent={renderPanelContent}
-        leftPanelIds={leftPanelIds}
-        rightPanelIds={rightPanelIds}
-        leftOverlayPanelId={leftOverlayPanelId}
-        rightOverlayPanelId={rightOverlayPanelId}
+        panelTitle={getPanelTitle}
+        leftPanelIds={dockedLeftPanelIds}
+        rightPanelIds={dockedRightPanelIds}
+        floatingPanelIds={visibleFloatingPanels}
+        onCloseFloatingPanel={closeFloatingPanel}
+        leftOverlayPanelId={dockedLeftOverlayPanelId}
+        rightOverlayPanelId={dockedRightOverlayPanelId}
         panelStackSizes={uiConfig.panel_stack_sizes ?? {}}
         onPanelStackResize={handlePanelStackResize}
         workspace={{
@@ -3422,6 +3797,7 @@ function App() {
           onRequestClose: handleRequestWindowClose,
         }}
       />
+      <McpApprovalHost />
       <AppOverlayDialogs
         t={t}
         showSessionQuickSwitcher={showSessionQuickSwitcher}
@@ -3448,6 +3824,15 @@ function App() {
         postLoginConfirm={postLoginConfirm}
         onPostLoginConfirmOpenChange={handlePostLoginConfirmOpenChange}
         onPostLoginContinue={handlePostLoginContinue}
+      />
+      <ActivityBarResetDialog
+        t={t}
+        open={showActivityBarResetConfirm}
+        onOpenChange={setShowActivityBarResetConfirm}
+        onConfirm={() => {
+          setShowActivityBarResetConfirm(false);
+          handleResetActivityBarLayout();
+        }}
       />
     </TransferProvider>
   );

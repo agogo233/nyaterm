@@ -1,4 +1,4 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -23,6 +23,7 @@ import {
   renderAiCommandEnd,
   renderAiCommandStart,
 } from "@/lib/aiTerminalRenderer";
+import { createAsyncUnlistenBag } from "@/lib/asyncUnlistenBag";
 import {
   buildTerminalThemeColors,
   isTerminalTransparencyEnabled,
@@ -42,7 +43,7 @@ import { detectCredentialPromptKind } from "@/lib/credentialAutofill";
 import { invoke } from "@/lib/invoke";
 import { hexLuminance } from "@/lib/keywordHighlightPresets";
 import { logger } from "@/lib/logger";
-import { isMacOS } from "@/lib/platform";
+import { isMacOS, isWindows } from "@/lib/platform";
 import { openSendCommandPanel } from "@/lib/sendCommandPanelEvents";
 import {
   buildTerminalCommandInput,
@@ -427,16 +428,16 @@ export default function XTerminal({
     if (!hibernated) return;
 
     let disposed = false;
-    const unlisteners: UnlistenFn[] = [];
+    const unlistenBag = createAsyncUnlistenBag();
     const wake = (event: PendingWakeEvent) => {
       pendingWakeEventsRef.current.push(event);
       if (disposed) return;
       requestWake(event.type);
     };
 
-    const setupWakeListeners = async () => {
-      unlisteners.push(
-        await listen<string>(`session-error-${sessionId}`, (event) => {
+    const setupWakeListeners = () => {
+      unlistenBag.add(
+        listen<string>(`session-error-${sessionId}`, (event) => {
           wake({
             type: "error",
             message: String(
@@ -445,38 +446,33 @@ export default function XTerminal({
           });
         }),
       );
-      unlisteners.push(
-        await listen<void>(`session-closed-${sessionId}`, () => {
+      unlistenBag.add(
+        listen<void>(`session-closed-${sessionId}`, () => {
           wake({ type: "closed" });
         }),
       );
-      unlisteners.push(
-        await listen<ZmodemEventPayload>(
-          `zmodem-event-${sessionId}`,
-          (event) => {
-            wake({ type: "zmodem", payload: event.payload });
-          },
-        ),
+      unlistenBag.add(
+        listen<ZmodemEventPayload>(`zmodem-event-${sessionId}`, (event) => {
+          wake({ type: "zmodem", payload: event.payload });
+        }),
       );
-      unlisteners.push(
-        await listen<AiCaptureEvent>(`ai-capture-${sessionId}`, (event) => {
+      unlistenBag.add(
+        listen<AiCaptureEvent>(`ai-capture-${sessionId}`, (event) => {
           wake({ type: "ai", payload: event.payload });
         }),
       );
-      unlisteners.push(
-        await listen<void>(`focus-terminal-${sessionId}`, () => {
+      unlistenBag.add(
+        listen<void>(`focus-terminal-${sessionId}`, () => {
           wake({ type: "focus" });
         }),
       );
     };
 
-    void setupWakeListeners();
+    setupWakeListeners();
 
     return () => {
       disposed = true;
-      for (const unlisten of unlisteners) {
-        unlisten();
-      }
+      unlistenBag.dispose();
     };
   }, [hibernated, requestWake, sessionId]);
 
@@ -1428,11 +1424,13 @@ export default function XTerminal({
 
       if (data.startsWith("A")) {
         si.enabled = true;
+        si.commandRunning = false;
         return false;
       }
 
       if (data.startsWith("B")) {
         si.enabled = true;
+        si.commandRunning = false;
         resetCommandSuggestionSuppression();
         return false;
       }
@@ -1646,6 +1644,7 @@ export default function XTerminal({
     };
 
     const {
+      outputAckLease,
       outputScheduler,
       outputDrain,
       frameGate,
@@ -1658,6 +1657,7 @@ export default function XTerminal({
       flushQueuedOutputBeforeStatusNotice,
     } = createXTerminalOutputController({
       sessionId,
+      terminalGeneration,
       terminal,
       outputDrainRef,
       frameGateRef,
@@ -2112,6 +2112,9 @@ export default function XTerminal({
       terminal,
       containerEl,
       isMacOS,
+      isWindows,
+      activeRef,
+      visibleRef,
       terminalAppSettingsRef,
       pendingSearchSelectionRef,
       searchSelectionTextRef,
@@ -2218,6 +2221,7 @@ export default function XTerminal({
         frameGateRef.current = null;
       }
       outputDrain.dispose();
+      outputAckLease.dispose();
       if (outputDrainRef.current === outputDrain) {
         outputDrainRef.current = null;
       }

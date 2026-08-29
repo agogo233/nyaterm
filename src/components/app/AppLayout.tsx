@@ -4,8 +4,10 @@ import {
   type ReactNode,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import FloatingPanel from "@/components/app/FloatingPanel";
 import { MdClose, MdTerminal } from "react-icons/md";
 import PanelStack from "@/components/app/PanelStack";
 import AboutDialog from "@/components/dialog/app/AboutDialog";
@@ -74,9 +76,15 @@ interface AppLayoutProps {
   onLeftResize: (delta: number) => void;
   onRightResize: (delta: number) => void;
   panelContent: (panelId: string | null) => ReactNode;
+  panelTitle: (panelId: string) => string;
   /** Panels visible per side, ordered top-to-bottom (single id in single-open mode). */
   leftPanelIds: string[];
   rightPanelIds: string[];
+  floatingPanelIds: {
+    left: string | null;
+    right: string | null;
+  };
+  onCloseFloatingPanel: (side: "left" | "right") => void;
   /** Exclusive panel (e.g. AI assistant) shown alone instead of the stack (multi-open mode). */
   leftOverlayPanelId: string | null;
   rightOverlayPanelId: string | null;
@@ -169,8 +177,11 @@ export default function AppLayout({
   onLeftResize,
   onRightResize,
   panelContent,
+  panelTitle,
   leftPanelIds,
   rightPanelIds,
+  floatingPanelIds,
+  onCloseFloatingPanel,
   leftOverlayPanelId,
   rightOverlayPanelId,
   panelStackSizes,
@@ -185,6 +196,9 @@ export default function AppLayout({
   const backgroundImagePath = appearance.background_image_path?.trim() ?? "";
   const [backgroundDataUrl, setBackgroundDataUrl] = useState("");
   const [serialSendRunning, setSerialSendRunning] = useState(false);
+  // Latch the first time the serial send panel is shown so it stays mounted
+  // (but hidden) afterwards, preserving the user's input across hide/show cycles.
+  const serialSendEverShownRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -233,10 +247,12 @@ export default function AppLayout({
   );
   const hasLeftActivityItems =
     leftActivityBar.items.length > 0 ||
-    (leftActivityBar.bottomItems?.length ?? 0) > 0;
+    (leftActivityBar.bottomItems?.length ?? 0) > 0 ||
+    (leftActivityBar.hiddenItems?.length ?? 0) > 0;
   const hasRightActivityItems =
     rightActivityBar.items.length > 0 ||
-    (rightActivityBar.bottomItems?.length ?? 0) > 0;
+    (rightActivityBar.bottomItems?.length ?? 0) > 0 ||
+    (rightActivityBar.hiddenItems?.length ?? 0) > 0;
   const leftPanelOpen =
     hasLeftActivityItems &&
     (leftPanelIds.length > 0 || Boolean(leftOverlayPanelId));
@@ -246,7 +262,11 @@ export default function AppLayout({
   const leftMobileOpen = hasLeftActivityItems && mobile.leftOpen;
   const rightMobileOpen = hasRightActivityItems && mobile.rightOpen;
   const serialSendVisible = bottomPanel.activePanel === "serialSend";
-  const serialSendMounted = serialSendVisible || serialSendRunning;
+  if (serialSendVisible) {
+    serialSendEverShownRef.current = true;
+  }
+  const serialSendMounted =
+    serialSendVisible || serialSendRunning || serialSendEverShownRef.current;
 
   useEffect(() => {
     const roots = [document.documentElement, document.body];
@@ -425,6 +445,30 @@ export default function AppLayout({
                     <p className="text-sm">{t("common.loading")}</p>
                   </div>
                 </div>
+              )}
+              {floatingPanelIds.left && (
+                <FloatingPanel
+                  side="left"
+                  panelId={floatingPanelIds.left}
+                  width={uiConfig.left_width}
+                  title={panelTitle(floatingPanelIds.left)}
+                  onClose={() => onCloseFloatingPanel("left")}
+                  onResize={onLeftResize}
+                >
+                  {panelContent(floatingPanelIds.left)}
+                </FloatingPanel>
+              )}
+              {floatingPanelIds.right && (
+                <FloatingPanel
+                  side="right"
+                  panelId={floatingPanelIds.right}
+                  width={uiConfig.right_width}
+                  title={panelTitle(floatingPanelIds.right)}
+                  onClose={() => onCloseFloatingPanel("right")}
+                  onResize={onRightResize}
+                >
+                  {panelContent(floatingPanelIds.right)}
+                </FloatingPanel>
               )}
             </div>
 

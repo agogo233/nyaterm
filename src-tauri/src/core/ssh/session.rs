@@ -8,11 +8,11 @@ use super::client::{
 use super::io::{open_shell_channel, ssh_io_loop};
 use crate::config::{
     AiExecutionProfile, SshAgentForwardingConfig, SshAgentForwardingPolicy, SshProfile,
-    effective_cwd_follow_mode_for_profile,
+    SshRuntimeMode, effective_cwd_follow_mode_for_runtime,
 };
 use crate::core::{
-    SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionReadyHook, SessionType,
-    SharedCwd,
+    SessionHandle, SessionInfo, SessionManager, SessionReadyHook, SessionType, SharedCwd,
+    session_command_channel,
 };
 use crate::error::{AppError, AppResult};
 use std::future::Future;
@@ -350,9 +350,12 @@ struct SshRuntimeCapabilities {
 
 fn resolve_runtime_capabilities(config: &SshConfig) -> SshRuntimeCapabilities {
     let network_device_profile = config.ssh_profile == SshProfile::NetworkDevice;
+    let terminal_only = config.runtime_mode == SshRuntimeMode::Terminal;
     SshRuntimeCapabilities {
-        remote_file_browser_enabled: config.sftp.enabled && !network_device_profile,
-        remote_stats_enabled: !network_device_profile,
+        remote_file_browser_enabled: config.sftp.enabled
+            && !network_device_profile
+            && !terminal_only,
+        remote_stats_enabled: !network_device_profile && !terminal_only,
         network_device_profile,
     }
 }
@@ -459,7 +462,7 @@ async fn create_ssh_session_inner(
 
     let session_id = uuid::Uuid::new_v4().to_string();
     let diagnostics = SshDiagnosticContext::new(Some(session_id.clone()));
-    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
+    let (cmd_tx, cmd_rx) = session_command_channel(session_id.clone());
 
     let x11_config = if config.x11_forwarding {
         Some(super::x11_forwarding::prepare_x11_forwarding(&config.x11_display).await)
@@ -483,13 +486,17 @@ async fn create_ssh_session_inner(
     }?;
     diagnostics.set_stage(SshDiagnosticStage::Authenticated);
     let capabilities = resolve_runtime_capabilities(&config);
-    let effective_cwd_follow_mode =
-        effective_cwd_follow_mode_for_profile(&config.sftp, &config.ssh_profile);
+    let effective_cwd_follow_mode = effective_cwd_follow_mode_for_runtime(
+        &config.sftp,
+        &config.ssh_profile,
+        &config.runtime_mode,
+    );
     tracing::info!(
         session_id = %session_id,
         host = %config.host,
         port = config.port,
         ssh_profile = ?config.ssh_profile,
+        runtime_mode = ?config.runtime_mode,
         terminal_type = %config.terminal_type.as_str(),
         sftp_enabled = config.sftp.enabled,
         cwd_follow_mode = ?config.sftp.cwd_follow_mode,
@@ -660,14 +667,18 @@ pub async fn create_multiplexed_ssh_session(
     let diagnostics = SshDiagnosticContext::new(Some(session_id.clone()));
     diagnostics.set_stage(SshDiagnosticStage::Authenticated);
     let capabilities = resolve_runtime_capabilities(&config);
-    let effective_cwd_follow_mode =
-        effective_cwd_follow_mode_for_profile(&config.sftp, &config.ssh_profile);
+    let effective_cwd_follow_mode = effective_cwd_follow_mode_for_runtime(
+        &config.sftp,
+        &config.ssh_profile,
+        &config.runtime_mode,
+    );
     tracing::info!(
         session_id = %session_id,
         source_session_id,
         host = %config.host,
         port = config.port,
         ssh_profile = ?config.ssh_profile,
+        runtime_mode = ?config.runtime_mode,
         terminal_type = %config.terminal_type.as_str(),
         sftp_enabled = config.sftp.enabled,
         cwd_follow_mode = ?config.sftp.cwd_follow_mode,
@@ -677,7 +688,7 @@ pub async fn create_multiplexed_ssh_session(
         shell_detection_timeout_ms = config.sftp.shell_detection_timeout_ms,
         "SSH session initialization starting"
     );
-    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
+    let (cmd_tx, cmd_rx) = session_command_channel(session_id.clone());
 
     if config.x11_forwarding {
         let connection_id = config.connection_id.clone().ok_or_else(|| {
@@ -797,7 +808,7 @@ mod tests {
     };
     use crate::config::{
         SftpSettings, SshAgentEndpoint, SshAgentForwardingConfig, SshAgentForwardingPolicy,
-        SshAgentForwardingSources, SshProfile, SshTerminalType,
+        SshAgentForwardingSources, SshProfile, SshRuntimeMode, SshTerminalType,
     };
     use crate::core::ssh::client::{SshAuth, SshConfig};
     use crate::error::AppError;
@@ -869,6 +880,7 @@ mod tests {
             post_login: None,
             ssh_algorithms: None,
             ssh_profile: profile,
+            runtime_mode: SshRuntimeMode::Standard,
             terminal_type: SshTerminalType::default(),
             sftp: SftpSettings::default(),
             encoding: "UTF-8".to_string(),
@@ -896,5 +908,31 @@ mod tests {
         assert!(resolve_runtime_capabilities(&enabled).remote_file_browser_enabled);
         assert!(!resolve_runtime_capabilities(&disabled).remote_file_browser_enabled);
         assert!(resolve_runtime_capabilities(&enabled).remote_stats_enabled);
+    }
+
+    #[test]
+    fn terminal_runtime_capabilities_disable_background_ssh_features() {
+        let mut config = test_config(SshProfile::Standard);
+        config.runtime_mode = SshRuntimeMode::Terminal;
+
+        let capabilities = resolve_runtime_capabilities(&config);
+
+        assert!(!capabilities.remote_file_browser_enabled);
+        assert!(!capabilities.remote_stats_enabled);
+        assert!(!capabilities.network_device_profile);
+    }
+
+    #[test]
+    fn ssh_runtime_mode_defaults_to_standard() {
+        let config: SshConfig = serde_json::from_value(serde_json::json!({
+            "name": "test",
+            "host": "example.com",
+            "port": 22,
+            "username": "root",
+            "auth": { "type": "none" }
+        }))
+        .expect("ssh config");
+
+        assert_eq!(config.runtime_mode, SshRuntimeMode::Standard);
     }
 }

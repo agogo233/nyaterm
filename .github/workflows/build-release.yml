@@ -277,9 +277,80 @@ jobs:
 
           gh release upload "$env:GITHUB_REF_NAME" "$assetPath" "$signaturePath" --repo "$env:GITHUB_REPOSITORY" --clobber
 
+  build-win7:
+    name: Build Windows 7 x64
+    runs-on: windows-2022
+
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Release version: $version"
+
+      - name: Build Win7 offline installer
+        id: win7
+        uses: ./.github/actions/build-win7
+        with:
+          artifact-version: ${{ steps.version.outputs.version }}
+
+      - name: Upload Win7 build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-windows-x64-win7
+          path: ${{ steps.win7.outputs.installer-path }}
+          if-no-files-found: error
+          retention-days: 7
+
+  upload-win7-release:
+    name: Upload Windows 7 release asset
+    needs:
+      - build
+      - build-win7
+    runs-on: ubuntu-latest
+
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Win7 build artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: release-assets-windows-x64-win7
+          path: release-assets
+
+      - name: Upload Win7 installer to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          gh release upload "$GITHUB_REF_NAME" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
   rename-assets:
     name: Rename release assets
-    needs: build
+    needs:
+      - build
+      - upload-win7-release
     runs-on: ubuntu-latest
 
     if: startsWith(github.ref, 'refs/tags/v')
@@ -334,6 +405,11 @@ jobs:
               const isSig = assetName.endsWith('.sig');
               const baseName = isSig ? assetName.slice(0, -4) : assetName;
               const lower = baseName.toLowerCase();
+
+              if (lower.includes('win7') || lower.includes('windows-7') || lower.includes('windows_7')) {
+                return null;
+              }
+
               const arch = normalizeArch(baseName);
 
               if (!arch) return null;

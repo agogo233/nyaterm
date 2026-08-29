@@ -31,6 +31,7 @@ export type AIExecutionProfile =
   | "send_only"
   | "disabled";
 export type SshProfile = "standard" | "network_device";
+export type SshRuntimeMode = "standard" | "terminal";
 export type SshTerminalType =
   | "xterm-256color"
   | "xterm"
@@ -54,7 +55,13 @@ export interface SyncGroup {
 export type PaneSplitDirection = "horizontal" | "vertical";
 
 /** Connection type discriminator matching Rust ConnectionType. */
-export type ConnectionTypeTag = "ssh" | "local_terminal" | "telnet" | "serial" | "rdp" | "vnc";
+export type ConnectionTypeTag =
+  | "ssh"
+  | "local_terminal"
+  | "telnet"
+  | "serial"
+  | "rdp"
+  | "vnc";
 
 /** Metadata for a connected or disconnected session. */
 export interface SessionInfo {
@@ -202,6 +209,7 @@ export interface SshConfig {
   post_login?: { command: string; delay_ms: number } | null;
   ssh_algorithms?: SshAlgorithmPreferences | null;
   ssh_profile?: SshProfile;
+  runtime_mode?: SshRuntimeMode;
   terminal_type?: SshTerminalType;
   sftp?: SftpSettings;
   encoding?: string;
@@ -238,7 +246,9 @@ export interface SshAgentForwardingIdentity {
   custom_endpoint_index?: number;
 }
 
-export type SshAgentForwardingEndpointErrorCode = "connect_failed" | "identity_enumeration_failed";
+export type SshAgentForwardingEndpointErrorCode =
+  | "connect_failed"
+  | "identity_enumeration_failed";
 
 export interface SshAgentForwardingEndpointError {
   custom_endpoint_index: number;
@@ -444,6 +454,14 @@ export interface SupportedSshAlgorithms {
   host_keys: AlgorithmOption[];
   compatible: SshAlgorithmDefaults;
   secure: SshAlgorithmDefaults;
+}
+
+export interface ConnectionCustomIcon {
+  id: string;
+  name: string;
+  data_url: string;
+  created_at_ms: number;
+  updated_at_ms: number;
 }
 
 /** Unified saved connection with type-discriminated config. */
@@ -713,6 +731,8 @@ export interface ActivityBarLayout {
   right_bottom: string[];
   /** When true every activity bar icon shows its name below the icon. */
   show_labels: boolean;
+  /** Activity bar item ids hidden by the user without changing their layout position. */
+  hidden_items: string[];
 }
 
 /** Layout preferences: panel widths, active panels, theme. */
@@ -744,6 +764,7 @@ export interface UiConfig {
   open_tabs: RestorableTab[];
   terminal_window_layout: RestorableTerminalWindowNode | null;
   start_workspace_mode?: "workbench" | "assets";
+  panel_open_mode: "docked" | "floating";
   left_width: number;
   right_width: number;
   quick_cmd_height: number;
@@ -1252,7 +1273,8 @@ export interface TranslateResult {
 
 export interface SecuritySettings {
   use_os_keyring: boolean;
-  enable_screen_lock: boolean;
+  enable_startup_lock: boolean;
+  enable_idle_lock: boolean;
   idle_lock_minutes: number;
   master_password?: string;
   host_key_policy: string;
@@ -1308,6 +1330,7 @@ export interface TerminalSettings {
 
 export interface TransferSettings {
   editor_type: "external" | "internal";
+  internal_editor_display: "workspace" | "window";
   download_threads: number;
   upload_threads: number;
   duplicate_strategy: string;
@@ -1338,6 +1361,15 @@ export type AIMode = "ask" | "agent";
 export type AIAgentCommandExecutionMode = "confirm_each" | "smart" | "auto";
 export type AIAgentKind = "nyaterm" | "codex" | "claude_code";
 export type AIPermissionMode = "observer" | "confirm" | "auto";
+export type ExternalMcpSessionScope = "current_window" | "all_sessions";
+export type ExternalMcpServerMode = "temporary" | "persistent";
+export interface ExternalMcpSettings {
+  enabled: boolean;
+  permission_mode: AIPermissionMode;
+  session_scope: ExternalMcpSessionScope;
+  server_mode: ExternalMcpServerMode;
+  idle_timeout_minutes: number;
+}
 export type AIReasoningEffort =
   | "auto"
   | "none"
@@ -1452,6 +1484,28 @@ export interface AISettings {
   agent_smart_auto_execute_max_risk: RiskLevel;
   codex: CodexIntegrationSettings;
   claude_code: ClaudeCodeIntegrationSettings;
+  external_mcp: ExternalMcpSettings;
+}
+
+export interface McpRuntimeStatus {
+  enabled: boolean;
+  running: boolean;
+  error?: string | null;
+  ownerWindowLabel?: string | null;
+  scopedSessionCount: number;
+  connectionCount: number;
+  port?: number | null;
+  generation?: string | null;
+}
+
+export interface McpApprovalRequest {
+  requestId: string;
+  client: string;
+  capability: string;
+  sessionId?: string | null;
+  sessionName?: string | null;
+  parameterSummary: string;
+  risk: RiskLevel;
 }
 
 export interface AIContext {
@@ -1693,6 +1747,7 @@ export interface FileProperties {
   name: string;
   is_dir: boolean;
   is_symlink: boolean;
+  symlink_target?: string | null;
   size: number;
   permissions: string;
   owner: string;
@@ -1828,4 +1883,24 @@ export interface CloudSyncHistoryEntry {
   revision?: string | null;
   duration_ms?: number | null;
   message: string;
+}
+
+// ── SSH Config Import ─────────────────────────────────────────────────────────
+
+export interface SshConfigHop {
+  host: string;
+  port: number;
+  user: string;
+  isTarget: boolean;
+}
+
+export interface SshConfigEntry {
+  alias: string;
+  host: string;
+  port: number;
+  user: string;
+  identityFile?: string | null;
+  proxyJump?: string | null;
+  hops: SshConfigHop[];
+  hostKeyAlias?: string | null;
 }

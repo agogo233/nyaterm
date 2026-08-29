@@ -16,8 +16,9 @@ pub use ai::{
     AiBackendKind, AiCustomActionConfig, AiMode, AiModelConfigItem, AiModelSource,
     AiPermissionMode, AiProviderCredential, AiProviderKind, AiProviderProfile, AiReasoningEffort,
     AiSettings, ClaudeCodeIntegrationSettings, CodexIntegrationSettings, CodexThreadMode,
-    RiskLevel, ai_model_id_for_credential, ai_model_id_for_provider, decrypt_ai_settings,
-    encrypt_ai_settings, mask_ai_settings, merge_masked_ai_settings, normalize_ai_settings,
+    ExternalMcpServerMode, ExternalMcpSessionScope, ExternalMcpSettings, RiskLevel,
+    ai_model_id_for_credential, ai_model_id_for_provider, decrypt_ai_settings, encrypt_ai_settings,
+    mask_ai_settings, merge_masked_ai_settings, normalize_ai_settings,
 };
 pub use appearance::{AppearanceSettings, TerminalColorsConfig, ThemeColorsConfig, ThemeConfig};
 pub use diagnostics::{DiagnosticsLogLevel, DiagnosticsSettings};
@@ -125,6 +126,9 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
     if normalize_ai_settings(&mut settings.ai) {
         migrated = true;
     }
+    if settings.security.migrate_legacy_screen_lock() {
+        migrated = true;
+    }
     if migrate_terminal_timestamp_format(&raw_settings, &mut settings.terminal) {
         migrated = true;
     }
@@ -164,6 +168,12 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
     if let Some(ref mut panel) = settings.ui.active_left_panel {
         if panel == "keyManagement" {
             *panel = "securityAuth".to_string();
+            migrated = true;
+        }
+    }
+    for item in settings.ui.activity_bar_layout.hidden_items.iter_mut() {
+        if item == "keyManagement" {
+            *item = "securityAuth".to_string();
             migrated = true;
         }
     }
