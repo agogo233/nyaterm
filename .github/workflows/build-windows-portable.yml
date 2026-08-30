@@ -1,0 +1,122 @@
+name: Build Windows Portable (x64)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-portable
+  cancel-in-progress: true
+
+env:
+  APP_NAME: NyaTerm
+
+jobs:
+  build-portable:
+    name: Build Windows x64 portable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ./src-tauri -> target
+          key: windows-latest-x86_64-pc-windows-msvc
+          cache-on-failure: false
+        env:
+          RUST_CACHE_COMPRESS: true
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri app (exe only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle --ci
+
+      - name: Package Windows portable zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $releaseDir = "src-tauri/target/release"
+
+          $exe = Join-Path $releaseDir "nyaterm.exe"
+          if (-not (Test-Path -LiteralPath $exe)) {
+            $exe = Get-ChildItem -Path $releaseDir -Filter "*.exe" |
+              Where-Object { $_.Name -notmatch 'build[-_]script' } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+
+          if (-not $exe -or -not (Test-Path -LiteralPath $exe)) {
+            throw "Release executable not found in $releaseDir"
+          }
+
+          $mcpExe = $null
+          $mcpFromRelease = Join-Path $releaseDir "nyaterm-mcp.exe"
+          if (Test-Path -LiteralPath $mcpFromRelease) {
+            $mcpExe = $mcpFromRelease
+          } else {
+            $mcpFromBinaries = Join-Path "src-tauri/binaries" "nyaterm-mcp-x86_64-pc-windows-msvc.exe"
+            if (Test-Path -LiteralPath $mcpFromBinaries) {
+              $mcpExe = $mcpFromBinaries
+            }
+          }
+
+          if (-not $mcpExe) {
+            throw "nyaterm-mcp sidecar not found in $releaseDir or src-tauri/binaries"
+          }
+
+          $assetName = "${env:APP_NAME}_${packageVersion}_windows_x64_portable.zip"
+          $portableRoot = Join-Path $env:RUNNER_TEMP "NyaTerm-portable-package"
+          $portableDir = Join-Path $portableRoot "NyaTerm-portable"
+          $dataDir = Join-Path $portableDir "data"
+          $assetPath = Join-Path (Get-Location) $assetName
+
+          Remove-Item -LiteralPath $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $portableDir "NyaTerm.exe")
+          Copy-Item -LiteralPath $mcpExe -Destination (Join-Path $portableDir "nyaterm-mcp.exe")
+          New-Item -ItemType File -Path (Join-Path $portableDir "portable.flag") -Force | Out-Null
+          New-Item -ItemType File -Path (Join-Path $dataDir ".keep") -Force | Out-Null
+
+          Compress-Archive -Path $portableDir -DestinationPath $assetPath -Force
+
+          Write-Host "Packaged: $assetPath"
+          Get-ChildItem -Path $portableDir -Recurse -File | ForEach-Object {
+            Write-Host $_.FullName
+          }
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nyaterm-windows-x64-portable
+          path: NyaTerm_*_windows_x64_portable.zip
+          if-no-files-found: error
+          retention-days: 7
