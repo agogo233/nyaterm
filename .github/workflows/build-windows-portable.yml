@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle --ci
+          pnpm tauri build --no-bundle --ci
 
       - name: Package Windows portable zip
         shell: pwsh
@@ -65,7 +65,13 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $releaseDir = "src-tauri/target/release"
+          $releaseDir = @("src-tauri/target/release", "src-tauri/target/x86_64-pc-windows-msvc/release") |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            Select-Object -First 1
+
+          if (-not $releaseDir) {
+            throw "No Tauri release directory found (checked src-tauri/target/release and src-tauri/target/x86_64-pc-windows-msvc/release)"
+          }
 
           $exe = Join-Path $releaseDir "nyaterm.exe"
           if (-not (Test-Path -LiteralPath $exe)) {
