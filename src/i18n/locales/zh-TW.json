@@ -2249,8 +2249,6 @@
     "resumeBrokenTransfer": "斷點續傳",
     "resumeBrokenTransferDesc": "嘗試恢復未完成的檔案傳輸而非重新開始。",
     "revisionLabel": "版本號",
-    "rightClickPaste": null,
-    "rightClickPasteDesc": null,
     "s3AccessKeyId": "Access Key ID",
     "s3Bucket": "Bucket",
     "s3BucketRequired": "必須填寫 S3 Bucket。",

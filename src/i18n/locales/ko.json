@@ -2254,8 +2254,6 @@
     "resumeBrokenTransfer": "전송 재개",
     "resumeBrokenTransferDesc": "완료되지 않은 전송을 처음부터 다시 시작하는 대신 재개합니다.",
     "revisionLabel": "리비전",
-    "rightClickPaste": null,
-    "rightClickPasteDesc": null,
     "s3AccessKeyId": "액세스 키 ID",
     "s3Bucket": "버킷",
     "s3BucketRequired": "S3 버킷이 필요합니다.",

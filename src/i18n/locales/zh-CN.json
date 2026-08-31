@@ -2254,8 +2254,6 @@
     "resumeBrokenTransfer": "断点续传",
     "resumeBrokenTransferDesc": "尝试恢复未完成的文件传输而非重新开始。",
     "revisionLabel": "版本号",
-    "rightClickPaste": null,
-    "rightClickPasteDesc": null,
     "s3AccessKeyId": "Access Key ID",
     "s3Bucket": "Bucket",
     "s3BucketRequired": "必须填写 S3 Bucket。",

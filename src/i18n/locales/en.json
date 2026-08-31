@@ -2255,8 +2255,6 @@
     "resumeBrokenTransfer": "Resume Transfers",
     "resumeBrokenTransferDesc": "Resume incomplete transfers instead of restarting.",
     "revisionLabel": "Revision",
-    "rightClickPaste": null,
-    "rightClickPasteDesc": null,
     "s3AccessKeyId": "Access Key ID",
     "s3Bucket": "Bucket",
     "s3BucketRequired": "S3 bucket is required.",
