@@ -3,6 +3,7 @@ mod baidu;
 mod deepl;
 mod google;
 mod microsoft;
+mod mtranserver;
 mod youdao;
 
 use crate::config::TranslationSettings;
@@ -50,6 +51,15 @@ pub async fn translate(
                 target_lang,
                 &settings.youdao_app_id,
                 &settings.youdao_app_key,
+            )
+            .await
+        }
+        "mtranserver" => {
+            mtranserver::translate(
+                text,
+                target_lang,
+                &settings.mtranserver_url,
+                &settings.mtranserver_api_key,
             )
             .await
         }

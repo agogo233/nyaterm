@@ -1824,6 +1824,7 @@
     "altAsMeta": "将 Option 作为 Meta/Alt 键",
     "altAsMetaDesc": "在 macOS 上，Option+f 等快捷键发送 ESC + 按键，而不是输入 ƒ 等特殊字符。",
     "apiKey": "API 密钥",
+    "apiKeyOptional": "API 密钥（可选）",
     "appId": "App ID",
     "appKey": "App Key",
     "appVersionLabel": "应用版本",
@@ -2279,6 +2280,7 @@
     "selectIcon": "选择图标",
     "selectKeyFile": "选择私钥文件...",
     "selectKeyFileTitle": "选择私钥文件",
+    "serverUrl": "服务器地址",
     "sessionLock": "会话锁定",
     "sessionSecurity": "会话安全",
     "shortcutCategories": {
@@ -2813,6 +2815,7 @@
     "google": "谷歌翻译",
     "loading": "翻译中...",
     "microsoft": "微软翻译",
+    "mtranserver": "MTranServer",
     "provider": "翻译服务",
     "sourceText": "原文",
     "title": "翻译",

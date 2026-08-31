@@ -1819,6 +1819,7 @@
     "altAsMeta": "將 Option 作為 Meta/Alt 鍵",
     "altAsMetaDesc": "在 macOS 上，Option+f 等快捷鍵傳送 ESC + 按鍵，而不是輸入 ƒ 等特殊字元。",
     "apiKey": "API 金鑰",
+    "apiKeyOptional": "API 金鑰（選填）",
     "appId": "App ID",
     "appKey": "App Key",
     "appVersionLabel": "應用版本",
@@ -2274,6 +2275,7 @@
     "selectIcon": "選擇圖示",
     "selectKeyFile": "選擇私鑰檔案...",
     "selectKeyFileTitle": "選擇私鑰檔案",
+    "serverUrl": "伺服器位址",
     "sessionLock": "工作階段鎖定",
     "sessionSecurity": "工作階段安全",
     "shortcutCategories": {
@@ -2808,6 +2810,7 @@
     "google": "Google 翻譯",
     "loading": "翻譯中...",
     "microsoft": "Microsoft 翻譯",
+    "mtranserver": "MTranServer",
     "provider": "翻譯服務",
     "sourceText": "原文",
     "title": "翻譯",

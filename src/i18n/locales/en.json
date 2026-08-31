@@ -1825,6 +1825,7 @@
     "altAsMeta": "Use Option as Meta/Alt",
     "altAsMetaDesc": "On macOS, send ESC + key for Option shortcuts like Option+f instead of entering special characters such as ƒ.",
     "apiKey": "API Key",
+    "apiKeyOptional": "API Key (optional)",
     "appId": "App ID",
     "appKey": "App Key",
     "appVersionLabel": "App Version",
@@ -2280,6 +2281,7 @@
     "selectIcon": "Select Icon",
     "selectKeyFile": "Select key file...",
     "selectKeyFileTitle": "Select Key File",
+    "serverUrl": "Server URL",
     "sessionLock": "Session Lock",
     "sessionSecurity": "Session Security",
     "shortcutCategories": {
@@ -2814,6 +2816,7 @@
     "google": "Google",
     "loading": "Translating...",
     "microsoft": "Microsoft",
+    "mtranserver": "MTranServer",
     "provider": "Provider",
     "sourceText": "Source",
     "title": "Translate",

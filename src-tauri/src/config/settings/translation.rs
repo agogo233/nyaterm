@@ -18,6 +18,10 @@ pub struct TranslationSettings {
     pub youdao_app_id: String,
     #[serde(default)]
     pub youdao_app_key: String,
+    #[serde(default)]
+    pub mtranserver_url: String,
+    #[serde(default)]
+    pub mtranserver_api_key: String,
 }
 
 fn default_target_language() -> String {
@@ -35,6 +39,8 @@ impl Default for TranslationSettings {
             ali_app_key: String::new(),
             youdao_app_id: String::new(),
             youdao_app_key: String::new(),
+            mtranserver_url: String::new(),
+            mtranserver_api_key: String::new(),
         }
     }
 }

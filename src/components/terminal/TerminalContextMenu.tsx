@@ -109,6 +109,11 @@ export default function TerminalContextMenu({
       free: false,
       configured: !!(translation.youdao_app_id && translation.youdao_app_key),
     },
+    {
+      id: "mtranserver",
+      free: false,
+      configured: !!translation.mtranserver_url,
+    },
   ].filter((p) => p.free || p.configured);
   const terminalAiActions = ai.enabled
     ? ai.terminal_ai_actions.filter(

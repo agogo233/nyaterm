@@ -1264,6 +1264,8 @@ export interface TranslationSettings {
   ali_app_key: string;
   youdao_app_id: string;
   youdao_app_key: string;
+  mtranserver_url: string;
+  mtranserver_api_key: string;
 }
 
 export interface TranslateResult {

@@ -186,6 +186,27 @@ export function TranslationTab() {
             />
           </SettingFieldGrid>
         </ProviderCard>
+
+        <ProviderCard
+          title={t("translation.mtranserver")}
+          status={<ProviderStatus configured={!!ts.mtranserver_url} />}
+        >
+          <SettingFieldGrid>
+            <SettingInput
+              label={t("settings.serverUrl")}
+              placeholder="http://127.0.0.1:8989"
+              value={ts.mtranserver_url}
+              onChange={(e) => update({ mtranserver_url: e.target.value })}
+            />
+            <SettingInput
+              label={t("settings.apiKeyOptional")}
+              type="password"
+              placeholder="MT_API_TOKEN (optional)"
+              value={ts.mtranserver_api_key}
+              onChange={(e) => update({ mtranserver_api_key: e.target.value })}
+            />
+          </SettingFieldGrid>
+        </ProviderCard>
       </SettingSection>
     </div>
   );

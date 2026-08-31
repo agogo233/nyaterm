@@ -120,6 +120,8 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     ali_app_key: "",
     youdao_app_id: "",
     youdao_app_key: "",
+    mtranserver_url: "",
+    mtranserver_api_key: "",
   },
   security: {
     use_os_keyring: true,
