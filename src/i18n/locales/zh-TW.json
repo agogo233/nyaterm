@@ -2785,6 +2785,7 @@
     "pasteSelectedText": "貼上選取的文字",
     "recordingLogs": "錄製日誌",
     "recordingSettings": "設定...",
+    "saveAsQuickCommand": "設為快捷命令",
     "searchCaseSensitive": "區分大小寫",
     "searchCurrentBuffer": "目前緩衝區",
     "searchDeepHistory": "深度歷史",

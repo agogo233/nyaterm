@@ -2790,6 +2790,7 @@
     "pasteSelectedText": "粘贴选定的文本",
     "recordingLogs": "录制日志",
     "recordingSettings": "设置...",
+    "saveAsQuickCommand": "设为快捷命令",
     "searchCaseSensitive": "区分大小写",
     "searchCurrentBuffer": "当前缓冲区",
     "searchDeepHistory": "深度历史",

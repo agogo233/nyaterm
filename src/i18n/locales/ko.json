@@ -2782,6 +2782,7 @@
     "pasteSelectedText": "선택한 텍스트 붙여넣기",
     "recordingLogs": "녹화 로그",
     "recordingSettings": "설정...",
+    "saveAsQuickCommand": "빠른 명령으로 저장",
     "searchCaseSensitive": "대소문자 구분",
     "searchCurrentBuffer": "현재 버퍼",
     "searchDeepHistory": "전체 기록",
