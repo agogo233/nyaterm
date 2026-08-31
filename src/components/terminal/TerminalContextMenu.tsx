@@ -268,13 +268,23 @@ export default function TerminalContextMenu({
               </ContextMenuItem>
               {ctxSelection.text.trim().length > 0 && (
                 <ContextMenuItem
-                  onClick={() =>
+                  onClick={() => {
+                    const commandText = ctxSelection.text
+                      .trim()
+                      .slice(0, 10000);
+                    const firstLine =
+                      commandText.split("\n").find((l) => l.trim() !== "") ??
+                      "";
+                    const labelText = Array.from(firstLine.trim())
+                      .slice(0, 60)
+                      .join("");
                     openQuickCommand(
                       JSON.stringify({
-                        command: ctxSelection.text.trim().slice(0, 10000),
+                        command: commandText,
+                        label: labelText,
                       }),
-                    )
-                  }
+                    );
+                  }}
                 >
                   <MdAddCircleOutline className="text-[0.875rem] text-muted-foreground mr-2" />
                   {t("terminalCtx.saveAsQuickCommand")}

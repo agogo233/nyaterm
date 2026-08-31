@@ -16,6 +16,14 @@ struct TranslateResponse {
     result: Option<String>,
 }
 
+fn to_bcp47(lang: &str) -> &str {
+    match lang.to_ascii_lowercase().as_str() {
+        "zh-cn" | "zh-hans" => "zh-Hans",
+        "zh-tw" | "zh-hant" => "zh-Hant",
+        _ => lang,
+    }
+}
+
 pub async fn translate(
     text: &str,
     target_lang: &str,
@@ -32,7 +40,7 @@ pub async fn translate(
 
     let body = TranslateRequest {
         from: "auto",
-        to: target_lang,
+        to: to_bcp47(target_lang),
         text,
     };
 
@@ -70,4 +78,24 @@ pub async fn translate(
         detected_language: "auto".to_string(),
         provider: "mtranserver".to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_bcp47;
+
+    #[test]
+    fn maps_chinese_regional_codes_to_bcp47() {
+        assert_eq!(to_bcp47("zh-CN"), "zh-Hans");
+        assert_eq!(to_bcp47("zh-TW"), "zh-Hant");
+        assert_eq!(to_bcp47("zh-cn"), "zh-Hans");
+        assert_eq!(to_bcp47("zh-hant"), "zh-Hant");
+    }
+
+    #[test]
+    fn passes_through_iso_codes() {
+        assert_eq!(to_bcp47("en"), "en");
+        assert_eq!(to_bcp47("ja"), "ja");
+        assert_eq!(to_bcp47("ko"), "ko");
+    }
 }
