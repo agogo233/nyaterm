@@ -110,7 +110,6 @@ export type TrayAction =
     }
   | { type: "open_settings"; targetWindowLabel?: string | null }
   | { type: "lock_screen"; targetWindowLabel?: string | null }
-  | { type: "check_updates"; targetWindowLabel?: string | null }
   | { type: "request_quit"; targetWindowLabel?: string | null };
 
 export function canCreateSessionFromPane(

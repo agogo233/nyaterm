@@ -13,7 +13,6 @@ import PanelStack from "@/components/app/PanelStack";
 import AboutDialog from "@/components/dialog/app/AboutDialog";
 import LockScreen from "@/components/dialog/app/LockScreen";
 import QuitConfirmDialog from "@/components/dialog/app/QuitConfirmDialog";
-import UpdateDialog from "@/components/dialog/app/UpdateDialog";
 import type { HostKeyVerifyRequest } from "@/components/dialog/connections/HostKeyVerifyDialog";
 import { HostKeyVerifyDialog } from "@/components/dialog/connections/HostKeyVerifyDialog";
 import type { OtpRequest } from "@/components/dialog/connections/OtpDialog";
@@ -44,7 +43,6 @@ import {
 } from "@/lib/backgroundImage";
 import { isMacOS } from "@/lib/platform";
 import type { SendCommandPanelDraft } from "@/lib/sendCommandPanelEvents";
-import type { UpdateInfo } from "@/lib/updater";
 import { bounceTopModalWindow } from "@/lib/windowManager";
 import type {
   AppearanceSettings,
@@ -140,9 +138,6 @@ interface AppLayoutProps {
     onAboutOpenChange: (open: boolean) => void;
     syncGroupOpen: boolean;
     onSyncGroupOpenChange: (open: boolean) => void;
-    updateOpen: boolean;
-    onUpdateOpenChange: (open: boolean) => void;
-    onUpdateFound: (info: UpdateInfo) => void;
     quitConfirmOpen: boolean;
     onQuitConfirmOpenChange: (open: boolean) => void;
     onQuitConfirm: () => void;
@@ -613,12 +608,6 @@ export default function AppLayout({
         <SyncGroupDialog
           open={dialogs.syncGroupOpen}
           onClose={() => dialogs.onSyncGroupOpenChange(false)}
-        />
-
-        <UpdateDialog
-          open={dialogs.updateOpen}
-          onClose={() => dialogs.onUpdateOpenChange(false)}
-          onUpdateFound={dialogs.onUpdateFound}
         />
 
         <QuitConfirmDialog

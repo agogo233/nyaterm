@@ -129,7 +129,6 @@ import {
 import type { TemporaryLinkConfig } from "./lib/temporaryLink";
 import { preserveTerminalReconnectContent } from "./lib/terminalReconnectHistory";
 import { setBackendTransferDuplicatePrompt } from "./lib/transferDuplicatePrompt";
-import { checkForUpdate, type UpdateInfo } from "./lib/updater";
 import {
   getOwnerMainWindowLabel,
   type NewSessionTarget,
@@ -212,11 +211,8 @@ function App() {
     setIsLocked,
     settingsLoaded,
     startupRestoreComplete,
-    runtimeInfo,
-    runtimeInfoLoaded,
   } = useApp();
   const uiConfig = appSettings.ui;
-  const portable = runtimeInfo.portable;
   const remoteStatsEnabled = uiConfig.show_remote_stats ?? true;
   const updateAutoIconForSessionStart = useCallback(
     (connectionId: string | null | undefined, sessionId: string) => {
@@ -251,7 +247,6 @@ function App() {
   const [mobileLeftOpen, setMobileLeftOpen] = useState(false);
   const [mobileRightOpen, setMobileRightOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
-  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
   const [showSyncGroupDialog, setShowSyncGroupDialog] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
   const [showActivityBarResetConfirm, setShowActivityBarResetConfirm] = useState(false);
@@ -268,8 +263,6 @@ function App() {
     handleDiscardFileDocumentsAndClose,
     handlePendingFileDocumentCloseOpenChange,
   } = useFileDocumentCloseGuard();
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [helpDotVisible, setHelpDotVisible] = useState(false);
   const [sendCommandDraft, setSendCommandDraft] = useState<SendCommandPanelDraft | null>(null);
   const [showSessionQuickSwitcher, setShowSessionQuickSwitcher] = useState(false);
   const [showTemporarySshLink, setShowTemporarySshLink] = useState(false);
@@ -322,23 +315,6 @@ function App() {
     isLocked,
     () => setIsLocked(true),
   );
-
-  // Background update check on startup
-  useEffect(() => {
-    if (!runtimeInfoLoaded) return;
-
-    const timer = setTimeout(() => {
-      checkForUpdate(portable)
-        .then((info) => {
-          if (info) {
-            setUpdateInfo(info);
-            setHelpDotVisible(true);
-          }
-        })
-        .catch(() => {});
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, [portable, runtimeInfoLoaded]);
 
   const closeFloatingPanel = useCallback(
     (side: "left" | "right") => {
@@ -2115,9 +2091,6 @@ function App() {
         case "lock_screen":
           handleLockScreen();
           break;
-        case "check_updates":
-          setShowUpdateDialog(true);
-          break;
         case "request_quit":
           handleRequestQuit();
           break;
@@ -3376,7 +3349,6 @@ function App() {
       if (isLocked || modalChildWindowCount > 0) return;
       if (
         showAbout ||
-        showUpdateDialog ||
         showSyncGroupDialog ||
         showQuitConfirm ||
         showActivityBarResetConfirm ||
@@ -3432,7 +3404,6 @@ function App() {
     showSessionQuickSwitcher,
     showSyncGroupDialog,
     showTemporarySshLink,
-    showUpdateDialog,
   ]);
 
   // When multi-open mode is first enabled, seed the stacks from the active panels.
@@ -3614,10 +3585,6 @@ function App() {
         header={{
           onNewSession: () => handleNewSession(),
           onAbout: () => setShowAbout(true),
-          onCheckForUpdates: () => setShowUpdateDialog(true),
-          hasUpdate: updateInfo !== null,
-          showUpdateDot: helpDotVisible,
-          onHelpMenuOpen: () => setHelpDotVisible(false),
           activeTab,
           savedConnections,
           remoteStatsEnabled: activeRemoteStatsEnabled,
@@ -3768,9 +3735,6 @@ function App() {
           onAboutOpenChange: setShowAbout,
           syncGroupOpen: showSyncGroupDialog,
           onSyncGroupOpenChange: setShowSyncGroupDialog,
-          updateOpen: showUpdateDialog,
-          onUpdateOpenChange: setShowUpdateDialog,
-          onUpdateFound: setUpdateInfo,
           quitConfirmOpen: showQuitConfirm,
           onQuitConfirmOpenChange: setShowQuitConfirm,
           onQuitConfirm: handleQuitApplication,

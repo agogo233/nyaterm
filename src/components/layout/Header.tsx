@@ -556,10 +556,6 @@ interface HeaderProps {
   onToggleLeft?: () => void;
   onToggleRight?: () => void;
   onAbout: () => void;
-  onCheckForUpdates: () => void;
-  hasUpdate?: boolean;
-  showUpdateDot?: boolean;
-  onHelpMenuOpen?: () => void;
   activeTab?: Tab | null;
   savedConnections?: SavedConnection[];
   remoteStatsEnabled?: boolean;
@@ -721,10 +717,6 @@ export default function Header({
   onToggleLeft,
   onToggleRight,
   onAbout,
-  onCheckForUpdates,
-  hasUpdate,
-  showUpdateDot,
-  onHelpMenuOpen,
   activeTab,
   savedConnections,
   remoteStatsEnabled = true,
@@ -1230,12 +1222,6 @@ export default function Header({
         label: t("menu.documentation"),
         icon: "menu_book",
         action: () => openUrl(`${packageJson.docspage}`),
-      },
-      {
-        id: "help.checkUpdates",
-        label: t("menu.checkForUpdates"),
-        icon: hasUpdate ? "upgrade" : "update",
-        action: onCheckForUpdates,
       },
       {
         id: "help.viewLogs",
@@ -1861,15 +1847,8 @@ export default function Header({
               <MenubarMenu key={key}>
                 <MenubarTrigger
                   className="relative cursor-default px-2.5 py-1 text-xs font-medium rounded-md transition-colors text-[var(--df-text-muted)] data-[state=open]:text-[var(--df-primary)] data-[state=open]:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] focus:text-[var(--df-text-muted)] data-[state=open]:focus:bg-[color-mix(in_srgb,var(--df-primary)_10%,transparent)] data-[state=open]:focus:text-[var(--df-primary)] outline-none"
-                  {...(key === "help" && showUpdateDot ? { onClick: onHelpMenuOpen } : {})}
                 >
                   {label}
-                  {key === "help" && showUpdateDot && (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                    </span>
-                  )}
                 </MenubarTrigger>
                 <MenubarContent align="start" className="min-w-[180px]">
                   {menus[key].map((item, idx) => renderMenuItem(item, idx))}
