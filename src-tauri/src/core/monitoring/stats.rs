@@ -333,6 +333,8 @@ cpucoref=$base.cpucores;
 diskf=$base.disk;
 diskraw=$base.diskraw;
 dfraw=$base.dfraw;
+netrawf=$base.netraw;
+netoutf=$base.netout;
 
 trap "rm -f \"$base\".*" 0 HUP INT TERM;
 
@@ -513,24 +515,44 @@ NR>2 {
   split(a[2], f, /[ \t]+/);
   print nic "\t" f[1] "\t" f[9];
 }
-'"'"' /proc/net/dev 2>/dev/null | while IFS="$(printf "\t")" read -r nic rx tx; do
-    [ -n "$nic" ] || continue;
-    [ "$nic" != "lo" ] || continue;
-    case "$nic" in
-      docker*|veth*|br-*|virbr*|flannel*|cali*|tunl*|kube-ipvs0|cni*|zt*|tailscale*|wg*|tap*|vnet*)
-        continue;
-        ;;
-    esac;
-    [ -e "/sys/class/net/$nic/device" ] || continue;
+'"'"' /proc/net/dev 2>/dev/null >"$netrawf";
 
-    state=unknown;
-    if [ -r "/sys/class/net/$nic/operstate" ]; then
-      IFS= read -r state <"/sys/class/net/$nic/operstate" || state=unknown;
-    fi;
-    [ "$state" = "up" ] || continue;
+  emit_netdev() {
+    mode=$1;
+    while IFS="$(printf "\t")" read -r nic rx tx; do
+      [ -n "$nic" ] || continue;
+      [ "$nic" != "lo" ] || continue;
+      case "$nic" in
+        docker*|veth*|br-*|virbr*|flannel*|cali*|tunl*|kube-ipvs0|cni*|zt*|tailscale*|wg*|tap*|vnet*)
+          continue;
+          ;;
+      esac;
 
-    printf "NETDEV\t%s\t%s\t%s\t%s\n" "$nic" "$state" "${rx:-0}" "${tx:-0}";
-  done;
+      state=unknown;
+      if [ -r "/sys/class/net/$nic/operstate" ]; then
+        IFS= read -r state <"/sys/class/net/$nic/operstate" || state=unknown;
+      fi;
+      [ -n "$state" ] || state=unknown;
+      if [ "$state" = "down" ]; then continue; fi;
+
+      if [ "$mode" = "strict" ]; then
+        carrier=0;
+        if [ -r "/sys/class/net/$nic/carrier" ]; then
+          IFS= read -r carrier <"/sys/class/net/$nic/carrier" || carrier=0;
+        fi;
+        if [ "$state" != "up" ] && [ "$carrier" != "1" ]; then continue; fi;
+        if [ -e "/sys/class/net/$nic/master" ]; then continue; fi;
+      fi;
+
+      printf "NETDEV\t%s\t%s\t%s\t%s\n" "$nic" "$state" "${rx:-0}" "${tx:-0}";
+    done <"$netrawf";
+  };
+
+  emit_netdev strict >"$netoutf";
+  if [ ! -s "$netoutf" ]; then
+    emit_netdev loose >"$netoutf";
+  fi;
+  cat "$netoutf";
 fi;
 
 : >"$diskf";
