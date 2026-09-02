@@ -593,6 +593,7 @@ fn entry_to_saved_connection(
             legacy_agent_forwarding: None,
             agent_forwarding_config: None,
             encoding: String::new(),
+            dynamic_tab_title: false,
         },
         group_id: None,
         description: Some(description),

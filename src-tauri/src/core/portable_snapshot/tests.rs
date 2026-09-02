@@ -312,6 +312,13 @@ mod tests {
         );
         assert_eq!(shell_args, "-NoLogo");
         assert_eq!(working_dir.as_deref(), Some("C:\\Users\\me"));
+        assert!(matches!(
+            &local.config,
+            config::ConnectionType::LocalTerminal {
+                dynamic_tab_title: true,
+                ..
+            }
+        ));
 
         let serial = sessions
             .connections
@@ -579,6 +586,7 @@ mod tests {
                         working_dir: Some("C:\\Users\\me".to_string()),
                         ai_execution_profile: config::AiExecutionProfile::Auto,
                         encoding: String::new(),
+                        dynamic_tab_title: true,
                     },
                     group_id: None,
                     description: None,
@@ -650,6 +658,7 @@ mod tests {
                     legacy_agent_forwarding: None,
                     agent_forwarding_config: None,
                     encoding: String::new(),
+                    dynamic_tab_title: true,
                 },
                 group_id: None,
                 description: None,
@@ -697,6 +706,13 @@ mod tests {
     }
 
     fn assert_asset_metadata_preserved(sessions: &config::SessionsConfig) {
+        assert!(matches!(
+            &sessions.connections[0].config,
+            config::ConnectionType::Ssh {
+                dynamic_tab_title: true,
+                ..
+            }
+        ));
         let asset = sessions.connections[0].asset.as_ref().expect("asset");
         assert_eq!(asset.device_type, Some(config::AssetDeviceType::Physical));
         assert_eq!(asset.hostname.as_deref(), Some("gpu-node-01"));

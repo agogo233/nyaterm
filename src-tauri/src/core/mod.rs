@@ -44,10 +44,14 @@ pub use recording::{
     TerminalHistorySearchResponse,
 };
 pub use session::{
-    SessionCommand, SessionCommandReceiver, SessionCommandSender, SessionHandle, SessionInfo,
-    SessionManager, SessionReadyHook, SessionType, SharedCwd,
+    CwdPresentation, DynamicTitleCapabilities, SessionCommand, SessionCommandReceiver,
+    SessionCommandSender, SessionHandle, SessionInfo, SessionManager, SessionReadyHook,
+    SessionType, SharedCwd,
 };
-pub(crate) use session::{now_session_started_at, session_command_channel, update_cwd_if_changed};
+pub(crate) use session::{
+    SessionCwdReplacement, now_session_started_at, replace_cwd_state, session_command_channel,
+    update_cwd_if_changed,
+};
 pub use terminal_session::local::{LocalSessionConfig, create_local_session};
 pub use terminal_session::serial::{SerialConfig, create_serial_session, list_serial_ports};
 pub use terminal_session::telnet::{

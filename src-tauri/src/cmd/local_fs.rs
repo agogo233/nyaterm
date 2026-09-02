@@ -567,7 +567,9 @@ async fn set_local_mode_if_supported(_path: &str, _mode: Option<String>) -> AppR
 mod tests {
     use super::*;
     use crate::config::AiExecutionProfile;
-    use crate::core::{SessionHandle, SessionInfo, session_command_channel};
+    use crate::core::{
+        DynamicTitleCapabilities, SessionHandle, SessionInfo, session_command_channel,
+    };
     use tokio::sync::Mutex;
 
     fn temp_test_dir(name: &str) -> PathBuf {
@@ -837,14 +839,16 @@ mod tests {
                     owner_window_label: None,
                     ai_execution_profile: AiExecutionProfile::default(),
                     injection_active: true,
+                    dynamic_title_capabilities: DynamicTitleCapabilities::default(),
                     remote_file_browser_enabled: true,
                     remote_stats_enabled: true,
                     ssh_profile: None,
                 },
                 cmd_tx,
+                startup_input_barrier: None,
                 ssh_config: None,
                 ssh_handle: None,
-                cwd: Arc::new(Mutex::new(None)),
+                cwd: Arc::new(Mutex::new(Default::default())),
                 remote_fs: None,
             })
             .await;

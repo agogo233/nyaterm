@@ -221,6 +221,7 @@ export default function NewSessionPage() {
   const [sshProfile, setSshProfile] = useState<SshProfile>("standard");
   const [sshTerminalType, setSshTerminalType] = useState<SshTerminalTypeSelection>("default");
   const [sftpSettings, setSftpSettings] = useState<SftpSettings>(DEFAULT_SFTP_SETTINGS);
+  const [remoteDynamicTabTitle, setRemoteDynamicTabTitle] = useState(false);
 
   // Serial Settings States
   const [serialPortName, setSerialPortName] = useState("");
@@ -236,6 +237,7 @@ export default function NewSessionPage() {
   const [shellPath, setShellPath] = useState("powershell.exe");
   const [shellArgs, setShellArgs] = useState("");
   const [workingDir, setWorkingDir] = useState("");
+  const [dynamicTabTitle, setDynamicTabTitle] = useState(false);
   const [serialBackspaceMode, setSerialBackspaceMode] = useState("ctrl_h");
   const [telnetBackspaceMode, setTelnetBackspaceMode] = useState("del");
   const [telnetRawTcpCli, setTelnetRawTcpCli] = useState(false);
@@ -295,6 +297,8 @@ export default function NewSessionPage() {
         setRecordingUseGlobal(!found.recording);
         setRecordingAutoStart(found.recording?.auto_start ?? appSettings.recording.auto_start);
         setRecordingMode(found.recording?.mode ?? appSettings.recording.default_mode);
+        if (found.type !== "ssh") setRemoteDynamicTabTitle(false);
+        if (found.type !== "local_terminal") setDynamicTabTitle(false);
 
         if (found.type === "ssh") {
           setHost(found.host || "");
@@ -321,6 +325,7 @@ export default function NewSessionPage() {
           setSshProfile(found.ssh_profile || "standard");
           setSshTerminalType(found.terminal_type || "default");
           setSftpSettings(normalizeSftpSettings(found.sftp));
+          setRemoteDynamicTabTitle(found.dynamic_tab_title ?? false);
         } else if (found.type === "telnet") {
           setHost(found.host || "");
           setTelnetPort(found.port || 23);
@@ -340,6 +345,7 @@ export default function NewSessionPage() {
           setShellPath(found.shell_path || "powershell.exe");
           setShellArgs(found.shell_args || "");
           setWorkingDir(found.working_dir || "");
+          setDynamicTabTitle(found.dynamic_tab_title ?? false);
         } else if (found.type === "serial") {
           setSerialPortName(found.port_name || "");
           setBaudRate(String(found.baud_rate || 115200));
@@ -354,6 +360,8 @@ export default function NewSessionPage() {
           setRdpDomain(found.domain || "");
           setPasswordId(found.auth?.password_id || "");
           setHasPassword(found.auth?.has_password || false);
+          setProxyId(found.network?.proxy_id || "");
+          setJumpHostId(found.network?.proxy_jump_id || "");
           setRdpUseNla(found.security?.use_nla ?? true);
           setRdpCertificatePolicy(found.security?.certificate_policy ?? "prompt");
           setRdpDisplayMode(
@@ -449,6 +457,8 @@ export default function NewSessionPage() {
     setShellPath("powershell.exe");
     setShellArgs("");
     setWorkingDir("");
+    setDynamicTabTitle(false);
+    setRemoteDynamicTabTitle(false);
     setSerialBackspaceMode("ctrl_h");
     setTelnetBackspaceMode("del");
     setTelnetRawTcpCli(false);
@@ -1002,6 +1012,7 @@ export default function NewSessionPage() {
               x11_forwarding: x11Forwarding,
               auth_agent_endpoint: authType === "agent" ? authAgentEndpoint : undefined,
               agent_forwarding_config: agentForwardingConfig,
+              dynamic_tab_title: remoteDynamicTabTitle,
             }
           : {}),
         ...(currentTab === "telnet"
@@ -1025,6 +1036,7 @@ export default function NewSessionPage() {
               shell_path: normalizedShellPath,
               shell_args: normalizedShellArgs,
               working_dir: normalizedWorkingDir || undefined,
+              dynamic_tab_title: dynamicTabTitle,
             }
           : {}),
         ...(currentTab === "serial"
@@ -1504,6 +1516,8 @@ export default function NewSessionPage() {
               setSshTerminalType={setSshTerminalType}
               sftpSettings={sftpSettings}
               setSftpSettings={setSftpSettings}
+              remoteDynamicTabTitle={remoteDynamicTabTitle}
+              setRemoteDynamicTabTitle={setRemoteDynamicTabTitle}
               recordingUseGlobal={recordingUseGlobal}
               setRecordingUseGlobal={setRecordingUseGlobal}
               recordingAutoStart={recordingAutoStart}
@@ -1527,6 +1541,8 @@ export default function NewSessionPage() {
               setShellArgs={setShellArgs}
               workingDir={workingDir}
               setWorkingDir={setWorkingDir}
+              dynamicTabTitle={dynamicTabTitle}
+              setDynamicTabTitle={setDynamicTabTitle}
               recordingUseGlobal={recordingUseGlobal}
               setRecordingUseGlobal={setRecordingUseGlobal}
               recordingAutoStart={recordingAutoStart}

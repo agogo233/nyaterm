@@ -5,14 +5,16 @@ use crate::config::SftpCwdFollowMode;
 use crate::core::capture::OutputCaptureProcessor;
 use crate::core::input::remap_del_to_bs;
 use crate::core::ssh::osc::{self, OscStripper, ShellKind};
+use crate::core::terminal_session::local::split_startup_passthrough;
 use crate::core::terminal_session::{TerminalOutputDecoder, encode_terminal_input};
 use crate::core::zmodem::{
     ZmodemAction, ZmodemDetectResult, ZmodemDetector, ZmodemDirection, ZmodemDownloadOoDrain,
     ZmodemEvent, ZmodemTransfer, ZmodemUploadDrain, start_zmodem_transfer,
 };
 use crate::core::{
-    RecordingManager, SessionCommand, SessionCommandReceiver, SessionCommandSender, SessionManager,
-    SessionOutputCoalescer, SharedCwd, update_cwd_if_changed,
+    RecordingManager, SessionCommand, SessionCommandReceiver, SessionCommandSender,
+    SessionCwdReplacement, SessionManager, SessionOutputCoalescer, SharedCwd, replace_cwd_state,
+    update_cwd_if_changed,
 };
 use crate::error::{AppError, AppResult};
 use russh::{ChannelMsg, client};
@@ -577,6 +579,8 @@ enum InjectionEvent {
     None,
     Inject,
     Ready { visible_after_ready: String },
+    Failed { visible_after_ready: String },
+    RuntimeFailed { visible: String },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -637,6 +641,12 @@ fn handle_injection_result(phase: &mut IoPhase, result: &osc::OscResult) -> Inje
             *phase = IoPhase::Suppressing;
             InjectionEvent::Inject
         }
+        IoPhase::Suppressing if result.ready_failed => {
+            *phase = IoPhase::Normal;
+            InjectionEvent::Failed {
+                visible_after_ready: result.visible_after_ready.clone(),
+            }
+        }
         IoPhase::Suppressing if result.ready => {
             *phase = IoPhase::Normal;
             InjectionEvent::Ready {
@@ -644,6 +654,9 @@ fn handle_injection_result(phase: &mut IoPhase, result: &osc::OscResult) -> Inje
             }
         }
         IoPhase::Suppressing => InjectionEvent::None,
+        IoPhase::Normal if result.ready_failed => InjectionEvent::RuntimeFailed {
+            visible: result.visible.clone(),
+        },
         IoPhase::Normal => InjectionEvent::None,
     }
 }
@@ -658,18 +671,17 @@ fn handle_injection_timeout(phase: &mut IoPhase) -> InjectionTimeoutEvent {
     }
 }
 
-fn append_suppressed_visible(buffer: &mut String, visible: &str) {
-    if visible.is_empty() {
-        return;
-    }
-
+fn append_suppressed_visible_and_take_passthrough(buffer: &mut String, visible: &str) -> String {
     buffer.push_str(visible);
-    while buffer.len() > SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES {
-        let Some(first_char) = buffer.chars().next() else {
+    let (mut suppressed, passthrough) = split_startup_passthrough(buffer);
+    while suppressed.len() > SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES {
+        let Some(first_char) = suppressed.chars().next() else {
             break;
         };
-        buffer.drain(..first_char.len_utf8());
+        suppressed.drain(..first_char.len_utf8());
     }
+    *buffer = suppressed;
+    passthrough
 }
 
 fn discard_suppressed_output(buffer: &mut String, flushed_osc_buffer: String) -> usize {
@@ -696,7 +708,21 @@ async fn handle_osc_result(
     shell_kind: Option<ShellKind>,
     injection_sent_at: &mut Option<Instant>,
 ) {
-    match handle_injection_result(phase, result) {
+    let was_suppressing = *phase == IoPhase::Suppressing;
+    let injection_event = handle_injection_result(phase, result);
+    let suppressed_passthrough = if was_suppressing {
+        let before_ready_len = result
+            .visible
+            .len()
+            .saturating_sub(result.visible_after_ready.len());
+        append_suppressed_visible_and_take_passthrough(
+            suppressed_visible_fallback,
+            &result.visible[..before_ready_len],
+        )
+    } else {
+        String::new()
+    };
+    match injection_event {
         InjectionEvent::Inject => {
             tracing::info!(
                 session_id = %session_id,
@@ -751,10 +777,58 @@ async fn handle_osc_result(
                 phase_transition = "Suppressing -> Normal",
                 "SSH shell integration ready marker received"
             );
+            // Exact OSC 0/2 and terminal queries retain their original order
+            // while source-command echo remains suppressed.
+            let mut release_output = suppressed_passthrough;
+            release_output.push_str(&visible_after_ready);
             emit_metadata(app, cwd_event, cwd, manager, session_id, result).await;
-            if !visible_after_ready.is_empty() {
-                emit_visible_text(output, recording_mgr, session_id, &visible_after_ready);
+            emit_visible_text(output, recording_mgr, session_id, &release_output);
+        }
+        InjectionEvent::Failed {
+            visible_after_ready,
+        } => {
+            let suppressed_visible_bytes = result
+                .visible
+                .len()
+                .saturating_sub(visible_after_ready.len())
+                + suppressed_visible_fallback.len();
+            suppressed_visible_fallback.clear();
+            let mut release_output = suppressed_passthrough;
+            release_output.push_str(&visible_after_ready);
+            tracing::warn!(
+                session_id = %session_id,
+                shell = ?shell_kind,
+                elapsed_ms = injection_sent_at
+                    .as_ref()
+                    .map(|started| started.elapsed().as_millis() as u64)
+                    .unwrap_or(0),
+                suppressed_visible_bytes,
+                phase_transition = "Suppressing -> Normal",
+                "SSH shell integration reported installation failure; continuing in passive mode"
+            );
+            emit_metadata(app, cwd_event, cwd, manager, session_id, result).await;
+            emit_visible_text(output, recording_mgr, session_id, &release_output);
+        }
+        InjectionEvent::RuntimeFailed { visible } => {
+            tracing::warn!(
+                session_id = %session_id,
+                shell = ?shell_kind,
+                "SSH shell integration failed after startup; clearing stale cwd"
+            );
+            emit_metadata(app, cwd_event, cwd, manager, session_id, result).await;
+            let changes = replace_cwd_state(
+                cwd,
+                SessionCwdReplacement {
+                    legacy_path: None,
+                    operational_path: None,
+                    presentation: None,
+                },
+            )
+            .await;
+            if changes.operational_changed {
+                let _ = app.emit(cwd_event, "");
             }
+            emit_visible_text(output, recording_mgr, session_id, &visible);
         }
         InjectionEvent::None if *phase == IoPhase::Normal => {
             emit_output(
@@ -770,7 +844,9 @@ async fn handle_osc_result(
             .await;
         }
         InjectionEvent::None => {
-            append_suppressed_visible(suppressed_visible_fallback, &result.visible);
+            // Transport terminal queries and bounded OSC 0/2 in their exact
+            // source order while all remaining startup text stays hidden.
+            emit_visible_text(output, recording_mgr, session_id, &suppressed_passthrough);
             emit_metadata(app, cwd_event, cwd, manager, session_id, result).await;
         }
     }
@@ -874,8 +950,8 @@ pub(super) async fn ssh_io_loop(
 
             cmd = cmd_rx.recv() => {
                 match cmd {
-                    Some(SessionCommand::Attach) => {
-                        output.attach();
+                    Some(SessionCommand::AttachConfirmed { ack }) => {
+                        output.attach_confirmed(ack);
                     }
                     Some(SessionCommand::DetachRenderer) => {
                         output.detach();
@@ -1295,16 +1371,18 @@ async fn emit_metadata(
     }
 
     for command in &result.accepted_commands {
-        manager
+        let accepted = manager
             .confirm_command_submission(session_id, command.clone())
             .await;
-        let _ = app.emit(
-            "session-command-accepted",
-            serde_json::json!({
-                "sessionId": session_id,
-                "command": command,
-            }),
-        );
+        if accepted {
+            let _ = app.emit(
+                "session-command-accepted",
+                serde_json::json!({
+                    "sessionId": session_id,
+                    "command": command,
+                }),
+            );
+        }
     }
 }
 
@@ -1330,12 +1408,12 @@ mod tests {
     use super::{
         INITIAL_INJECT_DELAY_MS, INJECT_TIMEOUT_SECS, InjectionEvent, InjectionTimeoutEvent,
         IoPhase, PendingStartupCommand, SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES,
-        append_suppressed_visible, build_startup_command_input, discard_suppressed_output,
-        handle_injection_result, handle_injection_timeout, open_shell_channel,
-        should_send_initial_injection,
+        append_suppressed_visible_and_take_passthrough, build_startup_command_input,
+        discard_suppressed_output, handle_injection_result, handle_injection_timeout,
+        open_shell_channel, should_send_initial_injection,
     };
     use crate::config::SftpCwdFollowMode;
-    use crate::core::ssh::osc::OscResult;
+    use crate::core::ssh::osc::{OscResult, OscStripper, build_ready_marker};
     use russh::{Channel, ChannelId, Disconnect, client, server};
     use std::pin::Pin;
     use std::sync::Arc;
@@ -1495,7 +1573,11 @@ mod tests {
             visible: "suppressed output".to_string(),
             visible_after_ready: visible_after_ready.to_string(),
             cwd_paths: Vec::new(),
+            cwd_payloads: Vec::new(),
+            cwd_payload_invalidated: false,
+            cwd_payload_events: Vec::new(),
             ready,
+            ready_failed: false,
             accepted_commands: Vec::new(),
         }
     }
@@ -1526,6 +1608,162 @@ mod tests {
     }
 
     #[test]
+    fn failure_marker_in_suppressing_enters_normal_and_preserves_prompt() {
+        let mut phase = IoPhase::Suppressing;
+        let mut result = osc_result(false, "prompt-after-failure");
+        result.ready_failed = true;
+
+        let event = handle_injection_result(&mut phase, &result);
+
+        assert_eq!(phase, IoPhase::Normal);
+        assert_eq!(
+            event,
+            InjectionEvent::Failed {
+                visible_after_ready: "prompt-after-failure".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn failure_marker_after_startup_preserves_visible_output_and_reports_runtime_failure() {
+        let mut phase = IoPhase::Normal;
+        let mut result = osc_result(false, "prompt-after-failure");
+        result.visible = "beforeprompt-after-failure".to_string();
+        result.ready_failed = true;
+
+        let event = handle_injection_result(&mut phase, &result);
+
+        assert_eq!(phase, IoPhase::Normal);
+        assert_eq!(
+            event,
+            InjectionEvent::RuntimeFailed {
+                visible: "beforeprompt-after-failure".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn suppression_transport_preserves_interleaved_title_query_order() {
+        let mut buffer = String::new();
+        let controls = concat!(
+            "\x1b]2;first\x07",
+            "\x1b[c",
+            "\x1b]0;final\x1b\\",
+            "\x1b]11;?\x07"
+        );
+
+        let passthrough = append_suppressed_visible_and_take_passthrough(
+            &mut buffer,
+            &format!("hidden{controls}tail"),
+        );
+
+        assert_eq!(passthrough, controls);
+        assert_eq!(buffer, "hiddentail");
+    }
+
+    #[test]
+    fn oversized_startup_queries_and_titles_remain_suppressed() {
+        let mut buffer = String::new();
+        let huge_dcs = format!("\x1bP$q{}\x1b\\", "x".repeat(17 * 1024));
+        let huge_title = format!("\x1b]2;{}\x07", "x".repeat(17 * 1024));
+
+        let passthrough = append_suppressed_visible_and_take_passthrough(
+            &mut buffer,
+            &format!("{huge_dcs}{huge_title}"),
+        );
+
+        assert!(passthrough.is_empty());
+        assert!(buffer.len() <= SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES);
+    }
+
+    #[test]
+    fn suppression_title_transport_is_exactly_once_across_split_ready_and_normal_phases() {
+        let ready_marker = build_ready_marker("session-1");
+        let mut stripper = OscStripper::new(&ready_marker);
+        let mut phase = IoPhase::Suppressing;
+        let mut buffer = String::new();
+        let mut emitted = String::new();
+
+        let incomplete = stripper.push("hidden source\x1b]2;split");
+        let _ = handle_injection_result(&mut phase, &incomplete);
+        emitted.push_str(&append_suppressed_visible_and_take_passthrough(
+            &mut buffer,
+            &incomplete.visible,
+        ));
+
+        let completed = stripper.push(" title\x07hidden tail");
+        let _ = handle_injection_result(&mut phase, &completed);
+        emitted.push_str(&append_suppressed_visible_and_take_passthrough(
+            &mut buffer,
+            &completed.visible,
+        ));
+
+        let ready = stripper.push(&format!("{ready_marker}[user@host]$ "));
+        let event = handle_injection_result(&mut phase, &ready);
+        let before_ready_len = ready.visible.len() - ready.visible_after_ready.len();
+        emitted.push_str(&append_suppressed_visible_and_take_passthrough(
+            &mut buffer,
+            &ready.visible[..before_ready_len],
+        ));
+        assert!(matches!(event, InjectionEvent::Ready { .. }));
+        emitted.push_str(&ready.visible_after_ready);
+        buffer.clear();
+
+        let normal = stripper.push("\x1b]2;normal title\x07prompt");
+        let event = handle_injection_result(&mut phase, &normal);
+        assert_eq!(event, InjectionEvent::None);
+        emitted.push_str(&normal.visible);
+
+        assert_eq!(phase, IoPhase::Normal);
+        assert_eq!(emitted.matches("\x1b]2;split title\x07").count(), 1);
+        assert_eq!(emitted.matches("\x1b]2;normal title\x07").count(), 1);
+        assert!(!emitted.contains("hidden source"));
+        assert!(!emitted.contains("hidden tail"));
+        assert!(
+            emitted.find("\x1b]2;split title\x07").unwrap()
+                < emitted.find("[user@host]$ ").unwrap()
+        );
+        assert!(
+            emitted.find("[user@host]$ ").unwrap()
+                < emitted.find("\x1b]2;normal title\x07").unwrap()
+        );
+    }
+
+    #[test]
+    fn title_transport_cap_is_per_sequence_and_keeps_final_semantics() {
+        let first = format!("\x1b]2;{}\x07", "x".repeat(16_395));
+        let final_title = "\x1b]2;final\x07";
+        let mut buffer = String::new();
+
+        let passthrough = append_suppressed_visible_and_take_passthrough(
+            &mut buffer,
+            &format!("{first}{final_title}"),
+        );
+
+        assert_eq!(passthrough, format!("{first}{final_title}"));
+        assert!(passthrough.ends_with(final_title));
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn delivered_suppression_title_survives_timeout_fallback() {
+        let mut buffer = String::new();
+        let delivered = append_suppressed_visible_and_take_passthrough(
+            &mut buffer,
+            "\x1b]2;delivered\x07hidden",
+        );
+        let mut phase = IoPhase::Suppressing;
+
+        assert_eq!(
+            handle_injection_timeout(&mut phase),
+            InjectionTimeoutEvent::FallbackToNormal
+        );
+        assert_eq!(delivered, "\x1b]2;delivered\x07");
+        assert_eq!(buffer, "hidden");
+        assert_eq!(phase, IoPhase::Normal);
+    }
+
+    #[test]
     fn injection_timeout_is_30s_and_falls_back_to_normal() {
         assert_eq!(INJECT_TIMEOUT_SECS, 30);
 
@@ -1545,23 +1783,32 @@ mod tests {
     }
 
     #[test]
-    fn suppressed_visible_fallback_keeps_recent_visible_text() {
+    fn suppressed_visible_fallback_keeps_recent_text_and_extracts_split_passthrough() {
         let mut buffer = String::new();
 
-        append_suppressed_visible(&mut buffer, "prompt-before-ready");
+        assert!(
+            append_suppressed_visible_and_take_passthrough(&mut buffer, "hidden\x1b[").is_empty()
+        );
+        let passthrough =
+            append_suppressed_visible_and_take_passthrough(&mut buffer, "cstill-hidden");
 
-        assert_eq!(buffer, "prompt-before-ready");
+        assert_eq!(passthrough, "\x1b[c");
+        assert_eq!(buffer, "hiddenstill-hidden");
     }
 
     #[test]
-    fn suppressed_visible_fallback_is_bounded() {
+    fn suppressed_visible_fallback_is_bounded_after_passthrough_extraction() {
         let mut buffer = String::new();
 
-        append_suppressed_visible(
+        let passthrough = append_suppressed_visible_and_take_passthrough(
             &mut buffer,
-            &"x".repeat(SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES + 16),
+            &format!(
+                "{}\x1b]11;?\x07",
+                "x".repeat(SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES + 16)
+            ),
         );
 
+        assert_eq!(passthrough, "\x1b]11;?\x07");
         assert_eq!(buffer.len(), SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES);
     }
 

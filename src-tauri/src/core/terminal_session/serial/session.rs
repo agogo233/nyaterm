@@ -191,8 +191,8 @@ fn serial_session_thread(
     // Command loop
     while let Some(cmd) = cmd_rx.blocking_recv() {
         match cmd {
-            SessionCommand::Attach => {
-                output.attach();
+            SessionCommand::AttachConfirmed { ack } => {
+                output.attach_confirmed(ack);
             }
             SessionCommand::DetachRenderer => {
                 output.detach();
