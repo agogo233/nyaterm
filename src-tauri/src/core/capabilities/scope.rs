@@ -114,7 +114,7 @@ fn dynamic_snapshot<'a>(sessions: impl Iterator<Item = &'a SessionInfo>) -> McpS
 #[cfg(test)]
 mod tests {
     use crate::config::AiExecutionProfile;
-    use crate::core::session::SessionType;
+    use crate::core::session::{DynamicTitleCapabilities, SessionType};
 
     use super::*;
 
@@ -129,6 +129,7 @@ mod tests {
             owner_window_label: Some(owner.into()),
             ai_execution_profile: AiExecutionProfile::Auto,
             injection_active: true,
+            dynamic_title_capabilities: DynamicTitleCapabilities::default(),
             remote_file_browser_enabled: true,
             remote_stats_enabled: true,
             ssh_profile: None,

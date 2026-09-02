@@ -4866,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "nyaterm"
-version = "1.2.5"
+version = "1.2.6"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm 0.10.3",
@@ -4888,6 +4888,7 @@ dependencies = [
  "ironrdp",
  "keyring",
  "lazy_static",
+ "libc",
  "md-5 0.10.6",
  "notify",
  "nucleo-matcher",

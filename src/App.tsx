@@ -6,8 +6,8 @@ import { toast } from "sonner";
 import AppLayout from "./components/app/AppLayout";
 import AppPanelContent from "./components/app/AppPanelContent";
 import ActivityBarResetDialog from "./components/dialog/app/ActivityBarResetDialog";
-import { McpApprovalHost } from "./components/dialog/app/McpApprovalHost";
 import AppOverlayDialogs from "./components/dialog/app/AppOverlayDialogs";
+import { McpApprovalHost } from "./components/dialog/app/McpApprovalHost";
 import type { HostKeyVerifyRequest } from "./components/dialog/connections/HostKeyVerifyDialog";
 import type { OtpRequest } from "./components/dialog/connections/OtpDialog";
 import type { RdpCertificateVerifyRequest } from "./components/dialog/connections/RdpCertificateVerifyDialog";
@@ -31,6 +31,7 @@ import { useRemoteStats } from "./hooks/useRemoteStats";
 import { useSecurityPromptQueue } from "./hooks/useSecurityPromptQueue";
 import { useSessionRuntimeState } from "./hooks/useSessionRuntimeState";
 import { resolveDisplayKeys } from "./hooks/useShortcutMap";
+import { useFileEditorZoom } from "./hooks/useFileEditorZoom";
 import { useTerminalZoom } from "./hooks/useTerminalZoom";
 import { useTabStatusIndicators } from "./hooks/useUnreadTabs";
 import { AI_OPEN_EVENT, type AIOpenIntent } from "./lib/aiEvents";
@@ -58,15 +59,15 @@ import {
 } from "./lib/appSessionFactory";
 import {
   buildPanelOpenUpdate,
-  canUseFloatingPanel,
   canCreateSessionFromPane,
+  canUseFloatingPanel,
   clearUnavailableFloatingPanels,
   collectActiveNonSerialSessionIds,
   EXCLUSIVE_PANEL_IDS,
   type FloatingPanelsState,
+  getItemSide,
   getSideOpenPanels,
   getSideOverlayPanel,
-  getItemSide,
   getVisibleActivityIds,
   hasLiveSession,
   isActivityItemAvailable,
@@ -143,13 +144,20 @@ import {
   findSessionPaneById,
   findTabBySessionId,
   getActivePane,
+  getActiveSessionTabDisplayName,
   getReleasedSessionIds,
-  getTabDisplayName,
 } from "./lib/workspaceTabs";
+import {
+  getDynamicTitle,
+  startDynamicTitles,
+  useDynamicTitles,
+} from "./lib/dynamicTabTitles";
 import type {
   AppSettings,
   AssetMetadata,
   CloudConflictPreview,
+  McpSessionOpenCancel,
+  McpSessionOpenRequest,
   PaneSplitDirection,
   RecordingMode,
   SavedConnection,
@@ -176,6 +184,12 @@ function eventTargetsCurrentWindow(targetWindowLabel?: string | null) {
 /** Root layout: header, activity bars, sidebars, terminal area, dialogs. */
 function App() {
   useMacSelectionGuard();
+  // Keep dynamic session titles (local PTY shell integration) flowing for the
+  // main window's tab labels and window title.
+  const dynamicTitles = useDynamicTitles();
+  useEffect(() => {
+    startDynamicTitles();
+  }, []);
 
   const {
     tabs,
@@ -752,7 +766,9 @@ function App() {
   }, [handleOpenPanel]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
-  const activeTabName = activeTab ? getTabDisplayName(activeTab).trim() : "";
+  const activeTabName = activeTab
+    ? getActiveSessionTabDisplayName(activeTab, getDynamicTitle).trim()
+    : "";
   const windowTitle = activeTabName ? `${activeTabName} - NyaTerm` : "NyaTerm";
   const activePane = activeTab ? getActivePane(activeTab) : null;
   const activeConnection = activePane?.connectionId
@@ -932,6 +948,9 @@ function App() {
       options?: {
         failureContext?: string;
         runtimeModeOverride?: SshRuntimeMode;
+        propagateError?: boolean;
+        onPending?: (pending: { tabId: string; createRequestId: string }) => void;
+        onSuccess?: (sessionId: string) => void;
       },
     ) => {
       const pending = addPendingTab(
@@ -943,6 +962,7 @@ function App() {
         { display: getRemoteDesktopPaneDisplay(connection) },
       );
       const { tabId, createRequestId } = pending;
+      options?.onPending?.({ tabId, createRequestId });
 
       try {
         const sessionId = await createSessionForConnection(
@@ -959,8 +979,10 @@ function App() {
         focusTerminalSession(sessionId);
         recordRecentConnection(connection.id);
         updateAutoIconForSessionStart(connection.id, sessionId);
+        options?.onSuccess?.(sessionId);
       } catch (error) {
         if (isSessionCreationCancelled(error) || !hasTab(tabId)) {
+          if (options?.propagateError) throw error;
           return;
         }
         const errorMessage = getErrorMessage(error);
@@ -976,6 +998,7 @@ function App() {
           sourceTabId: tabId,
         });
         toast.error(t("savedConnections.connectionFailed", { error: errorMessage }));
+        if (options?.propagateError) throw error;
       }
     },
     [
@@ -989,6 +1012,89 @@ function App() {
       updateTabSession,
     ],
   );
+
+  const mcpSessionOpenRequestsRef = useRef(
+    new Map<string, { tabId: string; createRequestId: string }>(),
+  );
+  const cancelledMcpSessionOpenRequestsRef = useRef(new Set<string>());
+  useEffect(() => {
+    let disposed = false;
+    let unlistenOpen: (() => void) | undefined;
+    let unlistenCancel: (() => void) | undefined;
+
+    void listen<McpSessionOpenRequest>("mcp-session-open-request", ({ payload }) => {
+      if (disposed || !eventTargetsCurrentWindow(payload.targetWindowLabel)) return;
+      void (async () => {
+        const connections = savedConnections.some((item) => item.id === payload.connectionId)
+          ? savedConnections
+          : await invoke<SavedConnection[]>("get_saved_connections");
+        if (cancelledMcpSessionOpenRequestsRef.current.delete(payload.requestId)) return;
+        const connection = connections.find((item) => item.id === payload.connectionId);
+        if (!connection || connection.type === "rdp" || connection.type === "vnc") {
+          await invoke("respond_mcp_session_open", {
+            requestId: payload.requestId,
+            sessionId: null,
+            error: "The saved connection does not exist or is not a supported terminal connection.",
+          });
+          return;
+        }
+
+        let openedSessionId: string | null = null;
+        await connectSavedConnection(connection, {
+          failureContext: "MCP session open failed",
+          propagateError: true,
+          onPending: (pending) => {
+            mcpSessionOpenRequestsRef.current.set(payload.requestId, pending);
+          },
+          onSuccess: (sessionId) => {
+            openedSessionId = sessionId;
+          },
+        });
+        await invoke("respond_mcp_session_open", {
+          requestId: payload.requestId,
+          sessionId: openedSessionId,
+          error: openedSessionId ? null : "The MCP session-open request did not create a session.",
+        });
+      })()
+        .catch((error) => {
+          void invoke("respond_mcp_session_open", {
+            requestId: payload.requestId,
+            sessionId: null,
+            error: getErrorMessage(error),
+          }).catch(() => {});
+        })
+        .finally(() => {
+          mcpSessionOpenRequestsRef.current.delete(payload.requestId);
+          cancelledMcpSessionOpenRequestsRef.current.delete(payload.requestId);
+        });
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlistenOpen = dispose;
+    });
+
+    void listen<McpSessionOpenCancel>("mcp-session-open-cancel", ({ payload }) => {
+      if (disposed || !eventTargetsCurrentWindow(payload.targetWindowLabel)) return;
+      const pending = mcpSessionOpenRequestsRef.current.get(payload.requestId);
+      if (!pending) {
+        cancelledMcpSessionOpenRequestsRef.current.add(payload.requestId);
+        return;
+      }
+      mcpSessionOpenRequestsRef.current.delete(payload.requestId);
+      closeTabs([pending.tabId]);
+      void invoke("cancel_session_creation", {
+        createRequestId: pending.createRequestId,
+      }).catch(() => {});
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlistenCancel = dispose;
+    });
+
+    return () => {
+      disposed = true;
+      unlistenOpen?.();
+      unlistenCancel?.();
+    };
+  }, [closeTabs, connectSavedConnection, savedConnections]);
 
   const connectTemporaryConnection = useCallback(
     async (config: TemporaryLinkConfig) => {
@@ -1030,18 +1136,11 @@ function App() {
 
   const connectExternalLocalSession = useCallback(
     async (workingDir: string | null) => {
-      const pending = addPendingTab(
-        t("menu.newLocalTerminal"),
-        "Local",
-        undefined,
-      );
+      const pending = addPendingTab(t("menu.newLocalTerminal"), "Local", undefined);
       const { tabId, createRequestId } = pending;
 
       try {
-        const sessionId = await createExternalLocalSession(
-          workingDir,
-          createRequestId,
-        );
+        const sessionId = await createExternalLocalSession(workingDir, createRequestId);
         if (!hasTab(tabId)) {
           await closeStaleCreatedSession(sessionId);
           return;
@@ -1477,7 +1576,7 @@ function App() {
   const handleUpdateWindowSplitRatio = useCallback((splitId: string, ratio: number) => {
     setTerminalWindows((current) =>
       current ? updateTerminalWindowSplitRatio(current, splitId, ratio) : current,
-    );
+      );
   }, []);
 
   const handleActivatePane = useCallback(
@@ -1926,6 +2025,8 @@ function App() {
     appSettings.keybindings,
     appSettings.interaction.terminal_zoom_enabled,
   );
+
+  useFileEditorZoom(updateAppSettings);
 
   const handleOpenSettings = useCallback(() => {
     openSettings();
@@ -2961,7 +3062,12 @@ function App() {
         owner_window_label: session?.owner_window_label ?? null,
         ai_execution_profile: session?.ai_execution_profile ?? "auto",
         injection_active: session?.injection_active ?? false,
-        remote_file_browser_enabled: session?.remote_file_browser_enabled ?? false,
+        dynamic_title_enabled: session?.dynamic_title_enabled ?? false,
+        dynamic_title_integration_active:
+          session?.dynamic_title_integration_active ?? false,
+        trusted_initial_title: session?.trusted_initial_title ?? null,
+        remote_file_browser_enabled:
+          session?.remote_file_browser_enabled ?? false,
         remote_stats_enabled: session?.remote_stats_enabled ?? false,
         ssh_profile: session?.ssh_profile ?? null,
       });
@@ -3195,7 +3301,11 @@ function App() {
             targetsById.set(pane.sessionId, {
               id: pane.sessionId,
               name: pane.name,
-              tabName: getTabDisplayName(tab),
+              tabName: getActiveSessionTabDisplayName(
+                tab,
+                (sessionId) =>
+                  dynamicTitles.get(sessionId ?? "")?.effectiveTitle ?? null,
+              ),
               type: pane.type,
               ownerWindowLabel: currentWindowLabel,
             });
@@ -3219,7 +3329,7 @@ function App() {
     }
 
     return [...targetsById.values()];
-  }, [liveSessionsById, tabsById, terminalWindows]);
+  }, [liveSessionsById, tabsById, terminalWindows, dynamicTitles]);
 
   const activeBottomPanel = uiConfig.show_serial_send_panel
     ? "serialSend"
@@ -3245,14 +3355,18 @@ function App() {
           name: pane.name,
           sessionType: pane.type,
           connectionName: connection?.name,
-          tabName: getTabDisplayName(tab),
+          tabName: getActiveSessionTabDisplayName(
+            tab,
+            (sessionId) =>
+              dynamicTitles.get(sessionId ?? "")?.effectiveTitle ?? null,
+          ),
           connecting: pane.connecting,
           connectError: pane.connectError,
         });
       }
     }
     return sessions;
-  }, [savedConnections, tabs]);
+  }, [savedConnections, tabs, dynamicTitles]);
 
   const handleCloseSessionQuickSwitcher = useCallback(() => {
     setShowSessionQuickSwitcher(false);

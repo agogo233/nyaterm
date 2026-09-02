@@ -269,18 +269,15 @@ export default function TerminalContextMenu({
               {ctxSelection.text.trim().length > 0 && (
                 <ContextMenuItem
                   onClick={() => {
-                    const commandText = ctxSelection.text
-                      .trim()
-                      .slice(0, 10000);
                     const firstLine =
-                      commandText.split("\n").find((l) => l.trim() !== "") ??
+                      ctxSelection.text.split("\n").find((l) => l.trim() !== "") ??
                       "";
                     const labelText = Array.from(firstLine.trim())
                       .slice(0, 60)
                       .join("");
                     openQuickCommand(
                       JSON.stringify({
-                        command: commandText,
+                        command: ctxSelection.text,
                         label: labelText,
                       }),
                     );

@@ -401,8 +401,8 @@ async fn telnet_session_task(
             }
             cmd = cmd_rx.recv() => {
                 match cmd {
-                    Some(SessionCommand::Attach) => {
-                        output.attach();
+                    Some(SessionCommand::AttachConfirmed { ack }) => {
+                        output.attach_confirmed(ack);
                     }
                     Some(SessionCommand::DetachRenderer) => {
                         output.detach();

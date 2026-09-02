@@ -276,7 +276,6 @@ export function codeMirrorFileViewExtensions(
         height: "100%",
         backgroundColor: "var(--background)",
         color: "var(--foreground)",
-        fontSize: "13px",
       },
       "&.cm-focused": {
         outline: "none",
