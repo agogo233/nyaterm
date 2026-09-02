@@ -724,7 +724,7 @@ pub fn parse_stats_output(output: &str) -> AppResult<ParsedRemoteStats> {
                 if cols[1] != "-" {
                     let rx_bytes = parse_u64_field(cols[3], "NETDEV rx bytes")?;
                     let tx_bytes = parse_u64_field(cols[4], "NETDEV tx bytes")?;
-                    let top = cols.get(5).map_or(true, |v| v == "yes");
+                    let top = cols.get(5).map_or(true, |v| *v == "yes");
                     networks.insert(
                         cols[1].to_string(),
                         NetworkCounters { rx_bytes, tx_bytes, top },
