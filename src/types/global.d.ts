@@ -1654,7 +1654,7 @@ export interface AIStreamStart {
 }
 
 export interface AIStreamEventPayload {
-  type: "start" | "delta" | "reasoning_delta" | "done" | "error";
+  type: "start" | "delta" | "reasoning_delta" | "warning" | "done" | "error";
   streamId: string;
   sessionId?: string;
   textDelta?: string;

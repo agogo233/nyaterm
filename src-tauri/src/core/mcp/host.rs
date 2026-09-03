@@ -854,13 +854,32 @@ impl McpManager {
         let definition = capability_for_tool(tool_name)
             .ok_or_else(|| failure("invalid_argument", "Unknown NyaTerm MCP tool."))?;
         if tool_name == tool::OUTPUT_READ {
-            let args: nyaterm_mcp_protocol::OutputReadArgs = parse(arguments.clone())?;
+            let args: nyaterm_mcp_protocol::OutputReadArgs = match parse(arguments.clone()) {
+                Ok(args) => args,
+                Err(error) => {
+                    self.audit_validation_error(
+                        context,
+                        definition.capability,
+                        started,
+                        &error,
+                        tool_name,
+                        &arguments,
+                    );
+                    return Err(error);
+                }
+            };
             let max_bytes = args.max_bytes.unwrap_or(MAX_INLINE_OUTPUT_BYTES);
             if max_bytes == 0 || max_bytes > MAX_INLINE_OUTPUT_BYTES {
-                return Err(failure(
-                    "invalid_argument",
-                    "maxBytes must be between 1 and 65536.",
-                ));
+                let error = failure("invalid_argument", "maxBytes must be between 1 and 65536.");
+                self.audit_validation_error(
+                    context,
+                    definition.capability,
+                    started,
+                    &error,
+                    tool_name,
+                    &arguments,
+                );
+                return Err(error);
             }
             let result = context
                 .outputs
@@ -904,11 +923,37 @@ impl McpManager {
         }
         let scope = self.resolve_credential_scope(&context.credential).await;
         let connection_target = if tool_name == tool::SESSION_OPEN {
-            let args = parse::<SessionOpenArgs>(arguments.clone())?;
-            Some(
-                self.connection_summary(&args.connection_id)
-                    .map_err(map_error)?,
-            )
+            let args = match parse::<SessionOpenArgs>(arguments.clone()) {
+                Ok(args) => args,
+                Err(error) => {
+                    self.audit_validation_error(
+                        context,
+                        definition.capability,
+                        started,
+                        &error,
+                        tool_name,
+                        &arguments,
+                    );
+                    return Err(error);
+                }
+            };
+            match self
+                .connection_summary(&args.connection_id)
+                .map_err(map_error)
+            {
+                Ok(summary) => Some(summary),
+                Err(error) => {
+                    self.audit_validation_error(
+                        context,
+                        definition.capability,
+                        started,
+                        &error,
+                        tool_name,
+                        &arguments,
+                    );
+                    return Err(error);
+                }
+            }
         } else {
             None
         };
@@ -932,66 +977,33 @@ impl McpManager {
             }
         };
         if definition.requires_session && session_id.is_none() {
-            return Err(failure(
+            let error = failure(
                 "invalid_argument",
                 "A target session is required for this capability.",
-            ));
+            );
+            self.audit_validation_error(
+                context,
+                definition.capability,
+                started,
+                &error,
+                tool_name,
+                &arguments,
+            );
+            return Err(error);
         }
-        let assessment: Option<RiskAssessment> = match tool_name {
-            tool::TERMINAL_EXECUTE => Some(assess_command_risk(
-                &parse::<TerminalExecuteArgs>(arguments.clone())?.command,
-            )),
-            tool::SFTP_WRITE_TEXT => {
-                let args = parse::<SftpWriteTextArgs>(arguments.clone())?;
-                Some(sftp_capability::assess_sftp_risk(
-                    sftp_capability::SftpRiskOperation::Write,
-                    &args.path,
-                    None,
-                    args.force.unwrap_or(false),
-                    None,
-                ))
+        let assessment = match assess_tool_risk(tool_name, &arguments) {
+            Ok(assessment) => assessment,
+            Err(error) => {
+                self.audit_validation_error(
+                    context,
+                    definition.capability,
+                    started,
+                    &error,
+                    tool_name,
+                    &arguments,
+                );
+                return Err(error);
             }
-            tool::SFTP_MKDIR => {
-                let args = parse::<SftpMkdirArgs>(arguments.clone())?;
-                Some(sftp_capability::assess_sftp_risk(
-                    sftp_capability::SftpRiskOperation::Mkdir,
-                    &args.path,
-                    None,
-                    false,
-                    args.mode.as_deref(),
-                ))
-            }
-            tool::SFTP_RENAME => {
-                let args = parse::<SftpRenameArgs>(arguments.clone())?;
-                Some(sftp_capability::assess_sftp_risk(
-                    sftp_capability::SftpRiskOperation::Rename,
-                    &args.old_path,
-                    Some(&args.new_path),
-                    false,
-                    None,
-                ))
-            }
-            tool::SFTP_DELETE => {
-                let args = parse::<PathArgs>(arguments.clone())?;
-                Some(sftp_capability::assess_sftp_risk(
-                    sftp_capability::SftpRiskOperation::Delete,
-                    &args.path,
-                    None,
-                    false,
-                    None,
-                ))
-            }
-            tool::SFTP_CHMOD => {
-                let args = parse::<SftpChmodArgs>(arguments.clone())?;
-                Some(sftp_capability::assess_sftp_risk(
-                    sftp_capability::SftpRiskOperation::Chmod,
-                    &args.path,
-                    None,
-                    false,
-                    Some(&args.mode),
-                ))
-            }
-            _ => None,
         };
         let policy = decide_policy(
             &context.credential.permission_mode,
@@ -1042,25 +1054,53 @@ impl McpManager {
         }
         if policy == PolicyDecision::RequireApproval && !granted {
             let info = if let Some(target) = session_id.as_deref() {
-                Some(
-                    self.sessions
-                        .session_info(target)
-                        .await
-                        .map_err(map_error)?,
-                )
+                match self.sessions.session_info(target).await.map_err(map_error) {
+                    Ok(info) => Some(info),
+                    Err(error) => {
+                        self.audit(
+                            context,
+                            definition.capability,
+                            session_id.as_deref(),
+                            risk.clone(),
+                            Some("validation_denied"),
+                            false,
+                            started.elapsed(),
+                            Some(&error.message),
+                            tool_name,
+                            &arguments,
+                        );
+                        return Err(error);
+                    }
+                }
             } else {
                 None
             };
-            let owner = info
+            let owner = match info
                 .as_ref()
                 .and_then(|info| info.owner_window_label.as_deref())
                 .or(context.credential.owner_window_label.as_deref())
-                .ok_or_else(|| {
-                    failure(
+            {
+                Some(owner) => owner,
+                None => {
+                    let error = failure(
                         "approval_denied",
                         "The MCP owner window is unavailable for approval.",
-                    )
-                })?;
+                    );
+                    self.audit(
+                        context,
+                        definition.capability,
+                        session_id.as_deref(),
+                        risk.clone(),
+                        Some("approval_unavailable"),
+                        false,
+                        started.elapsed(),
+                        Some(&error.message),
+                        tool_name,
+                        &arguments,
+                    );
+                    return Err(error);
+                }
+            };
             let event = ApprovalRequestEvent {
                 request_id: uuid::Uuid::new_v4().to_string(),
                 client: context.client.lock().unwrap().clone(),
@@ -1074,17 +1114,28 @@ impl McpManager {
                     .clone()
                     .unwrap_or_else(|| access_risk(definition.access)),
             };
+            let app = match self.app.get() {
+                Some(app) => app,
+                None => {
+                    let error = failure("approval_denied", "NyaTerm is not ready.");
+                    self.audit(
+                        context,
+                        definition.capability,
+                        session_id.as_deref(),
+                        risk.clone(),
+                        Some("approval_unavailable"),
+                        false,
+                        started.elapsed(),
+                        Some(&error.message),
+                        tool_name,
+                        &arguments,
+                    );
+                    return Err(error);
+                }
+            };
             let result = self
                 .approvals
-                .request(
-                    self.app
-                        .get()
-                        .ok_or_else(|| failure("approval_denied", "NyaTerm is not ready."))?,
-                    owner,
-                    &context.id,
-                    event,
-                    &cancellation,
-                )
+                .request(app, owner, &context.id, event, &cancellation)
                 .await;
             let decision = match result {
                 Ok(decision) => decision,
@@ -1503,6 +1554,29 @@ impl McpManager {
         );
     }
 
+    fn audit_validation_error(
+        &self,
+        context: &ConnectionContext,
+        capability: &str,
+        started: Instant,
+        error: &RpcError,
+        tool_name: &str,
+        arguments: &Value,
+    ) {
+        self.audit(
+            context,
+            capability,
+            arguments.get("sessionId").and_then(Value::as_str),
+            None,
+            Some("validation_denied"),
+            false,
+            started.elapsed(),
+            Some(&error.message),
+            tool_name,
+            arguments,
+        );
+    }
+
     fn set_error(&self, value: Option<String>) {
         *self.last_error.lock().unwrap() = value;
     }
@@ -1657,6 +1731,68 @@ fn summarize(name: &str, args: &Value) -> String {
     };
     value.chars().take(512).collect()
 }
+fn assess_tool_risk(
+    tool_name: &str,
+    arguments: &Value,
+) -> Result<Option<RiskAssessment>, RpcError> {
+    match tool_name {
+        tool::TERMINAL_EXECUTE => Ok(Some(assess_command_risk(
+            &parse::<TerminalExecuteArgs>(arguments.clone())?.command,
+        ))),
+        tool::SFTP_WRITE_TEXT => {
+            let args = parse::<SftpWriteTextArgs>(arguments.clone())?;
+            Ok(Some(sftp_capability::assess_sftp_risk(
+                sftp_capability::SftpRiskOperation::Write,
+                &args.path,
+                None,
+                args.force.unwrap_or(false),
+                None,
+            )))
+        }
+        tool::SFTP_MKDIR => {
+            let args = parse::<SftpMkdirArgs>(arguments.clone())?;
+            Ok(Some(sftp_capability::assess_sftp_risk(
+                sftp_capability::SftpRiskOperation::Mkdir,
+                &args.path,
+                None,
+                false,
+                args.mode.as_deref(),
+            )))
+        }
+        tool::SFTP_RENAME => {
+            let args = parse::<SftpRenameArgs>(arguments.clone())?;
+            Ok(Some(sftp_capability::assess_sftp_risk(
+                sftp_capability::SftpRiskOperation::Rename,
+                &args.old_path,
+                Some(&args.new_path),
+                false,
+                None,
+            )))
+        }
+        tool::SFTP_DELETE => {
+            let args = parse::<PathArgs>(arguments.clone())?;
+            Ok(Some(sftp_capability::assess_sftp_risk(
+                sftp_capability::SftpRiskOperation::Delete,
+                &args.path,
+                None,
+                false,
+                None,
+            )))
+        }
+        tool::SFTP_CHMOD => {
+            let args = parse::<SftpChmodArgs>(arguments.clone())?;
+            Ok(Some(sftp_capability::assess_sftp_risk(
+                sftp_capability::SftpRiskOperation::Chmod,
+                &args.path,
+                None,
+                false,
+                Some(&args.mode),
+            )))
+        }
+        _ => Ok(None),
+    }
+}
+
 fn parse<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, RpcError> {
     serde_json::from_value(value).map_err(|error| failure("invalid_argument", &error.to_string()))
 }

@@ -44,3 +44,10 @@ it("uses explicit names for all AI permission modes in every locale", () => {
     ko.ai.permissionFullAccess,
   ]).toEqual(["읽기 전용", "매번 확인", "안전 자동", "전체 권한"]);
 });
+
+it("localizes external agent MCP fallback and startup errors", () => {
+  for (const locale of [en, zhCN, zhTW, ko]) {
+    expect(locale.ai.codexMcpFallback).toBeTruthy();
+    expect(locale.ai.claudeMcpUnavailable).toContain("{{reason}}");
+  }
+});
