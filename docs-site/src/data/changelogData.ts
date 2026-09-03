@@ -10,6 +10,24 @@ export type ChangelogRelease = {
 
 const changelogReleasesEn: ChangelogRelease[] = [
   {
+    version: '[1.2.8] - 2026-09-03',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          "**ssh:** Prune NyaTerm's Bash shell-integration injection commands from remote command history, including shells with `cmdhist` disabled.",
+        ],
+      },
+      {
+        title: 'Changed',
+        items: [
+          "**editor:** Restyle the built-in editor's search panel with theme-aware controls, focus rings, and checkbox accents.",
+          '**ssh:** Keep shell-integration injection lines within remote Linux PTY canonical-input limits.',
+        ],
+      },
+    ],
+  },
+  {
     version: '[1.2.7] - 2026-09-02',
     sections: [
       {
@@ -2056,6 +2074,24 @@ const changelogReleasesEn: ChangelogRelease[] = [
 ];
 
 const changelogReleasesZhCN: ChangelogRelease[] = [
+  {
+    version: '[1.2.8] - 2026-09-03',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**ssh:** 从远程命令历史中清理 NyaTerm 注入的 Bash Shell 集成命令，并兼容已禁用 `cmdhist` 的 Shell。',
+        ],
+      },
+      {
+        title: '变更',
+        items: [
+          '**editor:** 使用主题化控件、焦点环和复选框强调色重新设计内置编辑器的搜索面板。',
+          '**ssh:** 将 Shell 集成注入脚本的单行长度控制在远程 Linux PTY 规范输入限制内。',
+        ],
+      },
+    ],
+  },
   {
     version: '[1.2.7] - 2026-09-02',
     sections: [

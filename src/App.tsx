@@ -58,6 +58,10 @@ import {
   sendStartupCommandToSession,
 } from "./lib/appSessionFactory";
 import {
+  buildReconnectCwdStartupCommand,
+  carryOverSessionCwd,
+} from "./lib/terminalSessionCwd";
+import {
   buildPanelOpenUpdate,
   canCreateSessionFromPane,
   canUseFloatingPanel,
@@ -2428,6 +2432,20 @@ function App() {
     toast.info(t("tabCtx.fileSessionInUse"));
   }, [t]);
 
+  const buildPaneReconnectCwdStartupCommand = useCallback(
+    (pane: Pick<SessionPane, "sessionId">) =>
+      appSettings.terminal.reconnect_restore_cwd ?? false
+        ? buildReconnectCwdStartupCommand(
+            pane.sessionId,
+            appSettings.interaction.duplicate_session_command_delay_ms,
+          )
+        : undefined,
+    [
+      appSettings.terminal.reconnect_restore_cwd,
+      appSettings.interaction.duplicate_session_command_delay_ms,
+    ],
+  );
+
   const handleReconnectSession = useCallback(
     async (tab: Tab) => {
       const pane = getActivePane(tab);
@@ -2446,12 +2464,18 @@ function App() {
           }).catch(() => {});
         }
         const reconnectContent = capturePaneReconnectContent(pane);
+        const reconnectCwdStartupCommand = buildPaneReconnectCwdStartupCommand(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
           throw new Error("close_session_failed");
         }
 
-        const newSessionId = await createSessionForPane(pane);
+        const newSessionId = await createSessionForPane(
+          pane,
+          undefined,
+          reconnectCwdStartupCommand,
+        );
+        carryOverSessionCwd(pane.sessionId, newSessionId);
         if (!hasPane(tab.id, pane.id)) {
           await closeStaleCreatedSession(newSessionId);
           return;
@@ -2488,6 +2512,7 @@ function App() {
       }
     },
     [
+      buildPaneReconnectCwdStartupCommand,
       closePaneBackendSession,
       hasFileDocumentDependency,
       hasPane,
@@ -2539,12 +2564,18 @@ function App() {
           }).catch(() => {});
         }
         const reconnectContent = capturePaneReconnectContent(pane);
+        const reconnectCwdStartupCommand = buildPaneReconnectCwdStartupCommand(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
           throw new Error("close_session_failed");
         }
 
-        const newSessionId = await createSessionForPane(pane);
+        const newSessionId = await createSessionForPane(
+          pane,
+          undefined,
+          reconnectCwdStartupCommand,
+        );
+        carryOverSessionCwd(pane.sessionId, newSessionId);
         if (!hasPane(tab.id, pane.id)) {
           await closeStaleCreatedSession(newSessionId);
           return;
@@ -2581,6 +2612,7 @@ function App() {
       }
     },
     [
+      buildPaneReconnectCwdStartupCommand,
       closePaneBackendSession,
       hasFileDocumentDependency,
       hasPane,
@@ -2711,12 +2743,18 @@ function App() {
           }).catch(() => {});
         }
         const reconnectContent = capturePaneReconnectContent(pane);
+        const reconnectCwdStartupCommand = buildPaneReconnectCwdStartupCommand(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
           throw new Error("close_session_failed");
         }
 
-        const newSessionId = await createSessionForPane(pane);
+        const newSessionId = await createSessionForPane(
+          pane,
+          undefined,
+          reconnectCwdStartupCommand,
+        );
+        carryOverSessionCwd(pane.sessionId, newSessionId);
         if (!hasPane(tabId, paneId)) {
           await closeStaleCreatedSession(newSessionId);
           return;
@@ -2754,6 +2792,7 @@ function App() {
       }
     },
     [
+      buildPaneReconnectCwdStartupCommand,
       closePaneBackendSession,
       hasFileDocumentDependency,
       hasPane,

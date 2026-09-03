@@ -1361,6 +1361,7 @@ export interface TerminalSettings {
   timestamp_format: string;
   show_multi_line_paste_dialog: boolean;
   paste_image_as_path: boolean;
+  reconnect_restore_cwd: boolean;
 }
 
 export interface TransferSettings {

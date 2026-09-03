@@ -594,7 +594,20 @@ struct PendingStartupCommand {
     delay_ms: u64,
 }
 
+/// Build renderer-supplied startup input without allowing terminal controls.
 pub(super) fn build_startup_command_input(command: &str) -> Option<Vec<u8>> {
+    if command.trim().is_empty() || contains_terminal_control(command) {
+        return None;
+    }
+
+    let mut input = command.as_bytes().to_vec();
+    if !input.ends_with(b"\r") {
+        input.push(b'\r');
+    }
+    Some(input)
+}
+
+fn build_post_login_command_input(command: &str) -> Option<Vec<u8>> {
     if command.trim().is_empty() {
         return None;
     }
@@ -605,6 +618,12 @@ pub(super) fn build_startup_command_input(command: &str) -> Option<Vec<u8>> {
         input.push(b'\r');
     }
     Some(input)
+}
+
+fn contains_terminal_control(value: &str) -> bool {
+    value
+        .chars()
+        .any(|ch| matches!(ch, '\u{0000}'..='\u{001F}' | '\u{007F}'..='\u{009F}'))
 }
 
 fn arm_post_login_timer(
@@ -911,7 +930,7 @@ pub(super) async fn ssh_io_loop(
     let mut initial_remote_data_logged = false;
     let mut injection_sent_at: Option<Instant> = None;
     let mut pending_post_login = post_login.and_then(|config| {
-        build_startup_command_input(&config.command).map(|input| PendingStartupCommand {
+        build_post_login_command_input(&config.command).map(|input| PendingStartupCommand {
             input,
             delay_ms: config.delay_ms,
         })
@@ -1408,9 +1427,9 @@ mod tests {
     use super::{
         INITIAL_INJECT_DELAY_MS, INJECT_TIMEOUT_SECS, InjectionEvent, InjectionTimeoutEvent,
         IoPhase, PendingStartupCommand, SUPPRESSED_VISIBLE_FALLBACK_MAX_BYTES,
-        append_suppressed_visible_and_take_passthrough, build_startup_command_input,
-        discard_suppressed_output, handle_injection_result, handle_injection_timeout,
-        open_shell_channel, should_send_initial_injection,
+        append_suppressed_visible_and_take_passthrough, build_post_login_command_input,
+        build_startup_command_input, discard_suppressed_output, handle_injection_result,
+        handle_injection_timeout, open_shell_channel, should_send_initial_injection,
     };
     use crate::config::SftpCwdFollowMode;
     use crate::core::ssh::osc::{OscResult, OscStripper, build_ready_marker};
@@ -1551,21 +1570,46 @@ mod tests {
 
     #[test]
     fn post_login_input_normalizes_line_endings_and_adds_enter() {
-        let input = build_startup_command_input("cd /opt/app\nclear").expect("input");
+        let input = build_post_login_command_input("cd /opt/app\nclear").expect("input");
 
         assert_eq!(input, b"cd /opt/app\rclear\r");
     }
 
     #[test]
     fn post_login_input_preserves_existing_trailing_enter() {
-        let input = build_startup_command_input("uptime\r").expect("input");
+        let input = build_post_login_command_input("uptime\r").expect("input");
 
         assert_eq!(input, b"uptime\r");
     }
 
     #[test]
     fn post_login_input_ignores_blank_commands() {
-        assert!(build_startup_command_input(" \n\t ").is_none());
+        assert!(build_post_login_command_input(" \n\t ").is_none());
+    }
+
+    #[test]
+    fn startup_input_rejects_c0_del_and_c1_controls() {
+        for code in 0x00..=0x1f {
+            let command = format!("cd /tmp/a{}b", char::from_u32(code).expect("C0 code point"));
+            assert!(
+                build_startup_command_input(&command).is_none(),
+                "C0 control U+{code:04X} must be rejected"
+            );
+        }
+        for code in 0x7f..=0x9f {
+            let command = format!("cd /tmp/a{}b", char::from_u32(code).expect("C1 code point"));
+            assert!(
+                build_startup_command_input(&command).is_none(),
+                "DEL/C1 control U+{code:04X} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn startup_input_adds_enter_to_a_safe_command() {
+        let input = build_startup_command_input("cd '/opt/app'").expect("input");
+
+        assert_eq!(input, b"cd '/opt/app'\r");
     }
 
     fn osc_result(ready: bool, visible_after_ready: &str) -> OscResult {

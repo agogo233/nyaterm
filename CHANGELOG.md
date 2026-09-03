@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 This changelog is inferred from release bump commits in git history (for example `chore: bump version to vX.Y.Z`) and grouped by Conventional Commit type.
 
+## [1.2.8] - 2026-09-03
+
+### Added
+
+- **ssh:** Prune NyaTerm's Bash shell-integration injection commands from remote command history, including shells with `cmdhist` disabled.
+
+### Changed
+
+- **editor:** Restyle the built-in editor's search panel with theme-aware controls, focus rings, and checkbox accents.
+- **ssh:** Keep shell-integration injection lines within remote Linux PTY canonical-input limits.
+
 ## [1.2.7] - 2026-09-02
 
 ### Added

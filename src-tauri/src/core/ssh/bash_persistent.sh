@@ -53,7 +53,8 @@ __nyaterm_prompt(){
     unset NYATERM_READY_PENDING
     printf '%s' "${NYATERM_READY_MARKER-}"
   fi
-  printf '\033]7;file://%s%s\007' "$(__nyaterm_host)" "$PWD"
+  local cwd="${PWD//%/%25}"
+  printf '\033]7;file://%s%s\007' "$(__nyaterm_host)" "$cwd"
   return "$status"
 }
 

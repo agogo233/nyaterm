@@ -42,6 +42,7 @@ const READY_FAILED_MARKER_PREFIX: &str = "7777;NyaTermReadyFailed:";
 const COMMAND_MARKER_PREFIX: &str = "7777;NyaTermCommand:";
 const LEGACY_READY_MARKER_PREFIX: &str = "7777;DflyReady:";
 const LEGACY_COMMAND_MARKER_PREFIX: &str = "7777;DflyCommand:";
+const BASH_HISTORY_PRUNE_MAX_ENTRIES: usize = 256;
 
 /// Build a session-unique ready marker: `\x1b]7777;NyaTermReady:<id>\x07`.
 pub fn build_ready_marker(session_id: &str) -> String {
@@ -86,82 +87,134 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
         .replace('\x1b', "\\033")
         .replace('\x07', "\\007");
     let command_marker = command_marker_for_ready(ready_marker);
+    let bash_history_token = format!(
+        "NyaTermHistory:{}",
+        BASE64_STANDARD.encode(marker_inner(ready_marker))
+    );
 
     match shell {
         ShellKind::Bash => Some(format!(
             concat!(
-                " NYATERM_PRUNE_HISTORY=1;",
-                " NYATERM_READY_PENDING=1;",
-                " export NYATERM_INJ=1;",
-                " NYATERM_COMMAND_MARKER=\"{}\";",
-                " NYATERM_READY_FAILED_MARKER=\"$(printf '{}')\";",
-                " NYATERM_LAST_HISTCMD=\"${{HISTCMD-}}\";",
-                " __nyaterm_host(){{ hostname 2>/dev/null || printf localhost; }};",
-                " __nyaterm_ready_failed(){{ [ -n \"${{__nyaterm_failure_reported:-}}\" ] || {{ __nyaterm_failure_reported=1; printf '%s' \"${{NYATERM_READY_FAILED_MARKER-}}\"; }}; }};",
-                " __nyaterm_restore_status(){{ return \"$1\"; }};",
-                " __nyaterm_prompt_guard(){{ return $?; }};",
-                " __nyaterm_prune_history(){{",
-                " [ -n \"${{NYATERM_PRUNE_HISTORY:-}}\" ] || return 0;",
-                " unset NYATERM_PRUNE_HISTORY;",
-                " local hline history_number;",
-                " hline=\"$(HISTTIMEFORMAT= history 1 2>/dev/null || true)\";",
-                " case \"$hline\" in *NYATERM_PRUNE_HISTORY*|*NYATERM_INJ*|*__nyaterm_prompt*|*NyaTermReady*)",
-                " history_number=${{hline#\"${{hline%%[![:space:]]*}}\"}}; history_number=${{history_number%%[!0-9]*}};",
-                " [ -z \"$history_number\" ] || history -d \"$history_number\" 2>/dev/null || true;; esac;",
-                " NYATERM_LAST_HISTCMD=\"${{HISTCMD-}}\";",
-                " }};",
-                " __nyaterm_emit_command(){{",
-                " local histcmd=\"${{HISTCMD-}}\";",
-                " if [ -n \"$histcmd\" ] && [ \"${{NYATERM_LAST_HISTCMD-}}\" != \"$histcmd\" ]; then",
-                " NYATERM_LAST_HISTCMD=\"$histcmd\";",
-                " local cmd; cmd=\"$(fc -ln -1 2>/dev/null)\";",
-                " if [ -n \"$cmd\" ] && command -v base64 >/dev/null 2>&1; then",
-                " local b64; b64=\"$(printf '%s' \"$cmd\" | base64 | tr -d '\\r\\n')\";",
-                " printf '\\033]%s%s\\007' \"$NYATERM_COMMAND_MARKER\" \"$b64\";",
-                " fi;",
-                " fi;",
-                " }};",
-                " __nyaterm_prompt(){{",
-                " local status=$?; __nyaterm_prune_history; __nyaterm_emit_command;",
-                " printf '\\033]7;file://%s%s\\007' \"$(__nyaterm_host)\" \"$PWD\";",
-                " return \"$status\";",
-                " }};",
-                " __nyaterm_prompt_state_writable(){{ local name decl; for name in __nyaterm_saved_prompt_command __nyaterm_extra_prompt_commands __nyaterm_exported_prompt_fallback; do decl=\"$(declare -p \"$name\" 2>/dev/null || true)\"; [[ ! \"$decl\" =~ ^declare\\ -[^[:space:]]*r ]] || return 1; done; }};",
-                " if __nyaterm_prompt_state_writable; then __nyaterm_extra_prompt_commands=(); fi;",
-                " __nyaterm_run_saved_prompt_command(){{",
-                " local status=$? command;",
-                " if [ -n \"${{__nyaterm_saved_prompt_command-}}\" ]; then __nyaterm_restore_status \"$status\"; builtin eval -- \"$__nyaterm_saved_prompt_command\"; status=$?; fi;",
-                " for command in \"${{__nyaterm_extra_prompt_commands[@]}}\"; do __nyaterm_restore_status \"$status\"; builtin eval -- \"$command\"; status=$?; done;",
-                " return \"$status\";",
-                " }};",
-                " __nyaterm_rebuild_exported_prompt_fallback(){{ local command result=\"${{__nyaterm_saved_prompt_command-}}\"; for command in \"${{__nyaterm_extra_prompt_commands[@]}}\"; do if [ -n \"$result\" ]; then result=\"$result; $command\"; else result=\"$command\"; fi; done; __nyaterm_exported_prompt_fallback=\"$result\"; }};",
-                " __nyaterm_capture_prompt_string(){{",
-                " local current=\"$1\" expected=\"$2\" tail; [ \"$current\" = \"$expected\" ] && return 0;",
-                " case \"$current\" in \"$expected\"\\;*|\"$expected\"\\&*|\"$expected \"*|\"$expected\"$'\\t'*|\"$expected\"$'\\n'*)",
-                " tail=${{current#\"$expected\"}}; while :; do tail=${{tail#\"${{tail%%[![:space:]]*}}\"}}; case \"$tail\" in \\;*|\\&*) tail=${{tail#?}};; *) break;; esac; done;",
-                " [ -z \"$tail\" ] || __nyaterm_extra_prompt_commands[${{#__nyaterm_extra_prompt_commands[@]}}]=\"$tail\";;",
-                " *\"$expected\"*) return 1;;",
-                " *) __nyaterm_saved_prompt_command=\"$current\"; __nyaterm_extra_prompt_commands=();; esac; __nyaterm_rebuild_exported_prompt_fallback; return 0;",
-                " }};",
-                " __nyaterm_array_prompt_supported(){{ [ \"${{BASH_VERSINFO[0]:-0}}\" -gt 5 ] || {{ [ \"${{BASH_VERSINFO[0]:-0}}\" -eq 5 ] && [ \"${{BASH_VERSINFO[1]:-0}}\" -ge 1 ]; }}; }};",
-                " __nyaterm_repair_prompt_container(){{",
-                " local decl f current exported=0 expected='if declare -F __nyaterm_prompt >/dev/null 2>&1; then __nyaterm_prompt; __nyaterm_run_saved_prompt_command; __nyaterm_repair_prompt; __nyaterm_prompt_guard; else eval -- \"${{__nyaterm_exported_prompt_fallback-}}\"; fi';",
-                " decl=\"$(declare -p PROMPT_COMMAND 2>/dev/null || true)\";",
-                " __nyaterm_prompt_state_writable || return 1;",
-                " [[ \"$decl\" =~ ^declare\\ -[^[:space:]]*x ]] && exported=1;",
-                " [[ ! \"$decl\" =~ ^declare\\ -[^[:space:]]*r ]] || return 1;",
-                " if [[ \"$decl\" =~ ^declare\\ -[^[:space:]]*a[^[:space:]]*\\ PROMPT_COMMAND= ]] && __nyaterm_array_prompt_supported; then",
-                " local -a retained=(); for f in \"${{PROMPT_COMMAND[@]}}\"; do case \"$f\" in __nyaterm_prompt|__nyaterm_repair_prompt) ;; *) retained+=(\"$f\");; esac; done;",
-                " PROMPT_COMMAND=(__nyaterm_prompt \"${{retained[@]}}\" __nyaterm_repair_prompt) || return 1;",
-                " else current=${{PROMPT_COMMAND-}}; if [[ \"$decl\" =~ ^declare\\ -[^[:space:]]*a[^[:space:]]*\\ PROMPT_COMMAND= ]]; then unset PROMPT_COMMAND; fi;",
-                " if ! __nyaterm_capture_prompt_string \"$current\" \"$expected\"; then PROMPT_COMMAND=\"$expected\"; return 1; fi; PROMPT_COMMAND=\"$expected\" || return 1; if [ \"$exported\" -eq 1 ]; then export __nyaterm_exported_prompt_fallback; else unset __nyaterm_exported_prompt_fallback; fi; fi;",
-                " return 0;",
-                " }};",
-                " __nyaterm_repair_prompt(){{ local status=$?; __nyaterm_repair_prompt_container || __nyaterm_ready_failed; return \"$status\"; }};",
-                " __nyaterm_install_prompt(){{ __nyaterm_repair_prompt_container; }};",
-                " if __nyaterm_install_prompt; then if [ -n \"${{NYATERM_READY_PENDING:-}}\" ]; then unset NYATERM_READY_PENDING; printf '{}'; fi; else unset NYATERM_READY_PENDING; __nyaterm_ready_failed; fi\n",
+                // Use one compound entry when cmdhist is enabled while keeping
+                // every physical line below remote PTY canonical-input limits.
+                // Explicit boundaries cover shells with `shopt -u cmdhist`.
+                " : '{history_token}:begin'; {{\n",
+                " NYATERM_PRUNE_HISTORY=1;\n",
+                " NYATERM_READY_PENDING=1;\n",
+                " NYATERM_SKIP_COMMAND_ONCE=1;\n",
+                " NYATERM_HISTORY_TOKEN='{history_token}';\n",
+                " NYATERM_HISTORY_BEGIN=\"${{NYATERM_HISTORY_TOKEN}}:begin\";\n",
+                " NYATERM_HISTORY_END=\"${{NYATERM_HISTORY_TOKEN}}:end\";\n",
+                " export NYATERM_INJ=1;\n",
+                " NYATERM_COMMAND_MARKER=\"{command_marker}\";\n",
+                " NYATERM_READY_FAILED_MARKER=\"$(printf '{ready_failed_osc}')\";\n",
+                " NYATERM_LAST_HISTCMD=\"${{HISTCMD-}}\";\n",
+                " __nyaterm_host(){{ hostname 2>/dev/null || printf localhost; }};\n",
+                " __nyaterm_ready_failed(){{\n",
+                " [ -n \"${{__nyaterm_failure_reported:-}}\" ] || {{ __nyaterm_failure_reported=1; printf '%s' \"${{NYATERM_READY_FAILED_MARKER-}}\"; }};\n",
+                " }};\n",
+                " __nyaterm_restore_status(){{ return \"$1\"; }};\n",
+                " __nyaterm_prompt_guard(){{ return $?; }};\n",
+                " __nyaterm_prune_history(){{\n",
+                " [ -n \"${{NYATERM_PRUNE_HISTORY:-}}\" ] || return 0;\n",
+                " unset NYATERM_PRUNE_HISTORY;\n",
+                " local hline history_number found_end= history_window remaining={history_prune_limit};\n",
+                " history_window=\"$(HISTTIMEFORMAT= history \"$remaining\" 2>/dev/null || true)\";\n",
+                " case \"$history_window\" in *\"$NYATERM_HISTORY_BEGIN\"*\"$NYATERM_HISTORY_END\"*) ;; *) NYATERM_LAST_HISTCMD=\"${{HISTCMD-}}\"; return 0;; esac;\n",
+                " while [ \"$remaining\" -gt 0 ]; do\n",
+                " hline=\"$(HISTTIMEFORMAT= history 1 2>/dev/null || true)\";\n",
+                " if [ -z \"$found_end\" ]; then case \"$hline\" in *\"$NYATERM_HISTORY_END\"*) found_end=1;; *) break;; esac; fi;\n",
+                " history_number=${{hline#\"${{hline%%[![:space:]]*}}\"}}; history_number=${{history_number%%[!0-9]*}};\n",
+                " [ -n \"$history_number\" ] || break;\n",
+                " history -d \"$history_number\" 2>/dev/null || break;\n",
+                " case \"$hline\" in *\"$NYATERM_HISTORY_BEGIN\"*) break;; esac;\n",
+                " remaining=$((remaining - 1));\n",
+                " done;\n",
+                " NYATERM_LAST_HISTCMD=\"${{HISTCMD-}}\";\n",
+                " }};\n",
+                " __nyaterm_emit_command(){{\n",
+                " local histcmd=\"${{HISTCMD-}}\";\n",
+                " if [ -n \"${{NYATERM_SKIP_COMMAND_ONCE:-}}\" ]; then unset NYATERM_SKIP_COMMAND_ONCE; NYATERM_LAST_HISTCMD=\"$histcmd\"; return 0; fi;\n",
+                " if [ -n \"$histcmd\" ] && [ \"${{NYATERM_LAST_HISTCMD-}}\" != \"$histcmd\" ]; then\n",
+                " NYATERM_LAST_HISTCMD=\"$histcmd\";\n",
+                " local cmd; cmd=\"$(fc -ln -1 2>/dev/null)\";\n",
+                " if [ -n \"$cmd\" ] && command -v base64 >/dev/null 2>&1; then\n",
+                " local b64; b64=\"$(printf '%s' \"$cmd\" | base64 | tr -d '\\r\\n')\";\n",
+                " printf '\\033]%s%s\\007' \"$NYATERM_COMMAND_MARKER\" \"$b64\";\n",
+                " fi;\n",
+                " fi;\n",
+                " }};\n",
+                " __nyaterm_prompt(){{\n",
+                " local status=$?; __nyaterm_prune_history; __nyaterm_emit_command;\n",
+                " local cwd=\"${{PWD//%/%25}}\";\n",
+                " printf '\\033]7;file://%s%s\\007' \"$(__nyaterm_host)\" \"$cwd\";\n",
+                " return \"$status\";\n",
+                " }};\n",
+                " __nyaterm_prompt_state_writable(){{\n",
+                " local name decl;\n",
+                " for name in __nyaterm_saved_prompt_command __nyaterm_extra_prompt_commands __nyaterm_exported_prompt_fallback; do\n",
+                " decl=\"$(declare -p \"$name\" 2>/dev/null || true)\";\n",
+                " [[ ! \"$decl\" =~ ^declare\\ -[^[:space:]]*r ]] || return 1;\n",
+                " done;\n",
+                " }};\n",
+                " if __nyaterm_prompt_state_writable; then __nyaterm_extra_prompt_commands=(); fi;\n",
+                " __nyaterm_run_saved_prompt_command(){{\n",
+                " local status=$? command;\n",
+                " if [ -n \"${{__nyaterm_saved_prompt_command-}}\" ]; then __nyaterm_restore_status \"$status\"; builtin eval -- \"$__nyaterm_saved_prompt_command\"; status=$?; fi;\n",
+                " for command in \"${{__nyaterm_extra_prompt_commands[@]}}\"; do __nyaterm_restore_status \"$status\"; builtin eval -- \"$command\"; status=$?; done;\n",
+                " return \"$status\";\n",
+                " }};\n",
+                " __nyaterm_rebuild_exported_prompt_fallback(){{\n",
+                " local command result=\"${{__nyaterm_saved_prompt_command-}}\";\n",
+                " for command in \"${{__nyaterm_extra_prompt_commands[@]}}\"; do\n",
+                " if [ -n \"$result\" ]; then result=\"$result; $command\"; else result=\"$command\"; fi;\n",
+                " done;\n",
+                " __nyaterm_exported_prompt_fallback=\"$result\";\n",
+                " }};\n",
+                " __nyaterm_capture_prompt_string(){{\n",
+                " local current=\"$1\" expected=\"$2\" tail; [ \"$current\" = \"$expected\" ] && return 0;\n",
+                " case \"$current\" in \"$expected\"\\;*|\"$expected\"\\&*|\"$expected \"*|\"$expected\"$'\\t'*|\"$expected\"$'\\n'*)\n",
+                " tail=${{current#\"$expected\"}};\n",
+                " while :; do tail=${{tail#\"${{tail%%[![:space:]]*}}\"}}; case \"$tail\" in \\;*|\\&*) tail=${{tail#?}};; *) break;; esac; done;\n",
+                " [ -z \"$tail\" ] || __nyaterm_extra_prompt_commands[${{#__nyaterm_extra_prompt_commands[@]}}]=\"$tail\";;\n",
+                " *\"$expected\"*) return 1;;\n",
+                " *) __nyaterm_saved_prompt_command=\"$current\"; __nyaterm_extra_prompt_commands=();;\n",
+                " esac;\n",
+                " __nyaterm_rebuild_exported_prompt_fallback;\n",
+                " return 0;\n",
+                " }};\n",
+                " __nyaterm_array_prompt_supported(){{\n",
+                " [ \"${{BASH_VERSINFO[0]:-0}}\" -gt 5 ] || {{ [ \"${{BASH_VERSINFO[0]:-0}}\" -eq 5 ] && [ \"${{BASH_VERSINFO[1]:-0}}\" -ge 1 ]; }};\n",
+                " }};\n",
+                " __nyaterm_repair_prompt_container(){{\n",
+                " local decl f current exported=0 expected='if declare -F __nyaterm_prompt >/dev/null 2>&1; then __nyaterm_prompt; __nyaterm_run_saved_prompt_command; __nyaterm_repair_prompt; __nyaterm_prompt_guard; else eval -- \"${{__nyaterm_exported_prompt_fallback-}}\"; fi';\n",
+                " decl=\"$(declare -p PROMPT_COMMAND 2>/dev/null || true)\";\n",
+                " __nyaterm_prompt_state_writable || return 1;\n",
+                " [[ \"$decl\" =~ ^declare\\ -[^[:space:]]*x ]] && exported=1;\n",
+                " [[ ! \"$decl\" =~ ^declare\\ -[^[:space:]]*r ]] || return 1;\n",
+                " if [[ \"$decl\" =~ ^declare\\ -[^[:space:]]*a[^[:space:]]*\\ PROMPT_COMMAND= ]] && __nyaterm_array_prompt_supported; then\n",
+                " local -a retained=();\n",
+                " for f in \"${{PROMPT_COMMAND[@]}}\"; do case \"$f\" in __nyaterm_prompt|__nyaterm_repair_prompt) ;; *) retained+=(\"$f\");; esac; done;\n",
+                " PROMPT_COMMAND=(__nyaterm_prompt \"${{retained[@]}}\" __nyaterm_repair_prompt) || return 1;\n",
+                " else\n",
+                " current=${{PROMPT_COMMAND-}};\n",
+                " if [[ \"$decl\" =~ ^declare\\ -[^[:space:]]*a[^[:space:]]*\\ PROMPT_COMMAND= ]]; then unset PROMPT_COMMAND; fi;\n",
+                " if ! __nyaterm_capture_prompt_string \"$current\" \"$expected\"; then PROMPT_COMMAND=\"$expected\"; return 1; fi;\n",
+                " PROMPT_COMMAND=\"$expected\" || return 1;\n",
+                " if [ \"$exported\" -eq 1 ]; then export __nyaterm_exported_prompt_fallback; else unset __nyaterm_exported_prompt_fallback; fi;\n",
+                " fi;\n",
+                " return 0;\n",
+                " }};\n",
+                " __nyaterm_repair_prompt(){{ local status=$?; __nyaterm_repair_prompt_container || __nyaterm_ready_failed; return \"$status\"; }};\n",
+                " __nyaterm_install_prompt(){{ __nyaterm_repair_prompt_container; }};\n",
+                " if __nyaterm_install_prompt; then __nyaterm_install_ok=1; else __nyaterm_install_ok=0; fi;\n",
+                " }}; : '{history_token}:end'; __nyaterm_prune_history; if [ \"$__nyaterm_install_ok\" = 1 ]; then if [ -n \"${{NYATERM_READY_PENDING:-}}\" ]; then unset NYATERM_READY_PENDING; printf '{ready_osc}'; fi; else unset NYATERM_READY_PENDING; __nyaterm_ready_failed; fi; unset __nyaterm_install_ok\n",
             ),
-            command_marker, ready_failed_osc, ready_osc,
+            history_token = bash_history_token,
+            command_marker = command_marker,
+            ready_failed_osc = ready_failed_osc,
+            ready_osc = ready_osc,
+            history_prune_limit = BASH_HISTORY_PRUNE_MAX_ENTRIES,
         )),
 
         ShellKind::Zsh => Some(format!(
@@ -174,7 +227,7 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
                 " __nyaterm_host(){{ hostname 2>/dev/null || printf localhost; }};",
                 " __nyaterm_ready_failed(){{ [ -n \"${{__nyaterm_failure_reported:-}}\" ] || {{ __nyaterm_failure_reported=1; printf '%s' \"${{NYATERM_READY_FAILED_MARKER-}}\"; }}; }};",
                 " __nyaterm_emit(){{",
-                " local saved_status=$?; printf '\\033]7;file://%s%s\\007' \"$(__nyaterm_host)\" \"$PWD\"; return \"$saved_status\";",
+                " local saved_status=$?; local cwd=\"${{PWD//%/%25}}\"; printf '\\033]7;file://%s%s\\007' \"$(__nyaterm_host)\" \"$cwd\"; return \"$saved_status\";",
                 " }};",
                 " __nyaterm_preexec(){{",
                 " local saved_status=$?; if [ -n \"$1\" ]; then",
@@ -209,7 +262,7 @@ pub fn injection_script(shell: ShellKind, ready_marker: &str) -> Option<String> 
                 " set -g NYATERM_COMMAND_MARKER \"{}\";",
                 " set -g NYATERM_READY_FAILED_MARKER (printf '{}');",
                 " function __nyaterm_emit --on-event fish_prompt;",
-                " set -l saved_status $status; printf '\\033]7;file://%s%s\\007' (hostname) $PWD; return $saved_status;",
+                " set -l saved_status $status; set -l cwd (string replace -a '%' '%25' -- $PWD); printf '\\033]7;file://%s%s\\007' (hostname) $cwd; return $saved_status;",
                 " end;",
                 " function __nyaterm_preexec --on-event fish_preexec;",
                 " set -l saved_status $status; if test -n \"$argv[1]\";",
@@ -353,7 +406,8 @@ const ZSH_PERSISTENT_SCRIPT: &str = concat!(
     "__nyaterm_emit(){\n",
     "  local saved_status=$?\n",
     "  if [ -n \"${NYATERM_READY_PENDING:-}\" ]; then unset NYATERM_READY_PENDING; printf '%s' \"${NYATERM_READY_MARKER-}\"; fi\n",
-    "  printf '\\033]7;file://%s%s\\007' \"$(__nyaterm_host)\" \"$PWD\"\n",
+    "  local cwd=\"${PWD//%/%25}\"\n",
+    "  printf '\\033]7;file://%s%s\\007' \"$(__nyaterm_host)\" \"$cwd\"\n",
     "  return \"$saved_status\"\n",
     "}\n",
     "__nyaterm_preexec(){\n",
@@ -387,7 +441,8 @@ const FISH_PERSISTENT_SCRIPT: &str = concat!(
     "    set -e NYATERM_READY_PENDING\n",
     "    printf '%s' \"$NYATERM_READY_MARKER\"\n",
     "  end\n",
-    "  printf '\\033]7;file://%s%s\\007' (hostname) $PWD\n",
+    "  set -l cwd (string replace -a '%' '%25' -- $PWD)\n",
+    "  printf '\\033]7;file://%s%s\\007' (hostname) $cwd\n",
     "  return $saved_status\n",
     "end\n",
     "function __nyaterm_preexec\n",
@@ -895,21 +950,41 @@ fn parse_command_marker(inner: &str, expected_marker: Option<&str>) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::{
-        CwdPayloadEvent, MANAGED_BLOCK_END, MANAGED_BLOCK_START, OscStripper, ShellKind,
-        activation_script, build_ready_marker, injection_script, persistent_script,
-        rc_managed_block, replace_managed_block,
+        BASH_HISTORY_PRUNE_MAX_ENTRIES, CwdPayloadEvent, MANAGED_BLOCK_END, MANAGED_BLOCK_START,
+        OscStripper, ShellKind, activation_script, build_ready_marker, injection_script,
+        persistent_script, rc_managed_block, replace_managed_block,
     };
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 
     #[test]
-    fn bash_injection_prunes_its_history_entry() {
+    fn bash_injection_prunes_its_complete_marked_history_range() {
         let script = injection_script(ShellKind::Bash, &build_ready_marker("session-1"))
             .expect("bash injection script");
 
         assert!(script.contains("NYATERM_PRUNE_HISTORY=1;"));
+        assert_eq!(
+            script
+                .matches("NyaTermHistory:Nzc3NztOeWFUZXJtUmVhZHk6c2Vzc2lvbi0x:begin")
+                .count(),
+            1
+        );
+        assert_eq!(
+            script
+                .matches("NyaTermHistory:Nzc3NztOeWFUZXJtUmVhZHk6c2Vzc2lvbi0x:end")
+                .count(),
+            1
+        );
+        assert!(script.contains("while [ \"$remaining\" -gt 0 ]; do"));
+        assert!(script.contains("history_window=\"$(HISTTIMEFORMAT= history"));
+        assert!(script.contains("*\"$NYATERM_HISTORY_BEGIN\"*\"$NYATERM_HISTORY_END\"*)"));
+        assert!(script.contains("*\"$NYATERM_HISTORY_END\"*) found_end=1"));
+        assert!(script.contains("*\"$NYATERM_HISTORY_BEGIN\"*) break"));
         assert!(script.contains("history_number=${hline#"));
-        assert!(script.contains("history -d \"$history_number\" 2>/dev/null || true;"));
+        assert!(script.contains("history -d \"$history_number\" 2>/dev/null || break;"));
+        assert!(script.contains("NYATERM_SKIP_COMMAND_ONCE=1;"));
+        assert!(script.contains("unset NYATERM_SKIP_COMMAND_ONCE"));
+        assert!(script.lines().count() < BASH_HISTORY_PRUNE_MAX_ENTRIES);
         assert!(!script.contains("BASH_REMATCH"));
         assert!(script.contains("if declare -F __nyaterm_prompt"));
         assert!(script.contains("__nyaterm_exported_prompt_fallback"));
@@ -918,6 +993,90 @@ mod tests {
         ));
         assert!(!script.contains("set +o history"));
         assert!(!script.contains("set -o history"));
+    }
+
+    #[test]
+    fn direct_injection_lines_fit_linux_pty_canonical_input() {
+        // Linux N_TTY reserves one byte of its 4096-byte input buffer, so a
+        // canonical input line must not exceed 4095 bytes.
+        const LINUX_MAX_CANON_BYTES: usize = 4095;
+        let ready = build_ready_marker("session-1");
+
+        for shell in [ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish] {
+            let script = injection_script(shell, &ready).expect("direct injection script");
+            let longest_line = script
+                .lines()
+                .map(|line| line.len())
+                .max()
+                .unwrap_or_default();
+
+            assert!(
+                longest_line <= LINUX_MAX_CANON_BYTES,
+                "{shell:?} injection line is {longest_line} bytes"
+            );
+        }
+
+        let bash = injection_script(ShellKind::Bash, &ready).expect("Bash injection script");
+        assert!(bash.starts_with(" : 'NyaTermHistory:"));
+        assert!(bash.contains(":begin'; {\n"));
+        assert!(bash.contains("}; : 'NyaTermHistory:"));
+        assert!(bash.contains(":end'; __nyaterm_prune_history;"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_bash_injection_prunes_history_with_cmdhist_enabled_or_disabled() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        for cmdhist in ["shopt -s cmdhist", "shopt -u cmdhist"] {
+            let integration = injection_script(ShellKind::Bash, &build_ready_marker("session-1"))
+                .expect("Bash injection script");
+            let input = format!(
+                concat!(
+                    "HISTFILE=/dev/null\n",
+                    "HISTCONTROL=\n",
+                    "history -c\n",
+                    "{cmdhist}\n",
+                    "PS1=\n",
+                    "PS2=\n",
+                    "{integration}",
+                    "history\n",
+                    "exit\n",
+                ),
+                cmdhist = cmdhist,
+                integration = integration,
+            );
+            let mut child = Command::new("/bin/bash")
+                .args(["--noprofile", "--norc", "-i"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn interactive Bash");
+            child
+                .stdin
+                .take()
+                .expect("Bash stdin")
+                .write_all(input.as_bytes())
+                .expect("write Bash injection");
+            let output = child.wait_with_output().expect("wait for Bash");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            assert!(output.status.success(), "{cmdhist}\n{stdout}\n{stderr}");
+            assert!(
+                stdout.contains("NyaTermReady:session-1"),
+                "{cmdhist}\n{stdout}"
+            );
+            assert!(stdout.contains(cmdhist), "{cmdhist}\n{stdout}");
+            assert!(
+                !stdout.contains("NYATERM_PRUNE_HISTORY=1;")
+                    && !stdout.contains("__nyaterm_host(){")
+                    && !stdout.contains("NyaTermHistory:"),
+                "injection leaked into Bash history with {cmdhist}\n{stdout}"
+            );
+        }
     }
 
     #[test]
@@ -1194,6 +1353,24 @@ eval "$PROMPT_COMMAND" 2>/dev/null || true
         );
         assert!(fish.contains("printf '\\033]7;file://%s%s\\007'"));
         assert_no_empty_tail_printf(&fish);
+        assert!(bash.contains("${PWD//%/%25}"));
+        assert!(zsh.contains("${PWD//%/%25}"));
+        assert!(fish.contains("string replace -a '%' '%25' -- $PWD"));
+        assert!(
+            persistent_script(ShellKind::Bash)
+                .expect("bash persistent script")
+                .contains("${PWD//%/%25}")
+        );
+        assert!(
+            persistent_script(ShellKind::Zsh)
+                .expect("zsh persistent script")
+                .contains("${PWD//%/%25}")
+        );
+        assert!(
+            persistent_script(ShellKind::Fish)
+                .expect("fish persistent script")
+                .contains("string replace -a '%' '%25' -- $PWD")
+        );
 
         assert!(bash.contains("NYATERM_COMMAND_MARKER"));
         assert!(zsh.contains("NYATERM_COMMAND_MARKER"));

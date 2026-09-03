@@ -2221,6 +2221,8 @@
     "rdpCertificateVerifyNew": "新的 RDP 证书，请验证以下指纹。",
     "rdpCertificateVerifyTitle": "RDP 证书验证",
     "rdpCertificateVerifyWarning": "警告：RDP 证书已更改。请仅在你信任此服务器时接受。",
+    "reconnectRestoreCwd": "重连后恢复上次工作目录",
+    "reconnectRestoreCwdDesc": "启用后，SSH 会话重连时自动 cd 回断开前的工作目录。需要 shell 集成（bash/zsh/fish）支持，无记录时保持原有行为。",
     "recordingAutoStart": "自动录制新会话",
     "recordingAutoStartDesc": "每次会话启动成功后自动开始写入录制文件。录制文件会持续增长，直到会话结束或手动停止。",
     "recordingDefaultMode": "默认模式",
