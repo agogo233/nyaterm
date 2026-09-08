@@ -121,6 +121,13 @@ export function installXTerminalSelectionController({
     if (e.button === 1) e.preventDefault();
   };
 
+  const handleWindowsMiddleMouseDownCapture = (e: MouseEvent) => {
+    if (e.button !== 1) return;
+    handleTerminalMouseDown(e);
+    terminal.focus();
+    e.stopPropagation();
+  };
+
   const handleTerminalMouseUp = (e: MouseEvent) => {
     if (e.button === 0) {
       const down = primaryMouseDown;
@@ -282,6 +289,7 @@ export function installXTerminalSelectionController({
     document.addEventListener("mousemove", handleMacReleasedMouseMove, true);
   }
   if (isWindows) {
+    containerEl.addEventListener("mousedown", handleWindowsMiddleMouseDownCapture, true);
     terminal.textarea?.addEventListener("focus", handleTerminalFocus);
     terminal.textarea?.addEventListener("blur", handleTerminalBlur);
     window.addEventListener("keydown", handleSyntheticWinVPaste, true);
@@ -307,6 +315,7 @@ export function installXTerminalSelectionController({
         );
       }
       if (isWindows) {
+        containerEl.removeEventListener("mousedown", handleWindowsMiddleMouseDownCapture, true);
         terminal.textarea?.removeEventListener("focus", handleTerminalFocus);
         terminal.textarea?.removeEventListener("blur", handleTerminalBlur);
         window.removeEventListener("keydown", handleSyntheticWinVPaste, true);

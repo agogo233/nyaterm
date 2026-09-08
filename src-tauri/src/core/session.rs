@@ -5,7 +5,7 @@
 
 use super::history::{CommandHistoryStore, sanitize_history_command};
 use super::{InputOrigin, InputSensitivity, RecordingManager};
-use crate::config::{AiExecutionProfile, SshProfile};
+use crate::config::{AiExecutionProfile, SshProfile, SshRuntimeMode};
 use crate::core::capabilities::RecentOutputStore;
 use crate::core::capture::CapturedOutput;
 use crate::core::zmodem::{ZmodemPreparedUpload, ZmodemUploadConflictMode};
@@ -213,6 +213,10 @@ pub struct SessionInfo {
     /// SSH runtime profile used for capability gating on the frontend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_profile: Option<SshProfile>,
+    /// Effective SSH runtime mode. This may differ from the requested mode
+    /// when Standard falls back to an SFTP-only session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_runtime_mode: Option<crate::config::SshRuntimeMode>,
 }
 
 fn default_remote_file_browser_enabled() -> bool {
@@ -856,6 +860,13 @@ impl SessionManager {
     pub async fn send_command(&self, id: &str, cmd: SessionCommand) -> AppResult<()> {
         let sessions = self.sessions.lock().await;
         if let Some(handle) = sessions.get(id) {
+            if matches!(cmd, SessionCommand::Write { .. })
+                && handle.info.ssh_runtime_mode == Some(SshRuntimeMode::Sftp)
+            {
+                return Err(AppError::Config(
+                    "Terminal input is unavailable for SFTP-only sessions".to_string(),
+                ));
+            }
             if let SessionCommand::Write {
                 origin,
                 sensitivity,
@@ -1405,6 +1416,7 @@ mod tests {
                 remote_file_browser_enabled: true,
                 remote_stats_enabled: true,
                 ssh_profile: None,
+                ssh_runtime_mode: None,
             },
             cmd_tx,
             startup_input_barrier: None,
@@ -1421,6 +1433,29 @@ mod tests {
             .unwrap_or_default()
             .as_nanos();
         std::env::temp_dir().join(format!("nyaterm-session-history-{name}-{nanos}.json"))
+    }
+
+    #[tokio::test]
+    async fn sftp_only_session_rejects_terminal_input() {
+        let manager = SessionManager::new();
+        let mut handle = test_handle("sftp-only", SessionType::SSH, false);
+        handle.info.ssh_runtime_mode = Some(crate::config::SshRuntimeMode::Sftp);
+        manager.add_session(handle).await;
+
+        let error = manager
+            .send_command(
+                "sftp-only",
+                SessionCommand::Write {
+                    data: b"ignored".to_vec(),
+                    automated: false,
+                    origin: InputOrigin::Keyboard,
+                    sensitivity: crate::core::InputSensitivity::Normal,
+                },
+            )
+            .await
+            .expect_err("SFTP-only sessions must reject terminal input");
+
+        assert!(error.to_string().contains("SFTP-only"));
     }
 
     #[test]

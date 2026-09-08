@@ -14,8 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { RecordingMode } from "@/types/global";
 
 interface LocalTerminalProps {
@@ -159,25 +159,6 @@ export function LocalTerminal({
           onChange={(e) => setWorkingDir(e.target.value)}
         />
       </div>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xs font-medium">{t("dialog.dynamicTabTitle")}</div>
-          <p className="mt-0.5 text-[0.6875rem] leading-relaxed text-muted-foreground">
-            {t("dialog.dynamicTabTitleDesc")}
-          </p>
-          {dynamicTabTitle && shellArgs.trim() ? (
-            <p className="mt-1 text-[0.6875rem] leading-relaxed text-amber-600 dark:text-amber-400">
-              {t("dialog.dynamicTabTitleCustomArgsHint")}
-            </p>
-          ) : null}
-        </div>
-        <Switch
-          className="mt-0.5"
-          size="sm"
-          checked={dynamicTabTitle}
-          onCheckedChange={setDynamicTabTitle}
-        />
-      </div>
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
         <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
           <MdChevronRight
@@ -210,6 +191,25 @@ export function LocalTerminal({
                       <SelectItem value="GB18030">GB18030</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium">{t("dialog.dynamicTabTitle")}</div>
+                    <p className="mt-0.5 text-[0.6875rem] leading-relaxed text-muted-foreground">
+                      {t("dialog.dynamicTabTitleDesc")}
+                    </p>
+                    {dynamicTabTitle && shellArgs.trim() ? (
+                      <p className="mt-1 text-[0.6875rem] leading-relaxed text-amber-600 dark:text-amber-400">
+                        {t("dialog.dynamicTabTitleCustomArgsHint")}
+                      </p>
+                    ) : null}
+                  </div>
+                  <Switch
+                    className="mt-0.5"
+                    size="sm"
+                    checked={dynamicTabTitle}
+                    onCheckedChange={setDynamicTabTitle}
+                  />
                 </div>
                 <ConnectionRecordingSettings
                   useGlobal={recordingUseGlobal}

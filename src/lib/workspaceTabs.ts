@@ -83,6 +83,7 @@ export function createSessionPane(
     createRequestId: overrides?.createRequestId,
     connectError: overrides?.connectError,
     temporaryConfig: overrides?.temporaryConfig,
+    sshRuntimeMode: overrides?.sshRuntimeMode,
   } as SessionPane;
 }
 
@@ -220,6 +221,7 @@ export function updateSessionPane(
       | "connecting"
       | "connectError"
       | "createRequestId"
+      | "sshRuntimeMode"
     >
   >,
 ): PaneNode {
@@ -441,6 +443,7 @@ function serializePane(node: PaneNode): RestorablePaneNode | null {
       title: node.name,
       session_type: node.type,
       connection_id: node.connectionId,
+      ssh_runtime_mode: node.sshRuntimeMode,
       display: isRemoteDesktopPane(node) ? node.display : undefined,
     };
   }
@@ -556,6 +559,7 @@ function restorePane(node: RestorablePaneNode): PaneNode | null {
       name: node.title,
       type,
       connectionId: node.connection_id,
+      sshRuntimeMode: node.ssh_runtime_mode,
       display: remoteDesktop
         ? {
             ...DEFAULT_REMOTE_DESKTOP_DISPLAY,

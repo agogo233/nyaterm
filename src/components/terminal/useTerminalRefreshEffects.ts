@@ -165,7 +165,7 @@ export function useTerminalRefreshEffects({
         force: force || isScaleChange,
         refresh: true,
         clearTextureAtlas: isScaleChange,
-        focus: active && visible,
+        focus: reason === "window-focus" ? false : active && visible,
       });
     };
 
@@ -202,7 +202,7 @@ export function useTerminalRefreshEffects({
       .catch(() => {});
     appWindow
       .onFocusChanged(({ payload }) => {
-        if (!disposed && payload) scheduleWindowFit("window-focus");
+        if (!disposed && payload) scheduleWindowFit("window-focus", true);
       })
       .then((unlisten) => {
         unlistenFocused = unlisten;

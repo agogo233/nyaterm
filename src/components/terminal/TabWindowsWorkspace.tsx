@@ -21,6 +21,7 @@ import type {
   RecordingMode,
   RecordingStatus,
   SavedConnection,
+  SessionInfo,
   Tab,
 } from "@/types/global";
 import PaneWorkspace from "./PaneWorkspace";
@@ -51,6 +52,7 @@ interface TabWindowsWorkspaceProps {
   focusedTabId?: string | null;
   unreadTabIds?: Set<string>;
   disconnectedTabIds?: Set<string>;
+  sessionInfoById?: Map<string, SessionInfo> | null;
   onSelectTab: (leafId: string, tabId: string) => void;
   onAddTab: (leafId: string) => void;
   onConnectConnection: (leafId: string, connection: SavedConnection) => void | Promise<void>;
@@ -222,6 +224,7 @@ function LeafWindow({
   focusedTabId,
   unreadTabIds,
   disconnectedTabIds,
+  sessionInfoById,
   onSelectTab,
   onAddTab,
   onConnectConnection,
@@ -326,6 +329,7 @@ function LeafWindow({
         focusedTabId={focusedTabId}
         unreadTabIds={unreadTabIds}
         disconnectedTabIds={disconnectedTabIds}
+        sessionInfoById={sessionInfoById}
         onTabChange={(tabId) => onSelectTab(leaf.id, tabId)}
         onTabClose={onTabClose}
         onAddTab={() => onAddTab(leaf.id)}
@@ -478,6 +482,7 @@ function TerminalContentHost({
   leafRects,
   dropState,
   onSelectTab,
+  sessionInfoById,
   onActivatePane,
   onUpdatePaneSplitRatio,
   onReconnectPane,
@@ -495,6 +500,7 @@ function TerminalContentHost({
   leafRects: Map<string, LeafContentRect>;
   dropState: DropState | null;
   onSelectTab: TabWindowsWorkspaceProps["onSelectTab"];
+  sessionInfoById?: TabWindowsWorkspaceProps["sessionInfoById"];
   onActivatePane: TabWindowsWorkspaceProps["onActivatePane"];
   onUpdatePaneSplitRatio: TabWindowsWorkspaceProps["onUpdatePaneSplitRatio"];
   onReconnectPane?: TabWindowsWorkspaceProps["onReconnectPane"];
@@ -533,6 +539,7 @@ function TerminalContentHost({
             <PaneWorkspace
               tab={tab}
               visible={visible}
+              sessionInfoById={sessionInfoById}
               onActivatePane={(paneId) => {
                 onSelectTab(leafId, tab.id);
                 onActivatePane(tab.id, paneId);
@@ -562,6 +569,7 @@ function TabWindowsWorkspace({
   onMoveTabToLeaf,
   onSplitTabToLeaf,
   onSelectTab,
+  sessionInfoById,
   onActivatePane,
   onUpdatePaneSplitRatio,
   onReconnectPane,
@@ -751,6 +759,7 @@ function TabWindowsWorkspace({
         onMoveTabToLeaf={onMoveTabToLeaf}
         onSplitTabToLeaf={onSplitTabToLeaf}
         onSelectTab={onSelectTab}
+        sessionInfoById={sessionInfoById}
         workspaceRef={workspaceRef}
         dropState={dropState}
         onLeafContentRectChange={handleLeafContentRectChange}
@@ -764,6 +773,7 @@ function TabWindowsWorkspace({
         leafRects={leafRects}
         dropState={dropState}
         onSelectTab={onSelectTab}
+        sessionInfoById={sessionInfoById}
         onActivatePane={onActivatePane}
         onUpdatePaneSplitRatio={onUpdatePaneSplitRatio}
         onReconnectPane={onReconnectPane}

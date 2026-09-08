@@ -843,6 +843,7 @@ mod tests {
                     remote_file_browser_enabled: true,
                     remote_stats_enabled: true,
                     ssh_profile: None,
+                    ssh_runtime_mode: None,
                 },
                 cmd_tx,
                 startup_input_barrier: None,

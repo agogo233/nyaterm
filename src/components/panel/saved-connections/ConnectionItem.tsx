@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdContentCopy, MdDelete, MdDriveFileRenameOutline, MdEdit, MdLink } from "react-icons/md";
 import { toast } from "sonner";
@@ -10,6 +11,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { canOpenSavedConnectionWithSftp } from "@/lib/sftpRuntime";
 import type { SavedConnection } from "@/types/global";
 import { resolveConnectionIcon } from "../../icons";
 import { useSavedConnectionsContext } from "./context";
@@ -303,6 +305,7 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
     savedGroups,
     handleConnect,
     handleConnectOnly,
+    handleOpenSftp,
     handleConnectSelected,
     handleCopyConnection,
     requestMoveConnectionToGroup,
@@ -613,6 +616,17 @@ export default function ConnectionItem({ conn, indented, depth = 0 }: Connection
           <MdLink className="text-[0.875rem] text-muted-foreground mr-2" />
           {connectLabel}
         </ContextMenuItem>
+        {canOpenSavedConnectionWithSftp(conn) ? (
+          <ContextMenuItem
+            onClick={() => {
+              closeAndSuppressDetails();
+              handleOpenSftp(conn);
+            }}
+          >
+            <FolderOpen className="mr-2 size-3.5 text-muted-foreground" />
+            {t("savedConnections.openWithSftp")}
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem
           onClick={() => {
             closeAndSuppressDetails();

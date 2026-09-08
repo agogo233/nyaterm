@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Terminal } from "@xterm/xterm";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   MdAddCircleOutline,
@@ -87,6 +87,7 @@ export default function TerminalContextMenu({
     text: "",
     provider: "",
   });
+  const suppressCloseAutoFocusRef = useRef(false);
   const pasteText = useCallback(
     (text: string) => {
       if (!text) return;
@@ -205,6 +206,14 @@ export default function TerminalContextMenu({
     terminalRef.current?.focus();
   }, [terminalRef]);
 
+  const doFind = useCallback(
+    (selection?: string) => {
+      suppressCloseAutoFocusRef.current = true;
+      onFind(selection);
+    },
+    [onFind],
+  );
+
   const toggleRecording = useCallback(
     (mode: RecordingMode = "transcript") => {
       void Promise.resolve(onToggleRecording?.(sessionId, mode)).finally(() =>
@@ -253,7 +262,15 @@ export default function TerminalContextMenu({
             {children}
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-[200px]">
+        <ContextMenuContent
+          className="min-w-[200px]"
+          onCloseAutoFocus={(event) => {
+            if (!suppressCloseAutoFocusRef.current) return;
+
+            event.preventDefault();
+            suppressCloseAutoFocusRef.current = false;
+          }}
+        >
           {ctxSelection.hasSelection ? (
             <>
               <ContextMenuItem onClick={() => doCopy(ctxSelection.text)}>
@@ -261,7 +278,7 @@ export default function TerminalContextMenu({
                 {t("terminalCtx.copy")}
                 <ContextMenuShortcut>{dk("terminal.copy")}</ContextMenuShortcut>
               </ContextMenuItem>
-              <ContextMenuItem onClick={() => onFind(ctxSelection.text)}>
+              <ContextMenuItem onClick={() => doFind(ctxSelection.text)}>
                 <MdSearch className="text-[0.875rem] text-muted-foreground mr-2" />
                 {t("terminalCtx.find")}
                 <ContextMenuShortcut>{dk("terminal.find")}</ContextMenuShortcut>
@@ -402,7 +419,7 @@ export default function TerminalContextMenu({
                   {dk("terminal.paste")}
                 </ContextMenuShortcut>
               </ContextMenuItem>
-              <ContextMenuItem onClick={() => onFind()}>
+              <ContextMenuItem onClick={() => doFind()}>
                 <MdSearch className="text-[0.875rem] text-muted-foreground mr-2" />
                 {t("terminalCtx.find")}
                 <ContextMenuShortcut>{dk("terminal.find")}</ContextMenuShortcut>

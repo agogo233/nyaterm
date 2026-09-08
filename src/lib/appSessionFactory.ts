@@ -185,7 +185,10 @@ export async function createExternalLocalSession(
 }
 
 export function createSessionForPane(
-  pane: Pick<SessionPane, "type" | "connectionId" | "temporaryConfig">,
+  pane: Pick<
+    SessionPane,
+    "type" | "connectionId" | "temporaryConfig" | "sshRuntimeMode"
+  >,
   createRequestId?: string,
   startupCommand?: StartupCommandRequest,
 ) {
@@ -201,6 +204,7 @@ export function createSessionForPane(
           connectionId: pane.connectionId,
           createRequestId,
           startupCommand: buildStartupCommandPayload(startupCommand),
+          runtimeMode: pane.sshRuntimeMode,
         });
       }
       assertMatchingTemporaryConfig(pane);
@@ -251,6 +255,7 @@ export function createSessionForPane(
           connectionId: pane.connectionId,
           createRequestId,
           startupCommand: buildStartupCommandPayload(startupCommand),
+          runtimeMode: pane.sshRuntimeMode,
         });
       }
       assertMatchingTemporaryConfig(pane);

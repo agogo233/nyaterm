@@ -41,6 +41,7 @@ export interface SavedConnectionsContextValue {
   toggleGroup: (id: string) => void;
   handleConnect: (conn: SavedConnection) => void;
   handleConnectOnly: (conn: SavedConnection) => void;
+  handleOpenSftp: (conn: SavedConnection) => void;
   handleConnectSelected: () => void;
   handleCopyConnection: (conn: SavedConnection) => void;
   requestMoveConnectionToGroup: (conn: SavedConnection, groupId: string | null) => void;

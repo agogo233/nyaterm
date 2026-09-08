@@ -9,16 +9,20 @@ function createHarness(
 ) {
   const { isMacOS = false, isWindows = true } = options;
   const containerEl = document.createElement("div");
+  const xtermTarget = document.createElement("div");
   const textarea = document.createElement("textarea");
   const otherControl = document.createElement("button");
-  containerEl.append(textarea);
+  containerEl.append(xtermTarget, textarea);
   document.body.append(containerEl, otherControl);
 
   const pasteClipboard = vi.fn(() => Promise.resolve());
+  const pasteText = vi.fn();
+  const removeLinkPopup = vi.fn();
+  const clearSearchSelectionState = vi.fn();
   const terminal = {
     textarea,
     clearSelection: vi.fn(),
-    focus: vi.fn(),
+    focus: vi.fn(() => textarea.focus()),
     getSelection: vi.fn(() => ""),
     onSelectionChange: vi.fn(() => ({ dispose: vi.fn() })),
   } as unknown as Terminal;
@@ -40,17 +44,37 @@ function createHarness(
     aiCapturingRef: { current: false },
     inputStateRef: { current: {} as TerminalInputState },
     isTerminalAlive: () => true,
-    removeLinkPopup: vi.fn(),
-    clearSearchSelectionState: vi.fn(),
+    removeLinkPopup,
+    clearSearchSelectionState,
     getSmartCursorSelectedInputRange: () => null,
     moveInputCursorAfterSelection: vi.fn(),
     canUseSmartCursor: () => false,
     moveInputCursor: vi.fn(),
-    pasteText: vi.fn(),
+    pasteText,
     pasteClipboard,
   });
 
-  return { controller, otherControl, pasteClipboard, terminal, textarea };
+  return {
+    clearSearchSelectionState,
+    controller,
+    otherControl,
+    pasteClipboard,
+    pasteText,
+    removeLinkPopup,
+    terminal,
+    textarea,
+    xtermTarget,
+  };
+}
+
+function dispatchMouse(target: HTMLElement, type: "mousedown" | "mouseup", button: number) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button,
+  });
+  target.dispatchEvent(event);
+  return event;
 }
 
 function dispatchSyntheticWinVPaste() {
@@ -82,6 +106,72 @@ afterEach(() => {
 });
 
 describe("installXTerminalSelectionController", () => {
+  it("blocks Windows middle mousedown before it reaches xterm and still pastes on mouseup", () => {
+    const {
+      clearSearchSelectionState,
+      controller,
+      otherControl,
+      pasteClipboard,
+      removeLinkPopup,
+      terminal,
+      textarea,
+      xtermTarget,
+    } = createHarness();
+    const xtermMouseDown = vi.fn();
+    xtermTarget.addEventListener("mousedown", xtermMouseDown);
+    otherControl.focus();
+    expect(document.activeElement).toBe(otherControl);
+
+    const mouseDown = dispatchMouse(xtermTarget, "mousedown", 1);
+    dispatchMouse(xtermTarget, "mouseup", 1);
+
+    expect(mouseDown.defaultPrevented).toBe(true);
+    expect(xtermMouseDown).not.toHaveBeenCalled();
+    expect(terminal.focus).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(textarea);
+    expect(removeLinkPopup).toHaveBeenCalledOnce();
+    expect(clearSearchSelectionState).toHaveBeenCalledOnce();
+    expect(pasteClipboard).toHaveBeenCalledOnce();
+    controller.dispose();
+
+    const afterDispose = dispatchMouse(xtermTarget, "mousedown", 1);
+    expect(xtermMouseDown).toHaveBeenCalledOnce();
+    expect(afterDispose.defaultPrevented).toBe(false);
+  });
+
+  it("keeps non-Windows middle mousedown and Windows primary mousedown visible to xterm", () => {
+    const nonWindows = createHarness({ isWindows: false });
+    const nonWindowsMouseDown = vi.fn();
+    nonWindows.xtermTarget.addEventListener("mousedown", nonWindowsMouseDown);
+
+    dispatchMouse(nonWindows.xtermTarget, "mousedown", 1);
+
+    expect(nonWindowsMouseDown).toHaveBeenCalledOnce();
+    nonWindows.controller.dispose();
+
+    const windows = createHarness();
+    const windowsMouseDown = vi.fn();
+    windows.xtermTarget.addEventListener("mousedown", windowsMouseDown);
+
+    dispatchMouse(windows.xtermTarget, "mousedown", 0);
+
+    expect(windowsMouseDown).toHaveBeenCalledOnce();
+    windows.controller.dispose();
+  });
+
+  it("keeps middle-click terminal selection paste behavior", () => {
+    const { controller, pasteClipboard, pasteText, terminal, xtermTarget } = createHarness();
+    vi.mocked(terminal.getSelection).mockReturnValue("selected text");
+
+    dispatchMouse(xtermTarget, "mousedown", 1);
+    dispatchMouse(xtermTarget, "mouseup", 1);
+
+    expect(pasteText).toHaveBeenCalledOnce();
+    expect(pasteText).toHaveBeenCalledWith("selected text");
+    expect(pasteClipboard).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
   it("handles synthetic Win+V only when the terminal had focus before blur", () => {
     const first = createHarness();
     first.textarea.focus();

@@ -19,6 +19,7 @@ use scp_normal::ScpNormalBackend;
 use sftp_backend::SftpBackend;
 use traits::RemoteFs;
 
+use crate::config::SshRuntimeMode;
 use crate::core::SessionManager;
 use crate::core::ssh::SshConnectionHandles;
 use crate::error::{AppError, AppResult};
@@ -45,6 +46,10 @@ pub use util::{
     DirectoryChild, FileEntry, FileProperties, RemoteBinaryFile, RemoteFileAttributeUpdate,
     RemoteTextFile, TextFileOpenResult, WriteRemoteTextResult, classify_text_file,
 };
+
+pub(crate) async fn probe_sftp_subsystem(ssh_handle: &Arc<SshConnectionHandles>) -> AppResult<()> {
+    SftpBackend::probe(ssh_handle).await
+}
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +98,7 @@ pub(crate) struct AutoRemoteFs {
     cache_key: String,
     sftp_encoding: String,
     sftp_pipeline_depth_override: Option<u32>,
+    force_sftp: bool,
 }
 
 impl AutoRemoteFs {
@@ -103,6 +109,7 @@ impl AutoRemoteFs {
         username: &str,
         sftp_encoding: &str,
         sftp_pipeline_depth_override: Option<u32>,
+        force_sftp: bool,
     ) -> Self {
         Self {
             inner: RwLock::new(None),
@@ -110,6 +117,7 @@ impl AutoRemoteFs {
             cache_key: cache_key(host, port, username),
             sftp_encoding: sftp_encoding.to_string(),
             sftp_pipeline_depth_override,
+            force_sftp,
         }
     }
 
@@ -137,6 +145,16 @@ impl AutoRemoteFs {
     }
 
     async fn probe_backends(&self) -> AppResult<Box<dyn RemoteFs>> {
+        if self.force_sftp {
+            SftpBackend::probe(&self.ssh_handle).await?;
+            save_cached_backend(&self.cache_key, "sftp", false, None);
+            return Ok(Box::new(SftpBackend::new(
+                self.ssh_handle.clone(),
+                &self.sftp_encoding,
+                self.sftp_pipeline_depth_override,
+            )));
+        }
+
         if let Some(cached) = load_cached_backend(&self.cache_key) {
             tracing::debug!(cached_backend = %cached, "Trying cached backend first");
             if let Some(backend) = self.try_cached_backend(&cached).await {
@@ -309,7 +327,7 @@ async fn get_or_create_auto_fs(
     manager: &SessionManager,
     session_id: &str,
 ) -> AppResult<Arc<AutoRemoteFs>> {
-    {
+    let force_sftp = {
         let sessions = manager.sessions.lock().await;
         let session = sessions.get(session_id).ok_or_else(|| {
             AppError::SessionNotFound(format!("Session '{}' not found", session_id))
@@ -322,7 +340,8 @@ async fn get_or_create_auto_fs(
         if let Some(ref fs) = session.remote_fs {
             return Ok(fs.clone());
         }
-    }
+        session.info.ssh_runtime_mode == Some(SshRuntimeMode::Sftp)
+    };
 
     let (ssh_handle, host, port, username, _encoding, sftp_encoding, sftp_pipeline_depth_override) =
         get_ssh_info(manager, session_id).await?;
@@ -333,6 +352,7 @@ async fn get_or_create_auto_fs(
         &username,
         &sftp_encoding,
         sftp_pipeline_depth_override,
+        force_sftp,
     ));
 
     {
@@ -2659,6 +2679,7 @@ mod tests {
                     remote_file_browser_enabled: false,
                     remote_stats_enabled: true,
                     ssh_profile: None,
+                    ssh_runtime_mode: None,
                 },
                 cmd_tx,
                 startup_input_barrier: None,

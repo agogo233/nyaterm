@@ -25,6 +25,7 @@ import { useIdleLock } from "./hooks/useIdleLock";
 import { useMacSelectionGuard } from "./hooks/useMacSelectionGuard";
 import { useMcpActiveSession } from "./hooks/useMcpActiveSession";
 import { useModalChildWindows } from "./hooks/useModalChildWindows";
+import { useNetworkHistory } from "./hooks/useNetworkHistory";
 import { useRemoteGpuOverview } from "./hooks/useRemoteGpuOverview";
 import { useRemoteNpuOverview } from "./hooks/useRemoteNpuOverview";
 import { useRemoteStats } from "./hooks/useRemoteStats";
@@ -57,6 +58,10 @@ import {
   type StartupCommandRequest,
   sendStartupCommandToSession,
 } from "./lib/appSessionFactory";
+import {
+  buildReconnectCwdStartupCommand,
+  carryOverSessionCwd,
+} from "./lib/terminalSessionCwd";
 import {
   buildPanelOpenUpdate,
   canCreateSessionFromPane,
@@ -179,6 +184,25 @@ function joinPath(dir: string, fileName: string) {
 
 function eventTargetsCurrentWindow(targetWindowLabel?: string | null) {
   return !targetWindowLabel || targetWindowLabel === getOwnerMainWindowLabel();
+}
+
+function isSftpOnlyPane(
+  pane: SessionPane | null | undefined,
+  sessionsById: Map<string, SessionInfo> | null | undefined,
+) {
+  return (
+    pane?.paneKind === "terminal" &&
+    pane.type === "SSH" &&
+    (pane.sshRuntimeMode === "sftp" ||
+      sessionsById?.get(pane.sessionId)?.ssh_runtime_mode === "sftp")
+  );
+}
+
+function isSftpOnlySession(
+  sessionId: string,
+  sessionsById: Map<string, SessionInfo> | null | undefined,
+) {
+  return sessionsById?.get(sessionId)?.ssh_runtime_mode === "sftp";
 }
 
 /** Root layout: header, activity bars, sidebars, terminal area, dialogs. */
@@ -959,7 +983,10 @@ function App() {
         connection.id,
         undefined,
         undefined,
-        { display: getRemoteDesktopPaneDisplay(connection) },
+        {
+          display: getRemoteDesktopPaneDisplay(connection),
+          sshRuntimeMode: options?.runtimeModeOverride,
+        },
       );
       const { tabId, createRequestId } = pending;
       options?.onPending?.({ tabId, createRequestId });
@@ -1011,6 +1038,15 @@ function App() {
       updateAutoIconForSessionStart,
       updateTabSession,
     ],
+  );
+
+  const openSavedConnectionWithSftp = useCallback(
+    (connection: SavedConnection) =>
+      connectSavedConnection(connection, {
+        runtimeModeOverride: "sftp",
+        failureContext: "SFTP-only connection failed",
+      }),
+    [connectSavedConnection],
   );
 
   const mcpSessionOpenRequestsRef = useRef(
@@ -1795,14 +1831,22 @@ function App() {
 
   const getQuickCommandPeerSessionIds = useCallback(
     (sessionId: string) => {
-      return getSessionInputPeerIds(sessionId, syncGroups, tabs, broadcastToAll);
+      return getSessionInputPeerIds(sessionId, syncGroups, tabs, broadcastToAll).filter(
+        (peerSessionId) => !isSftpOnlySession(peerSessionId, liveSessionsById),
+      );
     },
-    [broadcastToAll, syncGroups, tabs],
+    [broadcastToAll, liveSessionsById, syncGroups, tabs],
   );
 
   const handleHistoryCommand = useCallback(
     (command: string, execute: boolean = true) => {
-      if (activePane?.paneKind !== "terminal" || !hasLiveSession(activePane)) return;
+      if (
+        activePane?.paneKind !== "terminal" ||
+        !hasLiveSession(activePane) ||
+        isSftpOnlyPane(activePane, liveSessionsById)
+      ) {
+        return;
+      }
 
       const { sessionId } = activePane;
       const data = buildTerminalCommandInput(command, execute);
@@ -1823,7 +1867,7 @@ function App() {
         emit(`focus-terminal-${sessionId}`);
       });
     },
-    [activePane, getQuickCommandPeerSessionIds],
+    [activePane, getQuickCommandPeerSessionIds, liveSessionsById],
   );
 
   const handleSendToAllSessions = useCallback(
@@ -1834,7 +1878,8 @@ function App() {
           if (
             pane.paneKind !== "terminal" ||
             !hasLiveSession(pane) ||
-            !isNonSerialSessionType(pane.type)
+            !isNonSerialSessionType(pane.type) ||
+            isSftpOnlyPane(pane, liveSessionsById)
           ) {
             continue;
           }
@@ -1846,7 +1891,7 @@ function App() {
         }
       }
     },
-    [tabs],
+    [liveSessionsById, tabs],
   );
 
   const handleReconnected = useCallback(
@@ -2217,6 +2262,7 @@ function App() {
     async (tab: Tab, startupCommand?: StartupCommandRequest) => {
       const pane = getActivePane(tab);
       if (!canCreateSessionFromPane(pane)) return;
+      if (startupCommand && isSftpOnlyPane(pane, liveSessionsById)) return;
 
       try {
         const pending = addPendingTab(
@@ -2225,7 +2271,10 @@ function App() {
           pane.connectionId,
           { customName: tab.customName, tabColor: tab.tabColor },
           { afterTabId: tab.id },
-          { temporaryConfig: pane.temporaryConfig },
+          {
+            temporaryConfig: pane.temporaryConfig,
+            sshRuntimeMode: pane.sshRuntimeMode,
+          },
         );
         const { tabId, createRequestId } = pending;
         setTerminalWindows((current) =>
@@ -2291,6 +2340,7 @@ function App() {
       t,
       updateAutoIconForSessionStart,
       updateTabSession,
+      liveSessionsById,
     ],
   );
 
@@ -2301,6 +2351,7 @@ function App() {
         !pane ||
         pane.paneKind !== "terminal" ||
         pane.type !== "SSH" ||
+        isSftpOnlyPane(pane, liveSessionsById) ||
         pane.connecting ||
         pane.connectError
       ) {
@@ -2316,7 +2367,10 @@ function App() {
           pane.connectionId,
           { customName: tab.customName, tabColor: tab.tabColor },
           { afterTabId: tab.id },
-          { temporaryConfig: pane.temporaryConfig },
+          {
+            temporaryConfig: pane.temporaryConfig,
+            sshRuntimeMode: pane.sshRuntimeMode,
+          },
         );
         tabId = pending.tabId;
         setTerminalWindows((current) =>
@@ -2364,6 +2418,7 @@ function App() {
       t,
       updateAutoIconForSessionStart,
       updateTabSession,
+      liveSessionsById,
     ],
   );
 
@@ -2428,6 +2483,20 @@ function App() {
     toast.info(t("tabCtx.fileSessionInUse"));
   }, [t]);
 
+  const buildPaneReconnectCwdStartupCommand = useCallback(
+    (pane: Pick<SessionPane, "sessionId">) =>
+      appSettings.terminal.reconnect_restore_cwd ?? false
+        ? buildReconnectCwdStartupCommand(
+            pane.sessionId,
+            appSettings.interaction.duplicate_session_command_delay_ms,
+          )
+        : undefined,
+    [
+      appSettings.terminal.reconnect_restore_cwd,
+      appSettings.interaction.duplicate_session_command_delay_ms,
+    ],
+  );
+
   const handleReconnectSession = useCallback(
     async (tab: Tab) => {
       const pane = getActivePane(tab);
@@ -2446,12 +2515,18 @@ function App() {
           }).catch(() => {});
         }
         const reconnectContent = capturePaneReconnectContent(pane);
+        const reconnectCwdStartupCommand = buildPaneReconnectCwdStartupCommand(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
           throw new Error("close_session_failed");
         }
 
-        const newSessionId = await createSessionForPane(pane);
+        const newSessionId = await createSessionForPane(
+          pane,
+          undefined,
+          reconnectCwdStartupCommand,
+        );
+        carryOverSessionCwd(pane.sessionId, newSessionId);
         if (!hasPane(tab.id, pane.id)) {
           await closeStaleCreatedSession(newSessionId);
           return;
@@ -2488,6 +2563,7 @@ function App() {
       }
     },
     [
+      buildPaneReconnectCwdStartupCommand,
       closePaneBackendSession,
       hasFileDocumentDependency,
       hasPane,
@@ -2539,12 +2615,18 @@ function App() {
           }).catch(() => {});
         }
         const reconnectContent = capturePaneReconnectContent(pane);
+        const reconnectCwdStartupCommand = buildPaneReconnectCwdStartupCommand(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
           throw new Error("close_session_failed");
         }
 
-        const newSessionId = await createSessionForPane(pane);
+        const newSessionId = await createSessionForPane(
+          pane,
+          undefined,
+          reconnectCwdStartupCommand,
+        );
+        carryOverSessionCwd(pane.sessionId, newSessionId);
         if (!hasPane(tab.id, pane.id)) {
           await closeStaleCreatedSession(newSessionId);
           return;
@@ -2581,6 +2663,7 @@ function App() {
       }
     },
     [
+      buildPaneReconnectCwdStartupCommand,
       closePaneBackendSession,
       hasFileDocumentDependency,
       hasPane,
@@ -2711,12 +2794,18 @@ function App() {
           }).catch(() => {});
         }
         const reconnectContent = capturePaneReconnectContent(pane);
+        const reconnectCwdStartupCommand = buildPaneReconnectCwdStartupCommand(pane);
         const closed = await closePaneBackendSession(pane);
         if (!closed) {
           throw new Error("close_session_failed");
         }
 
-        const newSessionId = await createSessionForPane(pane);
+        const newSessionId = await createSessionForPane(
+          pane,
+          undefined,
+          reconnectCwdStartupCommand,
+        );
+        carryOverSessionCwd(pane.sessionId, newSessionId);
         if (!hasPane(tabId, paneId)) {
           await closeStaleCreatedSession(newSessionId);
           return;
@@ -2754,6 +2843,7 @@ function App() {
       }
     },
     [
+      buildPaneReconnectCwdStartupCommand,
       closePaneBackendSession,
       hasFileDocumentDependency,
       hasPane,
@@ -3150,7 +3240,8 @@ function App() {
     !activePane.connectError
       ? activePane.sessionId
       : null;
-  useMcpActiveSession(activeSessionId);
+  const activeSftpOnly = isSftpOnlyPane(activePane, liveSessionsById);
+  useMcpActiveSession(activeSftpOnly ? null : activeSessionId);
   const activeSshSessionId =
     activePane &&
     activePane.paneKind === "terminal" &&
@@ -3177,6 +3268,10 @@ function App() {
     activeStatsSessionId,
     activeRemoteStatsEnabled,
     uiConfig.remote_stats_interval ?? 3,
+  );
+  const networkHistoryStore = useNetworkHistory(
+    remoteStats.sessionId,
+    remoteStats.stats,
   );
   const headerStatusMode = normalizeHeaderStatusMode(uiConfig.header_status_mode);
   const headerStatusVisible = uiConfig.header_status_visible !== false;
@@ -3262,12 +3357,16 @@ function App() {
     activePane.paneKind === "terminal" &&
     !activePane.connecting &&
     !activePane.connectError &&
-    isNonSerialSessionType(activePane.type)
+    isNonSerialSessionType(activePane.type) &&
+    !activeSftpOnly
       ? activePane.sessionId
       : null;
   const activeNonSerialSessionIds = useMemo(
-    () => collectActiveNonSerialSessionIds(terminalWindows, tabsById),
-    [tabsById, terminalWindows],
+    () =>
+      collectActiveNonSerialSessionIds(terminalWindows, tabsById).filter(
+        (sessionId) => !isSftpOnlySession(sessionId, liveSessionsById),
+      ),
+    [liveSessionsById, tabsById, terminalWindows],
   );
   const sendCommandSessionTargets = useMemo(() => {
     const currentWindowLabel = getOwnerMainWindowLabel();
@@ -3295,7 +3394,11 @@ function App() {
           if (!tab) continue;
 
           for (const pane of collectSessionPanes(tab.root)) {
-            if (pane.paneKind !== "terminal" || !hasLiveSession(pane)) {
+            if (
+              pane.paneKind !== "terminal" ||
+              !hasLiveSession(pane) ||
+              isSftpOnlyPane(pane, liveSessionsById)
+            ) {
               continue;
             }
             targetsById.set(pane.sessionId, {
@@ -3318,6 +3421,7 @@ function App() {
 
     for (const session of liveSessionsById?.values() ?? []) {
       if (!["SSH", "Local", "Telnet", "Serial"].includes(session.session_type)) continue;
+      if (session.ssh_runtime_mode === "sftp") continue;
       if (targetsById.has(session.id)) continue;
       targetsById.set(session.id, {
         id: session.id,
@@ -3596,9 +3700,11 @@ function App() {
         activePane={activePane}
         activeConnection={activeConnection}
         activeSessionId={activeSessionId}
+        shellInputEnabled={!activeSftpOnly}
         activeStatsSessionId={activeStatsSessionId}
         remoteStatsEnabled={activeRemoteStatsEnabled}
         remoteStats={remoteStats}
+        networkHistoryStore={networkHistoryStore}
         gpuMonitorEnabled={uiConfig.show_gpu_monitor ?? false}
         gpuOverviewState={gpuOverviewState}
         npuMonitorEnabled={uiConfig.show_ascend_npu_monitor ?? false}
@@ -3611,6 +3717,7 @@ function App() {
         onNewConnection={handleNewSession}
         onEditConnection={handleEditConnection}
         onConnectConnection={connectSavedConnection}
+        onOpenSftpConnection={openSavedConnectionWithSftp}
         onSessionClick={handleSessionClick}
         onSessionReconnect={handleReconnectSessionById}
         onSessionDisconnect={handleDisconnectSessionById}
@@ -3625,10 +3732,12 @@ function App() {
       activeStatsSessionId,
       activePane,
       activeSessionId,
+      activeSftpOnly,
       aiIntent,
       activeRemoteStatsEnabled,
       canReconnectSessionById,
       remoteStats,
+      networkHistoryStore,
       gpuOverviewState,
       npuOverviewState,
       handleSaveSessionTranscript,
@@ -3642,6 +3751,7 @@ function App() {
       handleToggleSessionRecording,
       handleTransferResize,
       connectSavedConnection,
+      openSavedConnectionWithSftp,
       recordingStatuses,
       uiConfig.show_ascend_npu_monitor,
       uiConfig.show_gpu_monitor,
@@ -3781,6 +3891,7 @@ function App() {
           focusedTabId: activeTabId,
           unreadTabIds,
           disconnectedTabIds,
+          sessionInfoById: liveSessionsById,
           onSelectTab: handleSelectLeafTab,
           onAddTab: handleAddTabFromLeaf,
           onConnectConnection: handleConnectConnectionFromLeaf,
@@ -3833,6 +3944,7 @@ function App() {
           activeSerialSessionId,
           activeNonSerialSessionId,
           activeNonSerialSessionIds,
+          quickCommandsDisabled: activeSftpOnly,
           syncGroups,
           currentWindowLabel: getOwnerMainWindowLabel(),
           sessionTargets: sendCommandSessionTargets,

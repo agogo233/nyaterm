@@ -400,6 +400,26 @@ describe("workspaceTabs temporary session metadata", () => {
   });
 });
 
+describe("workspaceTabs SSH runtime metadata", () => {
+  it("persists and restores an SFTP-only pane override", () => {
+    const pane = createSessionPane("SFTP Host", "SSH", "ssh-1", {
+      sshRuntimeMode: "sftp",
+    });
+
+    const [serialized] = serializeTabsForPersistence([createWorkspaceTab(pane, 0)]);
+    expect(serialized.root).toMatchObject({
+      kind: "leaf",
+      ssh_runtime_mode: "sftp",
+    });
+
+    const restored = restoreTabFromPersistence(serialized, 0);
+    expect(restored?.root).toMatchObject({
+      paneKind: "terminal",
+      sshRuntimeMode: "sftp",
+    });
+  });
+});
+
 describe("workspaceTabs dynamic titles", () => {
   const localTab = () =>
     createWorkspaceTab(createSessionPane("Local Terminal", "Local"), 0);

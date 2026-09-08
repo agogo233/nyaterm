@@ -1,5 +1,5 @@
-// Local PTY dynamic-title integration. Remote SSH integration remains in
-// `core::ssh::osc` so Local title policy cannot change released SSH/history behavior.
+// Local PTY managed title/cwd integration. Remote SSH integration remains in
+// `core::ssh::osc` so Local policy cannot change released SSH/history behavior.
 
 use crate::core::ssh::osc::{
     ControlSequenceKind, ShellKind, control_sequence_payload, find_control_sequence_end,
@@ -114,15 +114,15 @@ impl LocalStartupScript {
     }
 }
 
-/// Build Local-only dynamic-title hooks. `allow_injection` must be false for
-/// every non-empty user argv and unresolved wrapper shell.
+/// Build Local-only managed title/cwd hooks. `allow_injection` must be false
+/// for every non-empty user argv and unresolved wrapper shell.
 pub fn build_local_startup_script(
     shell_name: &str,
     ready_marker: &str,
-    enabled: bool,
+    managed_integration_enabled: bool,
     allow_injection: bool,
 ) -> LocalStartupScript {
-    if !enabled || !allow_injection {
+    if !managed_integration_enabled || !allow_injection {
         return LocalStartupScript::none();
     }
 

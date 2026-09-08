@@ -10,6 +10,68 @@ export type ChangelogRelease = {
 
 const changelogReleasesEn: ChangelogRelease[] = [
   {
+    version: '[1.2.9] - 2026-09-07',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          '**resource-monitor:** Add recent upload/download traffic history with per-session network-interface selection.',
+          '**terminal:** Add an optional setting to restore the last known working directory after SSH reconnects; the option is disabled by default.',
+          '**suggestions:** Show the full command in a tooltip when a command suggestion is truncated, including hover and keyboard-selection support.',
+          '**header:** Keep custom window controls from taking terminal focus on mouse down.',
+        ],
+      },
+      {
+        title: 'Changed',
+        items: [
+          '**saved-connections:** Redesign search as an expandable control with automatic focus, keyboard navigation, Escape handling, and clear/collapse actions.',
+          '**tabbar:** Refine active and inactive tab background contrast.',
+          '**terminal:** Reorganize dynamic-title controls while preserving their existing behavior.',
+        ],
+      },
+      {
+        title: 'Fixed',
+        items: [
+          '**ssh:** Prevent startup shell-integration injection from swallowing user output, cancel pending integration before capture commands, and shorten stalled injection handling with improved diagnostics.',
+          '**terminal:** Refresh terminal rendering when the window regains focus while preserving the active terminal input focus.',
+          '**terminal:** Harden last-working-directory restoration across SSH reconnects.',
+          '**file-explorer:** Fix Windows local-terminal working-directory synchronization, including drive-letter case and trailing-separator differences.',
+          '**terminal:** Prevent Windows middle-click paste from being forwarded as Vim mouse input.',
+          '**zmodem:** Use a non-blocking file picker so file selection does not block the terminal event flow.',
+          '**settings:** Restore the committed language when discarding a preview and preserve the expected cancel-and-close flow.',
+          '**notes:** Keep rename input focus when renaming from the context menu.',
+          '**monitoring:** Detect primary NICs more reliably on LXC, VM, bond, and bridge-based hosts while continuing to filter derived virtual interfaces.',
+          '**ui:** Align icons and reserved checkmark space in checkable menu items.',
+          '**suggestions:** Keep truncated-command tooltips above the command-suggestion popup.',
+        ],
+      },
+      {
+        title: 'Performance',
+        items: [
+          '**resource-monitor:** Avoid top-level application rerenders while collecting network traffic history.',
+        ],
+      },
+    ],
+  },
+  {
+    version: '[1.2.8] - 2026-09-03',
+    sections: [
+      {
+        title: 'Added',
+        items: [
+          "**ssh:** Prune NyaTerm's Bash shell-integration injection commands from remote command history, including shells with `cmdhist` disabled.",
+        ],
+      },
+      {
+        title: 'Changed',
+        items: [
+          "**editor:** Restyle the built-in editor's search panel with theme-aware controls, focus rings, and checkbox accents.",
+          '**ssh:** Keep shell-integration injection lines within remote Linux PTY canonical-input limits.',
+        ],
+      },
+    ],
+  },
+  {
     version: '[1.2.7] - 2026-09-02',
     sections: [
       {
@@ -2056,6 +2118,66 @@ const changelogReleasesEn: ChangelogRelease[] = [
 ];
 
 const changelogReleasesZhCN: ChangelogRelease[] = [
+  {
+    version: '[1.2.9] - 2026-09-07',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**resource-monitor:** 新增近期网络上传/下载流量历史曲线，并支持按会话选择具体网卡查看。',
+          '**terminal:** 新增 SSH 重连后恢复上次工作目录的可选设置，默认关闭。',
+          '**suggestions:** 命令建议被截断时显示完整命令 Tooltip，并支持鼠标悬停和键盘选中触发。',
+          '**header:** 自定义窗口控制按钮在鼠标按下时不再抢走终端焦点。',
+        ],
+      },
+      {
+        title: '变更',
+        items: [
+          '**saved-connections:** 将搜索改为可展开控件，支持自动聚焦、键盘导航、Escape 处理以及清空/收起操作。',
+          '**tabbar:** 调整活动与非活动标签页的背景对比度。',
+          '**terminal:** 调整动态标题选项的布局与结构，并保持原有功能行为。',
+        ],
+      },
+      {
+        title: '修复',
+        items: [
+          '**ssh:** 避免启动阶段的 Shell 集成注入吞掉用户输出，在执行捕获命令前取消待处理注入，并缩短异常注入等待时间、补充诊断信息。',
+          '**terminal:** 窗口重新获得焦点时刷新终端渲染，同时保留当前终端输入焦点。',
+          '**terminal:** 加固 SSH 重连时恢复上次工作目录的处理。',
+          '**file-explorer:** 修复 Windows 本地终端工作目录同步，并正确处理盘符大小写和末尾路径分隔符差异。',
+          '**terminal:** 修复 Windows 中键粘贴被错误转发为 Vim 鼠标输入的问题。',
+          '**zmodem:** 改用非阻塞文件选择器，避免文件选择阻塞终端事件流程。',
+          '**settings:** 放弃语言预览修改时恢复已提交语言，并保持预期的取消后关闭设置窗口流程。',
+          '**notes:** 修复通过右键菜单重命名笔记时输入框丢失焦点的问题。',
+          '**monitoring:** 提高 LXC、虚拟机、bond 和 bridge 环境下主网卡识别可靠性，同时继续过滤派生虚拟接口。',
+          '**ui:** 对齐可勾选菜单项的图标，并为勾选标记预留稳定空间。',
+          '**suggestions:** 确保被截断命令的 Tooltip 始终显示在命令建议弹窗之上。',
+        ],
+      },
+      {
+        title: '性能',
+        items: ['**resource-monitor:** 收集网络流量历史时避免触发应用顶层重新渲染。'],
+      },
+    ],
+  },
+  {
+    version: '[1.2.8] - 2026-09-03',
+    sections: [
+      {
+        title: '新增',
+        items: [
+          '**ssh:** 从远程命令历史中清理 NyaTerm 注入的 Bash Shell 集成命令，并兼容已禁用 `cmdhist` 的 Shell。',
+        ],
+      },
+      {
+        title: '变更',
+        items: [
+          '**editor:** 使用主题化控件、焦点环和复选框强调色重新设计内置编辑器的搜索面板。',
+          '**ssh:** 将 Shell 集成注入脚本的单行长度控制在远程 Linux PTY 规范输入限制内。',
+        ],
+      },
+    ],
+  },
   {
     version: '[1.2.7] - 2026-09-02',
     sections: [

@@ -1,5 +1,4 @@
 use crate::config;
-use crate::core::monitoring::stats::RemoteStatsSampler;
 use crate::core::ssh::{
     self, HostKeyVerifyManager, PendingAuthManager, PendingSshAgentAuthManager,
     PendingSshAuthManager, SshAgentAuthAction, SshAuthResponse,
@@ -921,6 +920,45 @@ pub async fn ack_session_output(
 }
 
 #[tauri::command]
+pub async fn zmodem_pick_download_dir(
+    window: tauri::Window,
+) -> AppResult<Option<tauri_plugin_dialog::FilePath>> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+    let dialog = window.dialog().file();
+    #[cfg(any(windows, target_os = "macos"))]
+    let dialog = dialog.set_parent(&window);
+    dialog.pick_folder(move |path| {
+        let _ = result_tx.send(path.map(|path| path.simplified()));
+    });
+
+    result_rx
+        .await
+        .map_err(|_| AppError::Channel("ZMODEM folder picker result was dropped".to_string()))
+}
+
+#[tauri::command]
+pub async fn zmodem_pick_upload_files(
+    window: tauri::Window,
+) -> AppResult<Option<Vec<tauri_plugin_dialog::FilePath>>> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+    let dialog = window.dialog().file();
+    #[cfg(any(windows, target_os = "macos"))]
+    let dialog = dialog.set_parent(&window);
+    dialog.pick_files(move |paths| {
+        let _ = result_tx
+            .send(paths.map(|paths| paths.into_iter().map(|path| path.simplified()).collect()));
+    });
+
+    result_rx
+        .await
+        .map_err(|_| AppError::Channel("ZMODEM file picker result was dropped".to_string()))
+}
+
+#[tauri::command]
 pub async fn zmodem_accept_download(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,
@@ -1042,7 +1080,6 @@ pub async fn detach_session_renderer(
 pub async fn close_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<SessionManager>>,
-    stats_sampler: tauri::State<'_, Arc<RemoteStatsSampler>>,
     session_id: String,
 ) -> AppResult<()> {
     let session_id_clone = session_id.clone();
@@ -1062,8 +1099,6 @@ pub async fn close_session(
         Err(AppError::SessionNotFound(_)) => Ok(()),
         other => other,
     };
-
-    stats_sampler.clear_session(&session_id).await;
 
     // Concurrently tidy up any downloaded/watcher temporary files stored in the OS temp directory
     tauri::async_runtime::spawn(async move {

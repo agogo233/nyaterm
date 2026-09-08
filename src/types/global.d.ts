@@ -53,7 +53,7 @@ export type AIExecutionProfile =
   | "send_only"
   | "disabled";
 export type SshProfile = "standard" | "network_device";
-export type SshRuntimeMode = "standard" | "terminal";
+export type SshRuntimeMode = "standard" | "terminal" | "sftp";
 export type SshTerminalType =
   | "xterm-256color"
   | "xterm"
@@ -109,6 +109,8 @@ export interface SessionInfo {
   remote_stats_enabled: boolean;
   /** SSH runtime profile used for capability gating. */
   ssh_profile?: SshProfile | null;
+  /** Effective SSH runtime mode, including Standard-to-SFTP fallback. */
+  ssh_runtime_mode?: SshRuntimeMode | null;
 }
 
 /** Shared fields for one session-like leaf inside a workspace tab. */
@@ -122,6 +124,8 @@ export interface WorkspacePaneBase {
   connectionId?: string;
   /** Config for ad-hoc (temporary) sessions that have no saved connection. */
   temporaryConfig?: import("@/types/temporaryConnection").TemporaryLinkConfig;
+  /** One-shot SSH runtime used to create and restore this pane. */
+  sshRuntimeMode?: SshRuntimeMode;
   /** True while the backend session is being established. XTerminal is not rendered yet. */
   connecting?: boolean;
   /** Backend creation request id used to cancel an in-flight session creation. */
@@ -702,6 +706,7 @@ export interface RestorableSessionPane {
   title: string;
   session_type: WorkspaceSessionType | "local";
   connection_id?: string;
+  ssh_runtime_mode?: SshRuntimeMode;
   display?: RemoteDesktopDisplayMetadata;
 }
 
@@ -1361,6 +1366,7 @@ export interface TerminalSettings {
   timestamp_format: string;
   show_multi_line_paste_dialog: boolean;
   paste_image_as_path: boolean;
+  reconnect_restore_cwd: boolean;
 }
 
 export interface TransferSettings {
@@ -1809,6 +1815,7 @@ export interface FileExplorerProps {
   activeSessionType: SessionType | null;
   activeConnectionId?: string | null;
   activeSessionName?: string | null;
+  terminalInputEnabled?: boolean;
 }
 
 export interface WebdavSyncSettings {

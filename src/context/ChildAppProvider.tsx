@@ -113,6 +113,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     timestamp_format: "[HH:mm:ss]",
     show_multi_line_paste_dialog: true,
     paste_image_as_path: true,
+    reconnect_restore_cwd: false,
   },
   interaction: {
     copy_on_select: false,

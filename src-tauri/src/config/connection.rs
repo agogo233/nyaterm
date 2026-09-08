@@ -390,6 +390,7 @@ pub enum SshRuntimeMode {
     #[default]
     Standard,
     Terminal,
+    Sftp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -479,7 +480,10 @@ pub fn effective_cwd_follow_mode_for_runtime(
     profile: &SshProfile,
     runtime_mode: &SshRuntimeMode,
 ) -> SftpCwdFollowMode {
-    if *runtime_mode == SshRuntimeMode::Terminal {
+    if matches!(
+        runtime_mode,
+        SshRuntimeMode::Terminal | SshRuntimeMode::Sftp
+    ) {
         SftpCwdFollowMode::Off
     } else {
         effective_cwd_follow_mode_for_profile(settings, profile)

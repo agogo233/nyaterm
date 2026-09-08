@@ -13,8 +13,9 @@ mod tests {
         ZmodemDirection, apply_working_dir_to_command, build_cmd_prompt,
         build_local_startup_script, cancel_startup_for_pending_zmodem, detect_local_zmodem,
         drain_startup_pipeline_on_cancel, input_cancels_startup_injection,
-        is_unresolved_shell_wrapper, lock_or_recover, managed_cwd_runtime_ready,
-        parse_shell_args, reconcile_managed_cwd_payloads, resolve_shell_command,
+        is_unresolved_shell_wrapper, local_managed_integration_enabled, lock_or_recover,
+        managed_cwd_runtime_ready, parse_shell_args, reconcile_managed_cwd_payloads,
+        resolve_shell_command,
         should_allow_local_injection,
         validate_working_dir_before_spawn,
     };
@@ -1608,6 +1609,34 @@ mod tests {
         let no_inject = build_local_startup_script("powershell.exe", &marker, true, false);
         assert!(!no_inject.dynamic_title_integration_requested);
         assert!(no_inject.pwsh_init_args.is_none());
+    }
+
+    #[test]
+    fn windows_local_cwd_integration_does_not_require_dynamic_titles() {
+        let marker = ready_marker();
+        let dynamic_title_enabled = false;
+        let managed_integration_enabled =
+            local_managed_integration_enabled(dynamic_title_enabled, true);
+        assert!(managed_integration_enabled);
+        assert!(!local_managed_integration_enabled(false, false));
+
+        let pwsh = build_local_startup_script(
+            "powershell.exe",
+            &marker,
+            managed_integration_enabled,
+            true,
+        );
+        assert!(pwsh.dynamic_title_integration_requested);
+        assert!(pwsh.pwsh_init_args.is_some());
+
+        let custom_argv = build_local_startup_script(
+            "powershell.exe",
+            &marker,
+            managed_integration_enabled,
+            false,
+        );
+        assert!(!custom_argv.dynamic_title_integration_requested);
+        assert!(custom_argv.pwsh_init_args.is_none());
     }
 
     #[cfg(target_os = "windows")]

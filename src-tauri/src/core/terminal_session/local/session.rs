@@ -1,3 +1,7 @@
+fn local_managed_integration_enabled(dynamic_title_enabled: bool, windows_host: bool) -> bool {
+    windows_host || dynamic_title_enabled
+}
+
 /// Spawns a local shell in a PTY and registers the session with the manager.
 pub async fn create_local_session(
     app: AppHandle,
@@ -33,6 +37,8 @@ pub async fn create_local_session(
     let dynamic_title_enabled = config
         .as_ref()
         .is_some_and(|cfg| cfg.dynamic_tab_title);
+    let managed_integration_enabled =
+        local_managed_integration_enabled(dynamic_title_enabled, cfg!(target_os = "windows"));
     let allow_injection = config.as_ref().is_none_or(|cfg| {
         should_allow_local_injection(
             &cfg.shell_path,
@@ -45,16 +51,16 @@ pub async fn create_local_session(
     let startup = build_local_startup_script(
         &shell_name,
         &ready_marker,
-        dynamic_title_enabled,
+        managed_integration_enabled,
         allow_injection,
     );
-    if dynamic_title_enabled && !startup.dynamic_title_integration_requested {
+    if managed_integration_enabled && !startup.dynamic_title_integration_requested {
         tracing::info!(
             shell = %shell_name,
             custom_argv = config
                 .as_ref()
                 .is_some_and(|cfg| !cfg.shell_args.is_empty()),
-            "Local dynamic-title hook unavailable; continuing in passive title mode"
+            "Local title/cwd hook unavailable; continuing in passive mode"
         );
     }
     let LocalStartupScript {
@@ -93,6 +99,7 @@ pub async fn create_local_session(
         remote_file_browser_enabled: false,
         remote_stats_enabled: false,
         ssh_profile: None,
+        ssh_runtime_mode: None,
     };
 
     let cwd: SharedCwd = Arc::new(tokio::sync::Mutex::new(Default::default()));

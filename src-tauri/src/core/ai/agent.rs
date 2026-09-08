@@ -1488,6 +1488,7 @@ mod tests {
                     remote_file_browser_enabled: false,
                     remote_stats_enabled: false,
                     ssh_profile: None,
+                    ssh_runtime_mode: None,
                 },
                 cmd_tx,
                 startup_input_barrier: None,

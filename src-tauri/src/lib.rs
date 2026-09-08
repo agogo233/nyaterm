@@ -263,6 +263,8 @@ pub fn run() {
             cmd::session::respond_ssh_agent_auth,
             cmd::session::cancel_ssh_agent_auth,
             cmd::session::respond_host_key_verify,
+            cmd::session::zmodem_pick_download_dir,
+            cmd::session::zmodem_pick_upload_files,
             cmd::session::zmodem_accept_download,
             cmd::session::zmodem_accept_upload,
             cmd::session::zmodem_cancel,

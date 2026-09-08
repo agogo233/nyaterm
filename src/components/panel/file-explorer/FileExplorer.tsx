@@ -107,6 +107,7 @@ import {
   buildRemoteUploadPath,
   buildMoveSuccessRefreshPlan,
   buildSessionCacheSnapshot,
+  canTrackTerminalCwd,
   compareFileEntries,
   DEFAULT_FILE_LIST_COLUMN_WIDTHS,
   DEFAULT_FILE_SORT_DIRECTIONS,
@@ -124,6 +125,7 @@ import {
   getLocalPathName,
   type InlineRenameState,
   isParentDirectoryEntry,
+  isSameExplorerDirectory,
   joinExplorerPath,
   type LoadDirectoryOptions,
   MIN_FILE_LIST_COLUMN_WIDTHS,
@@ -136,6 +138,7 @@ import {
   pushVisitedHistory,
   type RemoteTextFile,
   type ResolvedLocalDropPathEntry,
+  subscribeFileExplorerSessionSnapshots,
   syncExplorerDirectoryToTerminalCwd,
   syncExplorerDirectoryToTerminalCwdChange,
   type TextFileOpenResult,
@@ -676,6 +679,7 @@ function FileExplorerPane({
   activeSessionType,
   activeConnectionId,
   activeSessionName,
+  terminalInputEnabled = true,
   headerMeta,
   headerActions,
   peerEndpoint,
@@ -1038,19 +1042,21 @@ function FileExplorerPane({
       return;
     }
     setRemoteFileBrowserEnabled(hasLocalSession ? true : null);
-    invoke<SessionInfo[]>("list_sessions")
-      .then((sessions) => {
-        const s = sessions.find((s) => s.id === activeSessionId);
-        const active = s?.injection_active ?? false;
-        setCwdTrackingActive(active);
+    return subscribeFileExplorerSessionSnapshots({
+      listenSessionsChanged: (handler) => listen("sessions-changed", handler),
+      readSessions: () => invoke<SessionInfo[]>("list_sessions"),
+      onSessions: (sessions) => {
+        const session = sessions.find((session) => session.id === activeSessionId);
+        setCwdTrackingActive(canTrackTerminalCwd(session));
         setRemoteFileBrowserEnabled(
-          hasLocalSession ? true : (s?.remote_file_browser_enabled ?? true),
+          hasLocalSession ? true : (session?.remote_file_browser_enabled ?? true),
         );
-      })
-      .catch(() => {
+      },
+      onError: () => {
         setCwdTrackingActive(false);
         setRemoteFileBrowserEnabled(true);
-      });
+      },
+    });
   }, [activeSessionId, hasLocalSession, hasSshSession]);
 
   useEffect(() => {
@@ -1460,6 +1466,11 @@ function FileExplorerPane({
       return;
     }
 
+    if (!cwdTrackingActive) {
+      autoSyncCwdMountSyncKeyRef.current = null;
+      return;
+    }
+
     if (!canBrowseFiles || !currentPath) {
       return;
     }
@@ -1492,6 +1503,7 @@ function FileExplorerPane({
     autoSyncScopeId,
     canBrowseFiles,
     currentPath,
+    cwdTrackingActive,
     explorerBackend,
     loadDirectory,
   ]);
@@ -1940,7 +1952,7 @@ function FileExplorerPane({
 
   const sendTextToTerminal = useCallback(
     (text: string) => {
-      if (!activeSessionId || !text) return;
+      if (!activeSessionId || !text || !terminalInputEnabled) return;
       const peerSessionIds = getSessionInputPeerIds(
         activeSessionId,
         syncGroups,
@@ -1955,7 +1967,7 @@ function FileExplorerPane({
       sendInput.catch(() => {});
       emit(`focus-terminal-${activeSessionId}`).catch(() => {});
     },
-    [activeSessionId, broadcastToAll, syncGroups, tabs],
+    [activeSessionId, broadcastToAll, syncGroups, tabs, terminalInputEnabled],
   );
 
   const handleSendCurrentPathToTerminal = () => {
@@ -2167,7 +2179,7 @@ function FileExplorerPane({
       const normalizedCwd = normalizeExplorerPath(cwd, backend);
       if (
         normalizedCwd &&
-        normalizedCwd !== normalizeExplorerPath(currentPathRef.current, backend)
+        !isSameExplorerDirectory(normalizedCwd, currentPathRef.current, backend)
       ) {
         loadDirectory(normalizedCwd);
       }
@@ -3277,7 +3289,9 @@ function FileExplorerPane({
                           onDelete={handleDeleteFromContextMenu}
                           onAddToFavorites={handleAddEntryToFavorites}
                           onCopyPath={handleCopyPath}
-                          onSendToTerminal={handleSendToTerminal}
+                          onSendToTerminal={
+                            terminalInputEnabled ? handleSendToTerminal : undefined
+                          }
                           onProperties={(entry) => {
                             if (activeSessionId) {
                               setPropertiesDialogData({
@@ -3368,10 +3382,12 @@ function FileExplorerPane({
               <MdContentCopy className="mr-2 h-4 w-4" />
               {t("fileExplorer.copyDirPath")}
             </ContextMenuItem>
-            <ContextMenuItem onClick={handleSendCurrentPathToTerminal}>
-              <LuClipboardPaste className="mr-2 h-4 w-4" />
-              {t("fileExplorer.sendDirPathToTerminal")}
-            </ContextMenuItem>
+            {terminalInputEnabled ? (
+              <ContextMenuItem onClick={handleSendCurrentPathToTerminal}>
+                <LuClipboardPaste className="mr-2 h-4 w-4" />
+                {t("fileExplorer.sendDirPathToTerminal")}
+              </ContextMenuItem>
+            ) : null}
             <ContextMenuSeparator />
             <ContextMenuItem onClick={handleCurrentDirProperties}>
               <MdInfo className="mr-2 h-4 w-4" />
@@ -3408,26 +3424,28 @@ function FileExplorerPane({
             )}
           </div>
           <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
-                    onClick={handleSyncCwd}
-                    disabled={!cwdTrackingActive}
-                  >
-                    <LuFolderSync className="h-[0.875rem] w-[0.875rem]" />
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {cwdTrackingActive
-                  ? t("fileExplorer.syncTerminalPath")
-                  : t("fileExplorer.cwdTrackingUnavailable")}
-              </TooltipContent>
-            </Tooltip>
+            {terminalInputEnabled ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={handleSyncCwd}
+                      disabled={!cwdTrackingActive}
+                    >
+                      <LuFolderSync className="h-[0.875rem] w-[0.875rem]" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {cwdTrackingActive
+                    ? t("fileExplorer.syncTerminalPath")
+                    : t("fileExplorer.cwdTrackingUnavailable")}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="inline-flex">

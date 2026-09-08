@@ -1,5 +1,6 @@
-import { createEvent, fireEvent, render, waitFor } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Terminal } from "@xterm/xterm";
+import { useMemo, useRef } from "react";
 import type React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TerminalRightClickAction } from "@/lib/interactionSettings";
@@ -107,6 +108,78 @@ describe("TerminalContextMenu right-click behavior", () => {
     expect(view.getByTestId("terminal-child")).toBe(terminalChild);
   });
 });
+
+describe("TerminalContextMenu close autofocus", () => {
+  it.each([
+    ["without a selection", ""],
+    ["with a selection", "selected text"],
+  ])("keeps focus in search after Find %s", async (_label, selection) => {
+    renderFocusHarness(selection);
+    const terminalInput = screen.getByTestId("terminal-input");
+    terminalInput.focus();
+
+    fireEvent.contextMenu(terminalInput);
+    await waitFor(() => expect(screen.getByText("terminalCtx.find")).not.toBeNull());
+    fireEvent.click(screen.getByText("terminalCtx.find"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("terminalCtx.find")).toBeNull();
+      expect(document.activeElement).toBe(screen.getByTestId("search-input"));
+    });
+  });
+
+  it("preserves the default close autofocus for ordinary menu actions", async () => {
+    renderFocusHarness("");
+    const terminalInput = screen.getByTestId("terminal-input");
+    terminalInput.focus();
+
+    fireEvent.contextMenu(terminalInput);
+    await waitFor(() => expect(screen.getByText("terminalCtx.clearAll")).not.toBeNull());
+    fireEvent.click(screen.getByText("terminalCtx.clearAll"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("terminalCtx.clearAll")).toBeNull();
+      expect(document.activeElement).toBe(terminalInput);
+    });
+  });
+});
+
+function renderFocusHarness(selection: string) {
+  function FocusHarness() {
+    const terminalInputRef = useRef<HTMLInputElement>(null);
+    const searchInputRef = useRef<HTMLInputElement>(null);
+    const terminal = useMemo(
+      () =>
+        ({
+          clearSelection: vi.fn(),
+          focus: () => terminalInputRef.current?.focus(),
+          getSelection: () => selection,
+        }) as unknown as Terminal,
+      [],
+    );
+
+    return (
+      <>
+        <TerminalContextMenu
+          sessionId="session-1"
+          terminalRef={{ current: terminal }}
+          onFind={() => {
+            // Match TerminalSearchBar's existing post-show focus effect.
+            window.setTimeout(() => searchInputRef.current?.focus(), 0);
+          }}
+          onPasteText={vi.fn()}
+          onPasteClipboard={vi.fn()}
+          onClearAll={vi.fn()}
+        >
+          <input ref={terminalInputRef} data-testid="terminal-input" />
+        </TerminalContextMenu>
+        <input ref={searchInputRef} data-testid="search-input" />
+      </>
+    );
+  }
+
+  return render(<FocusHarness />);
+}
 
 function renderTerminalContextMenu({
   onAncestorContextMenu = vi.fn(),

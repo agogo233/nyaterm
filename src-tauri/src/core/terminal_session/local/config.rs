@@ -7,8 +7,8 @@ pub struct LocalSessionConfig {
     pub fail_on_missing_working_dir: bool,
     pub name: String,
     pub encoding: String,
-    /// When true, enable Local dynamic-title/cwd integration for this
-    /// connection. Command-history confirmation remains an independent policy.
+    /// When true, allow Local dynamic titles to be promoted for this connection.
+    /// Windows cwd tracking and command-history confirmation are independent policies.
     pub dynamic_tab_title: bool,
 }
 

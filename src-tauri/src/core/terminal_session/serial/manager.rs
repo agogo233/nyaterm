@@ -62,6 +62,7 @@ pub async fn create_serial_session(
         remote_file_browser_enabled: false,
         remote_stats_enabled: false,
         ssh_profile: None,
+        ssh_runtime_mode: None,
     };
 
     let cwd: SharedCwd = Arc::new(tokio::sync::Mutex::new(Default::default()));

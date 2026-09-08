@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 
 This changelog is inferred from release bump commits in git history (for example `chore: bump version to vX.Y.Z`) and grouped by Conventional Commit type.
 
+## [1.2.9] - 2026-09-07
+
+### Added
+
+- **resource-monitor:** Add recent upload/download traffic history with per-session network-interface selection.
+- **terminal:** Add an optional setting to restore the last known working directory after SSH reconnects; the option is disabled by default.
+- **suggestions:** Show the full command in a tooltip when a command suggestion is truncated, including hover and keyboard-selection support.
+- **header:** Keep custom window controls from taking terminal focus on mouse down.
+
+### Changed
+
+- **saved-connections:** Redesign search as an expandable control with automatic focus, keyboard navigation, Escape handling, and clear/collapse actions.
+- **tabbar:** Refine active and inactive tab background contrast.
+- **terminal:** Reorganize dynamic-title controls while preserving their existing behavior.
+
+### Fixed
+
+- **ssh:** Prevent startup shell-integration injection from swallowing user output, cancel pending integration before capture commands, and shorten stalled injection handling with improved diagnostics.
+- **terminal:** Refresh terminal rendering when the window regains focus while preserving the active terminal input focus.
+- **terminal:** Harden last-working-directory restoration across SSH reconnects.
+- **file-explorer:** Fix Windows local-terminal working-directory synchronization, including drive-letter case and trailing-separator differences.
+- **terminal:** Prevent Windows middle-click paste from being forwarded as Vim mouse input.
+- **zmodem:** Use a non-blocking file picker so file selection does not block the terminal event flow.
+- **settings:** Restore the committed language when discarding a preview and preserve the expected cancel-and-close flow.
+- **notes:** Keep rename input focus when renaming from the context menu.
+- **monitoring:** Detect primary NICs more reliably on LXC, VM, bond, and bridge-based hosts while continuing to filter derived virtual interfaces.
+- **ui:** Align icons and reserved checkmark space in checkable menu items.
+- **suggestions:** Keep truncated-command tooltips above the command-suggestion popup.
+
+### Performance
+
+- **resource-monitor:** Avoid top-level application rerenders while collecting network traffic history.
+
+## [1.2.8] - 2026-09-03
+
+### Added
+
+- **ssh:** Prune NyaTerm's Bash shell-integration injection commands from remote command history, including shells with `cmdhist` disabled.
+
+### Changed
+
+- **editor:** Restyle the built-in editor's search panel with theme-aware controls, focus rings, and checkbox accents.
+- **ssh:** Keep shell-integration injection lines within remote Linux PTY canonical-input limits.
+
 ## [1.2.7] - 2026-09-02
 
 ### Added

@@ -49,6 +49,7 @@ import type {
   Group,
   PaneSplitDirection,
   SavedConnection,
+  SessionInfo,
   Tab,
 } from "@/types/global";
 import { useApp } from "../../context/AppContext";
@@ -79,6 +80,7 @@ interface TabBarProps {
   focusedTabId?: string | null;
   unreadTabIds?: Set<string>;
   disconnectedTabIds?: Set<string>;
+  sessionInfoById?: Map<string, SessionInfo> | null;
   onTabChange: (tabId: string) => void;
   onTabClose: (tab: Tab) => void | Promise<void>;
   onAddTab: () => void;
@@ -223,12 +225,15 @@ function getTabServerIp(tab: Tab, savedConnections: SavedConnection[]): string |
 function canMultiplexTab(
   tab: Tab,
   savedConnections: SavedConnection[],
+  sessionInfoById?: Map<string, SessionInfo> | null,
 ): boolean {
   const pane = getActivePane(tab);
   return (
     !!pane &&
     pane.paneKind === "terminal" &&
     isSshTab(tab, savedConnections) &&
+    pane.sshRuntimeMode !== "sftp" &&
+    sessionInfoById?.get(pane.sessionId)?.ssh_runtime_mode !== "sftp" &&
     !pane.connecting &&
     !pane.connectError &&
     !!pane.sessionId
@@ -315,6 +320,7 @@ function TabBar({
   focusedTabId,
   unreadTabIds,
   disconnectedTabIds,
+  sessionInfoById,
   onTabChange,
   onTabClose,
   onAddTab,
@@ -733,7 +739,7 @@ function TabBar({
       if (!tab) return;
       if (
         detail.action === "multiplex" &&
-        !canMultiplexTab(tab, savedConnections)
+        !canMultiplexTab(tab, savedConnections, sessionInfoById)
       )
         return;
       if (detail.action === "duplicate" && !canSpawnSessionFromTab(tab)) return;
@@ -750,7 +756,7 @@ function TabBar({
         listener,
       );
     };
-  }, [openCommandDialog, savedConnections, tabs]);
+  }, [openCommandDialog, savedConnections, sessionInfoById, tabs]);
 
   const isTabMouseActionEnabled = useCallback(
     (tab: Tab, action: TabMouseAction) => {
@@ -765,7 +771,7 @@ function TabBar({
         case "duplicate_session":
           return canSpawnSessionFromTab(tab);
         case "multiplex_ssh":
-          return canMultiplexTab(tab, savedConnections);
+          return canMultiplexTab(tab, savedConnections, sessionInfoById);
         case "reconnect_session":
           return canReconnectTab(tab);
         case "disconnect_session":
@@ -774,7 +780,7 @@ function TabBar({
           return !tab.locked;
       }
     },
-    [savedConnections],
+    [savedConnections, sessionInfoById],
   );
 
   const runTabMouseAction = useCallback(
@@ -1330,10 +1336,10 @@ function TabBar({
           borderColor: "var(--df-border)",
           backgroundColor: isActive
             ? accentColor
-              ? `color-mix(in srgb, ${accentColor} 8%, var(--df-bg))`
+              ? `color-mix(in srgb, ${accentColor} 16%, var(--df-bg))`
               : "var(--df-bg)"
             : accentColor
-              ? `color-mix(in srgb, ${accentColor} 5%, transparent)`
+              ? `color-mix(in srgb, ${accentColor} 12%, var(--df-bg-panel))`
               : "transparent",
           color: isActive ? "var(--df-text)" : "var(--df-text-muted)",
         }}
@@ -1506,6 +1512,11 @@ function TabBar({
 
         <TabContextMenu
           tab={tab}
+          sftpOnly={
+            getActivePane(tab)?.sshRuntimeMode === "sftp" ||
+            sessionInfoById?.get(getActivePane(tab)?.sessionId ?? "")?.ssh_runtime_mode ===
+              "sftp"
+          }
           tooltipContent={tooltipContent}
           tabs={tabs}
           onDuplicateSession={onDuplicateSession}

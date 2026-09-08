@@ -72,3 +72,38 @@ describe("codeMirrorFileView selection styling", () => {
     }
   });
 });
+
+describe("codeMirrorFileView search panel styling", () => {
+  it("removes CodeMirror's light button gradient and uses theme colors", () => {
+    const host = mountEditor();
+
+    try {
+      const buttonRules = findRules("cm-search").filter((rule) => rule.includes("cm-button"));
+      const baseRule = buttonRules.find(
+        (rule) => rule.includes("background-image: none") && rule.includes("var(--secondary)"),
+      );
+
+      expect(baseRule).toBeDefined();
+      expect(baseRule).toContain("color: var(--foreground)");
+      expect(baseRule).toContain("border: 1px solid var(--border)");
+
+      const activeRule = buttonRules.find((rule) => rule.includes("cm-button:active"));
+      expect(activeRule).toContain("background-image: none");
+    } finally {
+      host.remove();
+    }
+  });
+
+  it("uses the theme focus ring and checkbox accent", () => {
+    const host = mountEditor();
+
+    try {
+      const searchRules = findRules("cm-search").join("\n");
+      expect(searchRules).toContain("accent-color: var(--primary)");
+      expect(searchRules).toContain("outline: 2px solid var(--ring)");
+      expect(searchRules).toContain("color: var(--muted-foreground)");
+    } finally {
+      host.remove();
+    }
+  });
+});

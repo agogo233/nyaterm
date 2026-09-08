@@ -1196,21 +1196,6 @@ export function SshForm({
         </Tabs>
       </div>
 
-      <div className="flex items-start justify-between gap-3 rounded-lg border bg-accent/25 p-3">
-        <div className="min-w-0 space-y-0.5">
-          <div className="text-xs font-medium">{t("dialog.remoteDynamicTabTitle")}</div>
-          <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-            {t("dialog.remoteDynamicTabTitleDesc")}
-          </p>
-        </div>
-        <Switch
-          className="mt-0.5"
-          size="sm"
-          checked={remoteDynamicTabTitle}
-          onCheckedChange={setRemoteDynamicTabTitle}
-        />
-      </div>
-
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
         <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
           <MdChevronRight
@@ -1779,6 +1764,20 @@ export function SshForm({
                       <SelectItem value="GB18030">GB18030</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="text-xs font-medium">{t("dialog.remoteDynamicTabTitle")}</div>
+                    <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                      {t("dialog.remoteDynamicTabTitleDesc")}
+                    </p>
+                  </div>
+                  <Switch
+                    className="mt-0.5"
+                    size="sm"
+                    checked={remoteDynamicTabTitle}
+                    onCheckedChange={setRemoteDynamicTabTitle}
+                  />
                 </div>
                 <ConnectionRecordingSettings
                   useGlobal={recordingUseGlobal}

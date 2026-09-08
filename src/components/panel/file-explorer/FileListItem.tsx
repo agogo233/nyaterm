@@ -71,7 +71,7 @@ interface FileListItemProps {
   onDelete: (entry: FileEntry) => void;
   onAddToFavorites: (entry: FileEntry) => void;
   onCopyPath: (entry: FileEntry, mode: "dir" | "name" | "full") => void;
-  onSendToTerminal: (entry: FileEntry, mode: "dir" | "name" | "full") => void;
+  onSendToTerminal?: (entry: FileEntry, mode: "dir" | "name" | "full") => void;
   onProperties: (entry: FileEntry) => void;
   aiActions: AICustomActionConfig[];
   onAIAction: (entry: FileEntry, action: AICustomActionConfig) => void;
@@ -514,20 +514,24 @@ export function FileListItem({
               <MdFolderCopy className="text-[0.875rem] text-muted-foreground mr-2" />
               {t("fileExplorer.cmCopyDirPath")}
             </ContextMenuItem>
-            <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => onSendToTerminal(entry, "full")}>
-              <MdKeyboardReturn className="text-[0.875rem] text-muted-foreground mr-2" />
-              {t("fileExplorer.cmTerminalPath")}
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onSendToTerminal(entry, "name")}>
-              <MdKeyboardArrowRight className="text-[0.875rem] text-muted-foreground mr-2" />
-              {t("fileExplorer.cmTerminalName")}
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onSendToTerminal(entry, "dir")}>
-              <MdKeyboardDoubleArrowRight className="text-[0.875rem] text-muted-foreground mr-2" />
-              {t("fileExplorer.cmTerminalDirPath")}
-            </ContextMenuItem>
-            <ContextMenuSeparator />
+            {onSendToTerminal ? (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem onClick={() => onSendToTerminal(entry, "full")}>
+                  <MdKeyboardReturn className="text-[0.875rem] text-muted-foreground mr-2" />
+                  {t("fileExplorer.cmTerminalPath")}
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => onSendToTerminal(entry, "name")}>
+                  <MdKeyboardArrowRight className="text-[0.875rem] text-muted-foreground mr-2" />
+                  {t("fileExplorer.cmTerminalName")}
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => onSendToTerminal(entry, "dir")}>
+                  <MdKeyboardDoubleArrowRight className="text-[0.875rem] text-muted-foreground mr-2" />
+                  {t("fileExplorer.cmTerminalDirPath")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+              </>
+            ) : null}
             {aiActions.length > 0 && (
               <ContextMenuSub>
                 <ContextMenuSubTrigger>

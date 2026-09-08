@@ -56,6 +56,7 @@ interface TabContextMenuProps {
   children: ReactNode;
   tooltipContent?: ReactNode;
   tab: Tab;
+  sftpOnly?: boolean;
   tabs: Tab[];
   onDuplicateSession: (tab: Tab) => void | Promise<void>;
   onMultiplexSshSession: (tab: Tab) => void | Promise<void>;
@@ -84,6 +85,7 @@ export default function TabContextMenu({
   children,
   tooltipContent,
   tab,
+  sftpOnly: effectiveSftpOnly,
   tabs,
   onDuplicateSession,
   onMultiplexSshSession,
@@ -108,6 +110,9 @@ export default function TabContextMenu({
   const { updateTab } = useApp();
 
   const activePane = getActivePane(tab);
+  const sftpOnly =
+    effectiveSftpOnly ||
+    (activePane?.paneKind === "terminal" && activePane.sshRuntimeMode === "sftp");
   const tabIndex = tabs.findIndex((item) => item.id === tab.id);
   const isTerminalPane = activePane?.paneKind === "terminal";
   const supportsSessionSpawn =
@@ -134,17 +139,19 @@ export default function TabContextMenu({
     supportsAI;
   const showSplitActionsGroup = supportsSplit;
   const canSpawnSession = supportsSessionSpawn;
+  const canSpawnSessionWithCommand = canSpawnSession && !sftpOnly;
   const canReconnect = supportsReconnect && !activePane.connecting;
   const canMultiplexSsh =
     supportsSshMultiplex &&
     !activePane.connecting &&
     !activePane.connectError &&
+    !sftpOnly &&
     !!activePane.sessionId;
   const canDisconnect =
     supportsDisconnect && !activePane.connecting && !activePane.connectError;
   const canSplit = supportsSplit;
   const canUseAI =
-    supportsAI && !activePane.connecting && !activePane.connectError;
+    supportsAI && !activePane.connecting && !activePane.connectError && !sftpOnly;
   const canCloseInactive = tabs.length > 1;
   const canCloseRight = tabIndex !== -1 && tabIndex < tabs.length - 1;
   const canCloseTab = !!activePane && !tab.locked;
@@ -300,7 +307,7 @@ export default function TabContextMenu({
                   {t("tabCtx.duplicate")}
                 </ContextMenuItem>
                 <ContextMenuItem
-                  disabled={!canSpawnSession}
+                  disabled={!canSpawnSessionWithCommand}
                   onClick={() => void onDuplicateSessionWithCommand(tab)}
                 >
                   <MdInput className={iconClass} />
