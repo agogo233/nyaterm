@@ -238,6 +238,7 @@ async fn run_claude_code_stream_inner(
                     default_id,
                     request.permission_mode.clone(),
                     owner,
+                    None,
                 )
                 .await
                 .map_err(|error| claude_mcp_unavailable(&error.to_string()))?,

@@ -16,6 +16,10 @@ export const XTERM_PERFORMANCE_CONFIG = {
     maxDecorations: 1_000,
     /** Hard cap for new keyword highlight decorations created by one refresh. */
     maxDecorationsPerRefresh: 100,
+    /** Safety cap for keyword highlight decorations contributed by one logical line. */
+    maxDecorationsPerLogicalLine: 100,
+    /** Hard cap for physical rows traversed while resolving one logical line. */
+    maxLogicalLineRows: 512,
     /** Hard cap for accepted keyword highlight matches on one physical line. */
     maxMatchesPerLine: 20,
     /** Main-thread time budget for one viewport refresh. */

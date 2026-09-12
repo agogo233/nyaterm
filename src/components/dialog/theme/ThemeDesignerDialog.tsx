@@ -31,13 +31,16 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ALL_THEME_COLOR_FIELDS,
+  appendCustomThemePatch,
   cloneThemeAsCustom,
   getThemeColor,
   isHexColor,
   normalizeImportedTheme,
+  removeCustomThemePatch,
   setThemeColor,
   structuredCloneTheme,
   UI_THEME_COLOR_FIELDS,
+  upsertCustomThemePatch,
   validateTheme,
 } from "@/lib/customThemes";
 import { invoke } from "@/lib/invoke";
@@ -50,7 +53,16 @@ interface ThemeDesignerDialogProps {
   onClose: () => void;
   appearance: AppearanceSettings;
   availableThemes: Theme[];
-  updateAppearance: (patch: Partial<AppearanceSettings>) => void;
+  /**
+   * Applies an appearance patch immediately: updates the settings draft and
+   * the committed app settings (persisting the change across windows).
+   * The function form receives the previous appearance of each target state.
+   */
+  applyAppearance: (
+    patch:
+      | Partial<AppearanceSettings>
+      | ((prev: AppearanceSettings) => Partial<AppearanceSettings>),
+  ) => void;
 }
 
 function hexToRgb(hex: string) {
@@ -93,7 +105,7 @@ export function ThemeDesignerDialog({
   onClose,
   appearance,
   availableThemes,
-  updateAppearance,
+  applyAppearance,
 }: ThemeDesignerDialogProps) {
   const { t } = useTranslation();
   const customThemes = appearance.custom_themes ?? [];
@@ -139,10 +151,7 @@ export function ThemeDesignerDialog({
       return false;
     }
     const nextTheme = structuredCloneTheme(draft);
-    const nextThemes = customThemes.some((theme) => theme.id === nextTheme.id)
-      ? customThemes.map((theme) => (theme.id === nextTheme.id ? nextTheme : theme))
-      : [...customThemes, nextTheme];
-    updateAppearance({ custom_themes: nextThemes });
+    applyAppearance((prev) => upsertCustomThemePatch(prev, nextTheme));
     setSelectedThemeId(nextTheme.id);
     toast.success(t("settings.themeDesignerSaved"));
     return true;
@@ -164,13 +173,10 @@ export function ThemeDesignerDialog({
 
   function deleteSelected() {
     if (!draft || !customThemes.some((theme) => theme.id === draft.id)) return;
-    const nextThemes = customThemes.filter((theme) => theme.id !== draft.id);
-    const patch: Partial<AppearanceSettings> = { custom_themes: nextThemes };
-    if (appearance.theme === draft.id) patch.theme = DEFAULT_THEME_ID;
-    if (appearance.terminal_theme === draft.id) patch.terminal_theme = null;
-    updateAppearance(patch);
-    const next = nextThemes[0]
-      ? structuredCloneTheme(nextThemes[0])
+    applyAppearance((prev) => removeCustomThemePatch(prev, draft.id, DEFAULT_THEME_ID));
+    const remaining = customThemes.filter((theme) => theme.id !== draft.id);
+    const next = remaining[0]
+      ? structuredCloneTheme(remaining[0])
       : cloneThemeAsCustom(sourceTheme);
     setSelectedThemeId(next.id);
     setDraft(next);
@@ -215,7 +221,7 @@ export function ThemeDesignerDialog({
         toast.error(t("settings.themeDesignerImportInvalid"));
         return;
       }
-      updateAppearance({ custom_themes: [...customThemes, next] });
+      applyAppearance((prev) => appendCustomThemePatch(prev, next));
       setSelectedThemeId(next.id);
       setDraft(structuredCloneTheme(next));
       toast.success(t("settings.themeDesignerImportSuccess"));

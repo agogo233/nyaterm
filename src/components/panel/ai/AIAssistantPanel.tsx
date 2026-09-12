@@ -234,6 +234,16 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     });
   }, [aiSettings, configuredRunMode, runMode, updateAppSettings]);
 
+  const openTerminalScopeKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const tab of tabs) {
+      for (const pane of collectSessionPanes(tab.root)) {
+        if (pane.paneKind === "terminal") keys.add(buildAIScopeKey(pane));
+      }
+    }
+    return keys;
+  }, [tabs]);
+
   const allSessionPanes = useMemo(() => {
     const panes: SessionPane[] = [];
     for (const tab of tabs) {
@@ -1198,10 +1208,12 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
 
   const isSessionUsedByAnotherScope = useCallback(
     (sessionId: string) =>
+      !!streamRuntimeBySession[sessionId] ||
       Object.entries(activeSessionIdByScope).some(
-        ([key, value]) => key !== scopeKey && value === sessionId,
+        ([key, value]) =>
+          key !== scopeKey && value === sessionId && openTerminalScopeKeys.has(key),
       ),
-    [activeSessionIdByScope, scopeKey],
+    [activeSessionIdByScope, openTerminalScopeKeys, scopeKey, streamRuntimeBySession],
   );
 
   const openHistorySession = useCallback(

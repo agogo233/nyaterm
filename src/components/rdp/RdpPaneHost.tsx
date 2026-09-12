@@ -1,6 +1,6 @@
 import { Channel } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Maximize2, Monitor, Power, RotateCcw, Send, ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import {
   memo,
   type FocusEvent as ReactFocusEvent,
@@ -16,7 +16,6 @@ import {
   createRemoteDesktopRenderer,
   type RemoteDesktopRenderer,
 } from "@/components/remote-desktop/renderer";
-import { Button } from "@/components/ui/button";
 import { invoke } from "@/lib/invoke";
 import { decodeRdpFramePatch } from "@/lib/rdpFrame";
 import {
@@ -82,7 +81,6 @@ interface RdpPaneHostProps {
   pane: RdpSessionPane;
   active: boolean;
   visible: boolean;
-  onDisconnectedCloseRequested?: () => void;
   onConnectionError?: (sessionId: string, error: string) => void;
 }
 
@@ -139,13 +137,7 @@ function statusLabel(state: RdpSessionState, message?: string | null) {
   }
 }
 
-function RdpPaneHost({
-  pane,
-  active,
-  visible,
-  onDisconnectedCloseRequested,
-  onConnectionError,
-}: RdpPaneHostProps) {
+function RdpPaneHost({ pane, active, visible, onConnectionError }: RdpPaneHostProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imeRef = useRef<HTMLTextAreaElement | null>(null);
@@ -549,10 +541,6 @@ function RdpPaneHost({
     [],
   );
 
-  const sendShortcut = (events: RdpInputEvent[]) => {
-    void sendInputBatch(events);
-  };
-
   return (
     <div
       ref={containerRef}
@@ -650,48 +638,6 @@ function RdpPaneHost({
         aria-hidden="true"
         className="pointer-events-none absolute left-0 top-0 z-10 hidden"
       />
-
-      <div className="absolute left-2 top-2 flex items-center gap-1 rounded border border-white/15 bg-black/65 px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100">
-        <Monitor className="h-3.5 w-3.5" />
-        <span className="max-w-40 truncate">{pane.name}</span>
-        <span className="text-white/55">
-          {desktopSize.width}x{desktopSize.height}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="h-6 w-6 text-white"
-          onClick={() =>
-            sendShortcut([
-              { type: "key-down", scanCode: 0x1d, extended: false, repeat: false },
-              { type: "key-down", scanCode: 0x38, extended: false, repeat: false },
-              { type: "key-down", scanCode: 0x53, extended: true, repeat: false },
-              { type: "key-up", scanCode: 0x53, extended: true, repeat: false },
-              { type: "key-up", scanCode: 0x38, extended: false, repeat: false },
-              { type: "key-up", scanCode: 0x1d, extended: false, repeat: false },
-            ])
-          }
-        >
-          <Send className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="h-6 w-6 text-white"
-          onClick={() => void invoke("rdp_reconnect", { sessionId: pane.sessionId })}
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="h-6 w-6 text-white"
-          onClick={onDisconnectedCloseRequested}
-        >
-          <Power className="h-3.5 w-3.5" />
-        </Button>
-        <Maximize2 className="h-3.5 w-3.5 text-white/50" />
-      </div>
 
       {state !== "active" && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/45 text-white">
